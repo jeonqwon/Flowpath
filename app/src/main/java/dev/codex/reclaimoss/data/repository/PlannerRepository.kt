@@ -198,63 +198,6 @@ class PlannerRepositoryImpl(
     }
 
     override suspend fun seedDemoDataIfEmpty() {
-        if (timePeriodDao.getAll().isEmpty()) {
-            listOf(
-                TimePeriod("period-sleep-start", "Sleep", LocalTime.MIDNIGHT, LocalTime.of(6, 0), type = TimePeriodType.LIFE, sortOrder = 0),
-                TimePeriod("period-morning", "Morning", LocalTime.of(8, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
-                TimePeriod("period-lunch", "Lunch", LocalTime.of(12, 0), LocalTime.of(13, 0), type = TimePeriodType.LIFE, sortOrder = 2),
-                TimePeriod("period-midday", "Midday Focus", LocalTime.of(13, 0), LocalTime.of(14, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 3),
-                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(14, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 4),
-                TimePeriod("period-rest", "Rest", LocalTime.of(17, 0), LocalTime.of(18, 0), type = TimePeriodType.LIFE, sortOrder = 5),
-                TimePeriod("period-dinner", "Dinner", LocalTime.of(19, 0), LocalTime.of(20, 0), type = TimePeriodType.LIFE, sortOrder = 6),
-                TimePeriod("period-night", "Night", LocalTime.of(20, 0), LocalTime.of(22, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 7),
-                TimePeriod("period-sleep-end", "Sleep", LocalTime.of(22, 0), LocalTime.MAX, type = TimePeriodType.LIFE, sortOrder = 8),
-            ).forEachIndexed { index, period ->
-                timePeriodDao.upsert(period.copy(sortOrder = index).toEntity())
-            }
-        }
-        if (taskDao.getAll().isNotEmpty()) return
-
-        upsertProject(
-            Project(
-                id = "project-default",
-                name = "Personal Ops",
-                colorHex = "#2B5566",
-                defaultPriority = TaskPriority.MEDIUM,
-            ),
-        )
-        upsertTask(
-            ScheduleTask(
-                id = "task-demo-1",
-                projectId = "project-default",
-                title = "Ship v1 scheduler",
-                description = "Finish the deterministic planner and reminders.",
-                priority = TaskPriority.HIGH,
-                preferredTimeOfDay = PreferredTimeOfDay.MORNING,
-                preferredTimePeriodId = "period-morning",
-                dueAt = Instant.now().plusSeconds(60L * 60L * 36L),
-                estimatedMinutes = 180,
-                remainingMinutes = 180,
-                recurrenceRule = RecurrenceRule(RecurrenceType.NONE),
-                status = TaskStatus.ACTIVE,
-            ),
-        )
-        upsertTask(
-            ScheduleTask(
-                id = "task-demo-2",
-                projectId = "project-default",
-                title = "Review project notes",
-                description = "Clean up requirements and backlog items.",
-                priority = TaskPriority.MEDIUM,
-                preferredTimeOfDay = PreferredTimeOfDay.AFTERNOON,
-                preferredTimePeriodId = "period-afternoon",
-                dueAt = Instant.now().plusSeconds(60L * 60L * 72L),
-                estimatedMinutes = 90,
-                remainingMinutes = 90,
-                recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY)),
-                status = TaskStatus.ACTIVE,
-            ),
-        )
     }
 }
 

@@ -30,6 +30,10 @@ docs/         Release documentation
 stitch_preview/  Web-based UI design previews
 ```
 
+## User Guide
+
+See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for a step-by-step walkthrough.
+
 ## Build
 
 Requires Android Studio and JDK 17+.
