@@ -50,6 +50,7 @@ data class TaskEntity(
     val remainingMinutes: Int,
     val recurrenceType: RecurrenceType,
     val recurrenceDaysCsv: String,
+    val recurrenceUntilEpochMillis: Long?,
     val status: TaskStatus,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
@@ -73,6 +74,7 @@ data class ReminderEntity(
     val dueAtEpochMillis: Long,
     val recurrenceType: RecurrenceType,
     val recurrenceDaysCsv: String,
+    val recurrenceUntilEpochMillis: Long?,
     val linkedTaskId: String?,
     val status: ReminderStatus,
     val createdAtEpochMillis: Long,
@@ -287,7 +289,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -302,6 +304,13 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
     companion object {
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(database: SupportSQLiteDatabase) = Unit
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceUntilEpochMillis INTEGER")
+                database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceUntilEpochMillis INTEGER")
+            }
         }
     }
 }

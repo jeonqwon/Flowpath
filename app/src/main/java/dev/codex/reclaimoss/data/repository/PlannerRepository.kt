@@ -228,6 +228,7 @@ private fun TaskEntity.toDomain() = ScheduleTask(
             .filter { it.isNotBlank() }
             .map { DayOfWeek.valueOf(it) }
             .toSet(),
+        until = recurrenceUntilEpochMillis?.let(Instant::ofEpochMilli),
     ),
     status = status,
     createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
@@ -248,6 +249,7 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     remainingMinutes = remainingMinutes,
     recurrenceType = recurrenceRule.type,
     recurrenceDaysCsv = recurrenceRule.daysOfWeek.joinToString(",") { it.name },
+    recurrenceUntilEpochMillis = recurrenceRule.until?.toEpochMilli(),
     status = status,
     createdAtEpochMillis = createdAt.toEpochMilli(),
     updatedAtEpochMillis = updatedAt.toEpochMilli(),
@@ -283,6 +285,7 @@ private fun ReminderEntity.toDomain() = Reminder(
             .filter { it.isNotBlank() }
             .map { DayOfWeek.valueOf(it) }
             .toSet(),
+        until = recurrenceUntilEpochMillis?.let(Instant::ofEpochMilli),
     ),
     linkedTaskId = linkedTaskId,
     status = status,
@@ -297,6 +300,7 @@ private fun Reminder.toEntity() = ReminderEntity(
     dueAtEpochMillis = dueAt.toEpochMilli(),
     recurrenceType = recurrenceRule.type,
     recurrenceDaysCsv = recurrenceRule.daysOfWeek.joinToString(",") { it.name },
+    recurrenceUntilEpochMillis = recurrenceRule.until?.toEpochMilli(),
     linkedTaskId = linkedTaskId,
     status = status,
     createdAtEpochMillis = createdAt.toEpochMilli(),

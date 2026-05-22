@@ -87,6 +87,7 @@ class PlannerCoordinator(
         val isRecurringSeries = recurrenceRule.type != RecurrenceType.NONE
         val seriesId = if (isRecurringSeries) newId("series") else null
         val dueDates = materializedDueDates(dueAt, recurrenceRule)
+        val taskIdsNeedingReminder = mutableListOf<String>()
         val createdTaskIds = dueDates.mapIndexed { index, occurrenceDueAt ->
             val taskId = "${newId("task")}-$index"
             repository.upsertTask(
@@ -107,7 +108,7 @@ class PlannerCoordinator(
                     status = TaskStatus.ACTIVE,
                 ),
             )
-            if (addReminder) createReminderForTask(taskId)
+            if (addReminder) taskIdsNeedingReminder += taskId
             taskId
         }
         if (createdTaskIds.size == 1) {
@@ -115,6 +116,7 @@ class PlannerCoordinator(
         } else {
             rebuildSchedule()
         }
+        taskIdsNeedingReminder.forEach { createReminderForTask(it) }
         val primaryTaskId = createdTaskIds.first()
         val hasScheduledBlock = repository.getBlocks().any { it.taskId == primaryTaskId }
         val issue = repository.getSchedulingIssues().firstOrNull { it.taskId == primaryTaskId }
@@ -184,13 +186,25 @@ class PlannerCoordinator(
 
     suspend fun createReminderForTask(taskId: String): String? {
         val task = repository.getTasks().firstOrNull { it.id == taskId } ?: return null
+        val reminderDueAt = reminderDueAtForTask(task.id, task.dueAt)
         repository.getReminders()
             .firstOrNull { it.linkedTaskId == task.id && it.status != ReminderStatus.COMPLETED }
-            ?.let { return it.id }
+            ?.let { existing ->
+                repository.upsertReminder(
+                    existing.copy(
+                        title = task.title,
+                        description = task.description,
+                        dueAt = reminderDueAt,
+                        recurrenceRule = task.recurrenceRule,
+                        updatedAt = now(),
+                    ),
+                )
+                return existing.id
+            }
         return createReminder(
             title = task.title,
             description = task.description,
-            dueAt = task.dueAt,
+            dueAt = reminderDueAt,
             recurrenceRule = task.recurrenceRule,
             linkedTaskId = task.id,
         )
@@ -289,6 +303,7 @@ class PlannerCoordinator(
         filteredTasks.forEach { task ->
             repository.replaceFlexibleBlocks(task.id, plan.blocks.filter { it.taskId == task.id })
             repository.replaceSchedulingIssuesForTask(task.id, plan.issues.filter { it.taskId == task.id })
+            syncLinkedReminderForTask(task.id)
         }
         calendarGateway.syncPlannedBlocks(plan.blocks)
     }
@@ -480,8 +495,25 @@ class PlannerCoordinator(
         tasks.forEach { task ->
             repository.replaceFlexibleBlocks(task.id, plan.blocks.filter { it.taskId == task.id })
             repository.replaceSchedulingIssuesForTask(task.id, plan.issues.filter { it.taskId == task.id })
+            syncLinkedReminderForTask(task.id)
         }
         calendarGateway.syncPlannedBlocks(plan.blocks)
+    }
+
+    private suspend fun syncLinkedReminderForTask(taskId: String) {
+        val task = repository.getTasks().firstOrNull { it.id == taskId } ?: return
+        val reminder = repository.getReminders()
+            .firstOrNull { it.linkedTaskId == taskId && it.status != ReminderStatus.COMPLETED }
+            ?: return
+        repository.upsertReminder(
+            reminder.copy(
+                title = task.title,
+                description = task.description,
+                dueAt = reminderDueAtForTask(taskId, task.dueAt),
+                recurrenceRule = task.recurrenceRule,
+                updatedAt = now(),
+            ),
+        )
     }
 
     private fun planSchedulesTaskCleanly(
@@ -512,7 +544,7 @@ class PlannerCoordinator(
         if (recurrenceRule.type == RecurrenceType.NONE) return listOf(initialDueAt)
 
         val zoneId = zoneId()
-        val horizonEnd = now().plus(recurrenceMaterializationDays.toLong(), ChronoUnit.DAYS)
+        val horizonEnd = recurrenceHorizonEnd(recurrenceRule)
         val initial = initialDueAt.atZone(zoneId)
         return when (recurrenceRule.type) {
             RecurrenceType.NONE -> listOf(initialDueAt)
@@ -546,7 +578,7 @@ class PlannerCoordinator(
         if (task.recurrenceRule.type == RecurrenceType.NONE) return
 
         val allTasks = repository.getTasks().filter { it.recurrenceSeriesId == seriesId }
-        val horizonEnd = now().plus(recurrenceMaterializationDays.toLong(), ChronoUnit.DAYS)
+        val horizonEnd = recurrenceHorizonEnd(task.recurrenceRule)
         var latestDueAt = allTasks.maxOfOrNull { it.dueAt } ?: task.dueAt
         val existingDueAts = allTasks.map { it.dueAt }.toMutableSet()
         var nextDueAt = nextOccurrence(task.copy(dueAt = latestDueAt))
@@ -565,6 +597,12 @@ class PlannerCoordinator(
             latestDueAt = nextDueAt
             nextDueAt = nextOccurrence(task.copy(dueAt = latestDueAt))
         }
+    }
+
+    private fun recurrenceHorizonEnd(recurrenceRule: RecurrenceRule): Instant {
+        val rollingHorizon = now().plus(recurrenceMaterializationDays.toLong(), ChronoUnit.DAYS)
+        val until = recurrenceRule.until ?: return rollingHorizon
+        return if (until.isBefore(rollingHorizon)) until else rollingHorizon
     }
 
     private fun workHoursFromProductivePeriods(timePeriods: List<TimePeriod>): WorkHoursProfile {
@@ -653,6 +691,12 @@ class PlannerCoordinator(
         }
         return candidate.toInstant()
     }
+
+    private suspend fun reminderDueAtForTask(taskId: String, fallbackDueAt: Instant): Instant =
+        repository.getBlocks()
+            .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
+            .maxOfOrNull { it.endAt }
+            ?: fallbackDueAt
 
     private fun newId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 

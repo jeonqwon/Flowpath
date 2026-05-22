@@ -162,6 +162,7 @@ data class TaskDraft(
     val priority: TaskPriority = TaskPriority.MEDIUM,
     val preferredTimePeriodId: String? = null,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
+    val repeatsForever: Boolean = true,
     val estimatedMinutes: Int = 60,
     val addReminder: Boolean = false,
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
@@ -194,6 +195,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
         deadline = dueAt.atZone(zoneId).toLocalDateTime().plusDays(1),
+        repeatsForever = true,
         estimatedMinutes = estimatedMinutes,
         addReminder = false,
         recurrenceType = RecurrenceType.NONE,
@@ -222,10 +224,11 @@ class PlannerViewModel(
             description = draft.description,
             priority = draft.priority,
             preferredTimePeriodId = draft.preferredTimePeriodId,
-            dueAt = draft.deadline.atZone(ZoneId.systemDefault()).toInstant(),
+            dueAt = draft.taskDueAtInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+                until = draft.repeatDeadlineOrNull(),
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
@@ -238,11 +241,12 @@ class PlannerViewModel(
             title = draft.title,
             description = draft.description,
             priority = draft.priority,
-            dueAt = draft.deadline.atZone(ZoneId.systemDefault()).toInstant(),
+            dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+                until = draft.repeatDeadlineOrNull(),
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
@@ -330,6 +334,39 @@ class PlannerViewModel(
 
     suspend fun deleteTimePeriod(periodId: String) {
         coordinator.deleteTimePeriod(periodId)
+    }
+}
+
+private fun TaskDraft.taskDueAtInstant(): Instant =
+    taskDueAtLocalDateTime().atZone(ZoneId.systemDefault()).toInstant()
+
+private fun TaskDraft.repeatDeadlineOrNull(): Instant? {
+    if (recurrenceType == RecurrenceType.NONE || repeatsForever) return null
+    val deadlineInstant = deadline.atZone(ZoneId.systemDefault()).toInstant()
+    val firstOccurrenceInstant = taskDueAtInstant()
+    return if (deadlineInstant.isBefore(firstOccurrenceInstant)) firstOccurrenceInstant else deadlineInstant
+}
+
+private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.now()): LocalDateTime {
+    if (recurrenceType == RecurrenceType.NONE) return deadline
+    val targetTime = deadline.toLocalTime()
+    return when (recurrenceType) {
+        RecurrenceType.NONE -> deadline
+        RecurrenceType.DAILY -> {
+            var candidate = LocalDateTime.of(now.toLocalDate(), targetTime)
+            if (!candidate.isAfter(now)) candidate = candidate.plusDays(1)
+            candidate
+        }
+        RecurrenceType.WEEKLY -> {
+            val repeatDays = recurrenceDays.ifEmpty { setOf(now.dayOfWeek) }
+            var candidateDate = now.toLocalDate()
+            var candidate = LocalDateTime.of(candidateDate, targetTime)
+            while (candidate.dayOfWeek !in repeatDays || !candidate.isAfter(now)) {
+                candidateDate = candidateDate.plusDays(1)
+                candidate = LocalDateTime.of(candidateDate, targetTime)
+            }
+            candidate
+        }
     }
 }
 

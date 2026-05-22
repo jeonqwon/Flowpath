@@ -503,8 +503,21 @@ fun EmptyCard(message: String) {
 fun recurrenceSummary(rule: RecurrenceRule): String =
     when (rule.type) {
         RecurrenceType.NONE -> "One-time"
-        RecurrenceType.DAILY -> "Repeats daily"
-        RecurrenceType.WEEKLY -> "Weekly: " + rule.daysOfWeek.sortedBy { it.value }.joinToString(", ") { it.shortLabel() }
+        RecurrenceType.DAILY -> buildString {
+            append("Repeats daily")
+            rule.until?.let {
+                append(" until ")
+                append(it.atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ofPattern("MMM d")))
+            }
+        }
+        RecurrenceType.WEEKLY -> buildString {
+            append("Weekly: ")
+            append(rule.daysOfWeek.sortedBy { it.value }.joinToString(", ") { it.shortLabel() })
+            rule.until?.let {
+                append(" until ")
+                append(it.atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ofPattern("MMM d")))
+            }
+        }
     }
 
 fun periodDropdownLabel(period: TimePeriod): String =

@@ -112,6 +112,7 @@ data class ReminderPolicy(
 data class RecurrenceRule(
     val type: RecurrenceType = RecurrenceType.NONE,
     val daysOfWeek: Set<DayOfWeek> = emptySet(),
+    val until: Instant? = null,
 )
 
 data class ScheduleTask(

@@ -211,8 +211,6 @@ fun CreateWorkScreen(
         mutableStateOf(initialTaskDraft ?: TaskDraft(preferredTimePeriodId = periods.firstOrNull { it.type == TimePeriodType.PRODUCTIVE }?.id))
     }
     var reminderDraft by remember { mutableStateOf(ReminderDraft()) }
-    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d  h:mm a") }
-
     LaunchedEffect(followUpMode) {
         if (followUpMode) {
             mode = CreateMode.Task
@@ -320,17 +318,6 @@ fun CreateWorkScreen(
                 }
                 item {
                     CreateFormCard {
-                        DateTimeSection(
-                            title = when {
-                                followUpMode -> "Follow-up due date"
-                                taskDraft.recurrenceType == RecurrenceType.NONE -> "Deadline"
-                                else -> "First due time"
-                            },
-                            value = dateFormatter.format(taskDraft.deadline),
-                            dateTime = taskDraft.deadline,
-                            onDateTimeChanged = { taskDraft = taskDraft.copy(deadline = it) },
-                            context = context,
-                        )
                         if (!followUpMode) {
                             RecurrenceSection(
                                 recurrenceType = taskDraft.recurrenceType,
@@ -343,6 +330,30 @@ fun CreateWorkScreen(
                                 },
                                 onDayToggle = { taskDraft = taskDraft.copy(recurrenceDays = taskDraft.recurrenceDays.toggle(it)) },
                             )
+                            if (taskDraft.recurrenceType != RecurrenceType.NONE) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TaskSectionTitle("No due date")
+                                    Switch(
+                                        checked = taskDraft.repeatsForever,
+                                        onCheckedChange = { taskDraft = taskDraft.copy(repeatsForever = it) },
+                                    )
+                                }
+                            }
+                        }
+                        val showDeadline = followUpMode || taskDraft.recurrenceType == RecurrenceType.NONE || !taskDraft.repeatsForever
+                        if (showDeadline) {
+                            DateTimeSection(
+                                title = if (followUpMode) "Follow-up due date" else "Deadline",
+                                dateTime = taskDraft.deadline,
+                                onDateTimeChanged = { taskDraft = taskDraft.copy(deadline = it) },
+                                context = context,
+                            )
+                        }
+                        if (!followUpMode) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -380,7 +391,6 @@ fun CreateWorkScreen(
                     CreateFormCard {
                         DateTimeSection(
                             title = if (reminderDraft.recurrenceType == RecurrenceType.NONE) "Remind me" else "First reminder time",
-                            value = dateFormatter.format(reminderDraft.dueAt),
                             dateTime = reminderDraft.dueAt,
                             onDateTimeChanged = { reminderDraft = reminderDraft.copy(dueAt = it) },
                             context = context,
@@ -423,7 +433,6 @@ fun CreateWorkScreen(
 @Composable
 fun DateTimeSection(
     title: String,
-    value: String,
     dateTime: LocalDateTime,
     onDateTimeChanged: (LocalDateTime) -> Unit,
     context: android.content.Context,

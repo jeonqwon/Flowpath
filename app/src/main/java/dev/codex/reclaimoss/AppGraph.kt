@@ -14,7 +14,10 @@ class AppGraph(context: Context) {
         context,
         OpenReclaimDatabase::class.java,
         "open-reclaim.db",
-    ).addMigrations(OpenReclaimDatabase.MIGRATION_5_6).build()
+    ).addMigrations(
+        OpenReclaimDatabase.MIGRATION_5_6,
+        OpenReclaimDatabase.MIGRATION_6_7,
+    ).build()
 
     private val calendarGateway = NoOpGoogleCalendarGateway()
     private val schedulerEngine = SchedulerEngine()

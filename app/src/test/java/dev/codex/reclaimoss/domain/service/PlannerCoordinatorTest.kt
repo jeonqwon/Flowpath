@@ -136,6 +136,48 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `task linked reminder uses scheduled completion time when blocks exist`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(7200)
+        val task = task("scheduled-task-reminder", dueAt, RecurrenceRule())
+        repository.upsertTask(task)
+        val scheduledEnd = now().plusSeconds(5400)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "scheduled-block", now().plusSeconds(1800), scheduledEnd)),
+        )
+
+        coordinator.createReminderForTask(task.id)
+
+        val reminder = repository.getReminders().single()
+        assertEquals(task.id, reminder.linkedTaskId)
+        assertEquals(scheduledEnd, reminder.dueAt)
+    }
+
+    @Test
+    fun `create task with add reminder uses scheduled block end for reminder`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Task with auto reminder",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-morning",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = true,
+        )
+
+        val block = repository.getBlocks().single { it.taskId == result.taskId }
+        val reminder = repository.getReminders().single { it.linkedTaskId == result.taskId }
+        assertEquals(block.endAt, reminder.dueAt)
+    }
+
+    @Test
     fun `can create a new linked reminder after completing the previous one`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)
@@ -240,6 +282,34 @@ class PlannerCoordinatorTest {
         val weeklyBlocks = repository.getBlocks().filter { block -> createdTasks.any { it.id == block.taskId } }
         assertTrue(weeklyBlocks.isNotEmpty())
         assertTrue(weeklyBlocks.all { it.startAt.atZone(zone).toLocalTime() >= LocalTime.of(13, 0) })
+    }
+
+    @Test
+    fun `creating recurring task with an until date stops materialization at that date`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+        val until = firstDueAt.plus(2, java.time.temporal.ChronoUnit.DAYS)
+
+        coordinator.createTask(
+            title = "Finite daily task",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(
+                type = RecurrenceType.DAILY,
+                until = until,
+            ),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertEquals(3, createdTasks.size)
+        assertEquals(firstDueAt, createdTasks.first().dueAt)
+        assertEquals(until, createdTasks.last().dueAt)
+        assertTrue(createdTasks.none { it.dueAt.isAfter(until) })
     }
 
     @Test
