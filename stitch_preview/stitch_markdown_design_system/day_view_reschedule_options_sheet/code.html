@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+
+<html lang="en" style=""><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Day View</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface-variant": "#464555",
+                        "secondary-fixed": "#dee2ef",
+                        "on-primary-fixed-variant": "#3323cc",
+                        "priority-low": "#10B981",
+                        "border-subtle": "#E5E7EB",
+                        "surface": "#FFFFFF",
+                        "tertiary-fixed": "#eaddff",
+                        "primary": "#3525cd",
+                        "outline-variant": "#c7c4d8",
+                        "surface-dim": "#d9dadb",
+                        "on-error": "#ffffff",
+                        "surface-container": "#edeeef",
+                        "surface-container-high": "#e7e8e9",
+                        "inverse-primary": "#c3c0ff",
+                        "surface-container-lowest": "#ffffff",
+                        "outline": "#777587",
+                        "on-surface": "#191c1d",
+                        "on-secondary-container": "#60646f",
+                        "on-primary-fixed": "#0f0069",
+                        "primary-fixed": "#e2dfff",
+                        "on-tertiary-container": "#e4d4ff",
+                        "on-error-container": "#93000a",
+                        "secondary-fixed-dim": "#c2c6d3",
+                        "tertiary-fixed-dim": "#d2bbff",
+                        "primary-container": "#4f46e5",
+                        "priority-medium": "#F59E0B",
+                        "primary-fixed-dim": "#c3c0ff",
+                        "on-secondary": "#ffffff",
+                        "surface-container-low": "#f3f4f5",
+                        "tertiary-container": "#7531e6",
+                        "surface-tint": "#4d44e3",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary-fixed-variant": "#424751",
+                        "surface-bright": "#f8f9fa",
+                        "tertiary": "#5c00ca",
+                        "inverse-on-surface": "#f0f1f2",
+                        "surface-container-highest": "#e1e3e4",
+                        "background": "#f8f9fa",
+                        "text-muted": "#6B7280",
+                        "surface-variant": "#e1e3e4",
+                        "on-tertiary-fixed-variant": "#5a00c6",
+                        "on-primary": "#ffffff",
+                        "priority-high": "#EF4444",
+                        "on-tertiary-fixed": "#25005a",
+                        "text-main": "#111827",
+                        "on-primary-container": "#dad7ff",
+                        "inverse-surface": "#2e3132",
+                        "error-container": "#ffdad6",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#dee2ef",
+                        "secondary": "#5a5e69",
+                        "on-secondary-fixed": "#171c25",
+                        "on-background": "#191c1d"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "xs": "4px",
+                        "touch-target": "48px",
+                        "gutter": "16px",
+                        "xl": "32px",
+                        "margin-screen": "16px",
+                        "md": "16px",
+                        "lg": "24px",
+                        "sm": "8px"
+                    },
+                    "fontFamily": {
+                        "display-lg": ["Inter"],
+                        "label-xs": ["Inter"],
+                        "button-md": ["Inter"],
+                        "body-md": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "subhead-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "display-lg": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "label-xs": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                        "button-md": ["16px", { "lineHeight": "20px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-md": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "subhead-sm": ["14px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style class="">.timeline-line::before { display: none; } .timeline-item:last-child .timeline-line::before { display: none; }</style>
+<style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+<style data-stitch-cursor=""></style><style data-stitch-scroll-lock=""></style></head>
+<body class="bg-background text-on-background antialiased min-h-screen pb-touch-target overflow-hidden">
+<header class="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md flex items-center justify-between px-md h-touch-target bg-background dark:bg-background flat no shadows">
+<button class="w-10 h-10 flex items-center justify-center text-primary dark:text-primary-fixed hover:bg-surface-container-low transition-colors rounded-full active:scale-95 duration-100">
+<span class="material-symbols-outlined" data-icon="arrow_back">arrow_back</span>
+</button>
+<h1 class="font-headline-md text-headline-md text-on-surface dark:text-on-surface-variant font-bold">Monday, Oct 14</h1>
+<div class="w-10 h-10 flex items-center justify-center text-primary dark:text-primary-fixed hover:bg-surface-container-low transition-colors rounded-full active:scale-95 duration-100">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</div>
+</header>
+<main class="pt-[calc(48px+24px)] px-md max-w-3xl mx-auto flex flex-col gap-lg">
+<!-- Timeline Item 1 -->
+<div class="relative timeline-item pl-touch-target">
+<div class="absolute left-0 top-0 w-touch-target flex flex-col items-center z-10 timeline-line">
+<span class="font-label-xs text-label-xs text-text-muted bg-background py-1">09:00<br/><span class="text-[10px] opacity-70">- 10:30</span></span>
+</div>
+<div class="bg-surface border border-border-subtle rounded-xl p-md shadow-sm relative overflow-hidden flex flex-col gap-md">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-priority-high"></div>
+<div>
+<h2 class="font-headline-md text-headline-md text-text-main mb-xs">Q3 Review Presentation</h2>
+</div>
+<p class="font-body-md text-body-md text-secondary">Finalize slides 12-15 and review financial projections for accuracy.</p>
+<div class="flex gap-sm mt-sm">
+<button class="flex-1 bg-secondary-container text-on-secondary-container font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs border border-transparent hover:bg-secondary-fixed transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit_calendar">edit_calendar</span>
+    Reschedule
+</button>
+<button class="flex-1 bg-primary text-on-primary font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs hover:bg-primary-fixed-dim transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="check_circle" data-weight="fill" style="font-variation-settings: 'FILL' 1;">check_circle</span> Done
+                    </button>
+</div>
+</div>
+</div>
+<!-- Passive Block: Break -->
+<div class="relative timeline-item pl-touch-target">
+<div class="absolute left-0 top-0 w-touch-target flex flex-col items-center z-10 timeline-line">
+<span class="font-label-xs text-label-xs text-text-muted bg-background py-1">10:30<br/><span class="text-[10px] opacity-70">- 11:00</span></span>
+</div>
+<div class="bg-surface-container-low border border-border-subtle rounded-lg p-sm flex items-center justify-center text-text-muted py-md">
+<span class="font-subhead-sm text-subhead-sm">Short Break (30m)</span>
+</div>
+</div>
+<!-- Timeline Item 2 (Active/Current) -->
+<div class="relative timeline-item pl-touch-target">
+<div class="absolute left-0 top-0 w-touch-target flex flex-col items-center z-10 timeline-line">
+<span class="font-label-xs text-label-xs text-primary bg-background py-1 font-bold">11:00<br/><span class="text-[10px] opacity-70">- 12:00</span></span>
+</div>
+<div class="bg-surface border-2 border-primary rounded-xl p-md shadow-md relative overflow-hidden flex flex-col gap-md">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-priority-medium"></div>
+<div>
+<h2 class="font-headline-md text-headline-md text-text-main mb-xs">Sync with Design Team</h2>
+</div>
+<div class="bg-surface-container-lowest border border-border-subtle rounded-lg p-sm flex flex-col gap-sm">
+<div class="flex items-center gap-sm">
+<div class="w-5 h-5 rounded border border-outline flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-surface">check</span></div>
+<span class="font-subhead-sm text-subhead-sm text-on-surface">Review new component specs</span>
+</div>
+<div class="flex items-center gap-sm">
+<div class="w-5 h-5 rounded border border-outline flex items-center justify-center"><span class="material-symbols-outlined text-[16px] text-surface">check</span></div>
+<span class="font-subhead-sm text-subhead-sm text-on-surface">Discuss motion guidelines</span>
+</div>
+</div>
+<div class="flex gap-sm mt-sm">
+<button class="flex-1 bg-secondary-container text-on-secondary-container font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs border border-transparent hover:bg-secondary-fixed transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit_calendar">edit_calendar</span>
+    Reschedule
+</button>
+<button class="flex-1 bg-primary text-on-primary font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs hover:bg-primary-fixed transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="check_circle" data-weight="fill" style="font-variation-settings: 'FILL' 1;">check_circle</span> Done
+                    </button>
+</div>
+</div>
+</div>
+<!-- Passive Block: Lunch -->
+<div class="relative timeline-item pl-touch-target">
+<div class="absolute left-0 top-0 w-touch-target flex flex-col items-center z-10 timeline-line">
+<span class="font-label-xs text-label-xs text-text-muted bg-background py-1">12:00<br/><span class="text-[10px] opacity-70">- 13:30</span></span>
+</div>
+<div class="bg-surface-container-low border border-border-subtle rounded-lg p-sm flex items-center justify-center text-text-muted py-md">
+<span class="material-symbols-outlined mr-2 text-[18px]" data-icon="restaurant">restaurant</span>
+<span class="font-subhead-sm text-subhead-sm">Lunch (1h 30m)</span>
+</div>
+</div>
+<!-- Timeline Item 3 -->
+<div class="relative timeline-item pl-touch-target">
+<div class="absolute left-0 top-0 w-touch-target flex flex-col items-center z-10 timeline-line">
+<span class="font-label-xs text-label-xs text-text-muted bg-background py-1">13:30<br/><span class="text-[10px] opacity-70">- 14:00</span></span>
+</div>
+<div class="bg-surface border border-border-subtle rounded-xl p-md shadow-sm relative overflow-hidden flex flex-col gap-md opacity-80">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-priority-low"></div>
+<div>
+<h2 class="font-headline-md text-headline-md text-text-main mb-xs">Inbox Zero Routing</h2>
+</div>
+<div class="flex gap-sm mt-sm">
+<button class="flex-1 bg-secondary-container text-on-secondary-container font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs border border-transparent hover:bg-secondary-fixed transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit_calendar">edit_calendar</span>
+    Reschedule
+</button>
+<button class="flex-1 bg-primary text-on-primary font-button-md text-button-md py-3 rounded-lg flex items-center justify-center gap-xs hover:bg-primary-fixed-dim transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px] text-on-primary" data-icon="check_circle" data-weight="fill" style="font-variation-settings: 'FILL' 1;">check_circle</span> Done
+                    </button>
+</div>
+</div>
+</div>
+</main>
+<div class="fixed inset-0 bg-black/50 z-[60] backdrop-blur-sm"></div><div class="fixed bottom-0 left-0 right-0 z-[70] animate-in slide-in-from-bottom duration-300">
+<div class="bg-surface rounded-t-[28px] p-lg pb-[40px] shadow-[0_-8px_30px_rgb(0,0,0,0.12)] max-w-3xl mx-auto">
+<!-- Handle -->
+<div class="w-12 h-1.5 bg-outline-variant rounded-full mx-auto mb-lg"></div>
+<header class="mb-lg">
+<h2 class="font-display-lg text-display-lg text-on-surface text-center">Reschedule Task</h2>
+</header>
+<div class="flex flex-col gap-sm">
+<button class="w-full flex items-center justify-between p-md bg-error-container text-on-error-container rounded-xl font-button-md transition-active active:scale-[0.98]">
+<span class="flex items-center gap-md">
+<span class="material-symbols-outlined">priority_high</span>
+                    Reschedule Urgently
+                </span>
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+<button class="w-full flex items-center justify-between p-md bg-surface-container-high text-on-surface rounded-xl font-button-md transition-active active:scale-[0.98]">
+<span class="flex items-center gap-md">
+<span class="material-symbols-outlined">schedule</span>
+                    Reschedule Later Today
+                </span>
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+<button class="w-full flex items-center justify-between p-md bg-surface-container-high text-on-surface rounded-xl font-button-md transition-active active:scale-[0.98]">
+<span class="flex items-center gap-md">
+<span class="material-symbols-outlined">calendar_month</span>
+                    Reschedule Later This Week
+                </span>
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+<button class="w-full flex items-center justify-between p-md bg-primary-container text-on-primary-container rounded-xl font-button-md transition-active active:scale-[0.98]">
+<span class="flex items-center gap-md">
+<span class="material-symbols-outlined">auto_awesome</span>
+                    Let the Scheduler Choose
+                </span>
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+<button class="w-full mt-md py-3 text-secondary font-button-md text-center">
+                Cancel
+            </button>
+</div>
+</div>
+</div></body></html>

@@ -1,0 +1,335 @@
+package dev.codex.reclaimoss.ui
+
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.codex.reclaimoss.AppGraph
+import dev.codex.reclaimoss.data.repository.PlannerSnapshot
+import dev.codex.reclaimoss.domain.model.BlockLockState
+import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.RecurrenceRule
+import dev.codex.reclaimoss.domain.model.RecurrenceType
+import dev.codex.reclaimoss.domain.model.Reminder
+import dev.codex.reclaimoss.domain.model.ReminderStatus
+import dev.codex.reclaimoss.domain.model.ScheduleBlock
+import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.TimePeriod
+import dev.codex.reclaimoss.domain.model.TimePeriodType
+import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
+import dev.codex.reclaimoss.domain.service.PlannerCoordinator
+import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.YearMonth
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+enum class AppTab(val label: String) {
+    Tasks("Tasks"),
+    Reminders("Reminders"),
+    Planner("Planner"),
+    Settings("Settings"),
+}
+
+enum class CreateMode(val label: String) {
+    Task("Task"),
+    Reminder("Reminder"),
+}
+
+val HeaderActionShape = RoundedCornerShape(22.dp)
+val HeaderActionHeight = 56.dp
+val HeaderActionWidth = 176.dp
+val SurfaceTintStrong = Color(0xFFE9EEF9)
+val CreateScreenSnackbarBottomOffset = 108.dp
+
+data class PlannerUiState(
+    val snapshot: PlannerSnapshot = PlannerSnapshot(
+        projects = emptyList(),
+        tasks = emptyList(),
+        blocks = emptyList(),
+        timePeriods = emptyList(),
+    ),
+)
+
+data class TaskDraft(
+    val title: String = "",
+    val description: String = "",
+    val priority: TaskPriority = TaskPriority.MEDIUM,
+    val preferredTimePeriodId: String? = null,
+    val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
+    val estimatedMinutes: Int = 60,
+    val addReminder: Boolean = false,
+    val recurrenceType: RecurrenceType = RecurrenceType.NONE,
+    val recurrenceDays: Set<DayOfWeek> = emptySet(),
+)
+
+data class ReminderDraft(
+    val title: String = "",
+    val description: String = "",
+    val dueAt: LocalDateTime = LocalDateTime.now().plusHours(1).withMinute(0),
+    val recurrenceType: RecurrenceType = RecurrenceType.NONE,
+    val recurrenceDays: Set<DayOfWeek> = emptySet(),
+)
+
+data class TimePeriodDraft(
+    val id: String = "",
+    val label: String = "",
+    val start: LocalTime = LocalTime.of(9, 0),
+    val end: LocalTime = LocalTime.of(12, 0),
+    val boundStart: LocalTime = LocalTime.MIDNIGHT,
+    val boundEnd: LocalTime = LocalTime.MIDNIGHT,
+    val type: TimePeriodType = TimePeriodType.PRODUCTIVE,
+    val sortOrder: Int = 0,
+)
+
+fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskDraft =
+    TaskDraft(
+        title = if (title.endsWith(" Follow up")) title else "$title Follow up",
+        description = description,
+        priority = priority,
+        preferredTimePeriodId = preferredTimePeriodId,
+        deadline = dueAt.atZone(zoneId).toLocalDateTime().plusDays(1),
+        estimatedMinutes = estimatedMinutes,
+        addReminder = false,
+        recurrenceType = RecurrenceType.NONE,
+        recurrenceDays = emptySet(),
+    )
+
+class PlannerViewModel(
+    private val coordinator: PlannerCoordinator,
+) : ViewModel() {
+    private val _uiState = MutableStateFlow(PlannerUiState())
+    val uiState: StateFlow<PlannerUiState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            coordinator.snapshot.collect { snapshot ->
+                _uiState.value = PlannerUiState(snapshot)
+            }
+        }
+    }
+
+    suspend fun seedIfNeeded() = coordinator.ensureSeedData()
+
+    suspend fun addTask(draft: TaskDraft, timePeriods: List<TimePeriod>): TaskCreationResult {
+        return coordinator.createTask(
+            title = draft.title,
+            description = draft.description,
+            priority = draft.priority,
+            preferredTimePeriodId = draft.preferredTimePeriodId,
+            dueAt = draft.deadline.atZone(ZoneId.systemDefault()).toInstant(),
+            recurrenceRule = RecurrenceRule(
+                type = draft.recurrenceType,
+                daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+            ),
+            estimatedMinutes = draft.estimatedMinutes,
+            addReminder = draft.addReminder,
+        )
+    }
+
+    suspend fun addFollowUpTask(sourceTaskId: String, draft: TaskDraft): TaskCreationResult? {
+        return coordinator.createFollowUpTask(
+            sourceTaskId = sourceTaskId,
+            title = draft.title,
+            description = draft.description,
+            priority = draft.priority,
+            dueAt = draft.deadline.atZone(ZoneId.systemDefault()).toInstant(),
+            preferredTimePeriodId = draft.preferredTimePeriodId,
+            recurrenceRule = RecurrenceRule(
+                type = draft.recurrenceType,
+                daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+            ),
+            estimatedMinutes = draft.estimatedMinutes,
+            addReminder = draft.addReminder,
+        )
+    }
+
+    suspend fun addReminder(draft: ReminderDraft) {
+        coordinator.createReminder(
+            title = draft.title,
+            description = draft.description,
+            dueAt = draft.dueAt.atZone(ZoneId.systemDefault()).toInstant(),
+            recurrenceRule = RecurrenceRule(
+                type = draft.recurrenceType,
+                daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+            ),
+        )
+    }
+
+    suspend fun dismissReminder(reminderId: String) {
+        coordinator.dismissReminder(reminderId)
+    }
+
+    suspend fun rebuildSchedule() {
+        coordinator.rebuildSchedule()
+    }
+
+    suspend fun toggleLock(block: ScheduleBlock) {
+        if (block.lockState == BlockLockState.LOCKED) {
+            coordinator.unlockBlock(block.id)
+        } else {
+            coordinator.lockBlock(block.id)
+        }
+    }
+
+    suspend fun completeBlock(block: ScheduleBlock, tasks: List<ScheduleTask>) {
+        val task = tasks.firstOrNull { it.id == block.taskId } ?: return
+        val minutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt()
+        coordinator.markBlockDone(block.id, task.id, minutes)
+    }
+
+    suspend fun completeTask(taskId: String) {
+        coordinator.markTaskDone(taskId)
+    }
+
+    suspend fun completeRecurringSeries(taskId: String) {
+        coordinator.markRecurringSeriesDone(taskId)
+    }
+
+    suspend fun addReminderForTask(taskId: String) {
+        coordinator.createReminderForTask(taskId)
+    }
+
+    suspend fun rescheduleUrgently(taskId: String, dueAt: Instant? = null): Boolean {
+        return coordinator.rescheduleUrgently(taskId, dueAt)
+    }
+
+    suspend fun rescheduleNextAvailable(taskId: String, dueAt: Instant? = null): Boolean {
+        return coordinator.rescheduleNextAvailable(taskId, dueAt)
+    }
+
+    suspend fun rescheduleToDueDate(taskId: String, dueAt: Instant) {
+        coordinator.rescheduleToDueDate(taskId, dueAt)
+    }
+
+    suspend fun rescheduleMissed(taskId: String) {
+        coordinator.rescheduleTask(taskId, ScheduleRebuildReason.TaskMissed(taskId))
+    }
+
+    suspend fun deleteTask(taskId: String) {
+        coordinator.deleteTask(taskId)
+    }
+
+    suspend fun saveTimePeriod(draft: TimePeriodDraft) {
+        coordinator.upsertTimePeriod(
+            TimePeriod(
+                id = draft.id.ifBlank { "period-${System.currentTimeMillis()}" },
+                label = draft.label,
+                start = draft.start,
+                end = draft.end,
+                type = draft.type,
+                sortOrder = draft.sortOrder,
+            ),
+        )
+    }
+
+    suspend fun deleteTimePeriod(periodId: String) {
+        coordinator.deleteTimePeriod(periodId)
+    }
+}
+

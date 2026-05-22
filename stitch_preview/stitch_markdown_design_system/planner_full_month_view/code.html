@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Planner</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+                  "on-error-container": "#93000a",
+                  "primary-fixed": "#e2dfff",
+                  "priority-high": "#EF4444",
+                  "on-secondary": "#ffffff",
+                  "surface-dim": "#d9dadb",
+                  "outline": "#777587",
+                  "on-surface": "#191c1d",
+                  "surface-container-high": "#e7e8e9",
+                  "outline-variant": "#c7c4d8",
+                  "on-tertiary": "#ffffff",
+                  "tertiary-container": "#7531e6",
+                  "on-primary-fixed": "#0f0069",
+                  "text-muted": "#6B7280",
+                  "on-tertiary-fixed": "#25005a",
+                  "on-background": "#191c1d",
+                  "surface-tint": "#4d44e3",
+                  "secondary": "#5a5e69",
+                  "on-surface-variant": "#464555",
+                  "background": "#f8f9fa",
+                  "on-primary": "#ffffff",
+                  "secondary-fixed-dim": "#c2c6d3",
+                  "on-secondary-fixed": "#171c25",
+                  "on-secondary-fixed-variant": "#424751",
+                  "tertiary-fixed-dim": "#d2bbff",
+                  "on-primary-container": "#dad7ff",
+                  "on-error": "#ffffff",
+                  "text-main": "#111827",
+                  "primary-fixed-dim": "#c3c0ff",
+                  "border-subtle": "#E5E7EB",
+                  "error": "#ba1a1a",
+                  "surface-container-lowest": "#ffffff",
+                  "surface-variant": "#e1e3e4",
+                  "primary-container": "#4f46e5",
+                  "surface": "#FFFFFF",
+                  "secondary-fixed": "#dee2ef",
+                  "inverse-primary": "#c3c0ff",
+                  "tertiary": "#5c00ca",
+                  "on-tertiary-container": "#e4d4ff",
+                  "on-primary-fixed-variant": "#3323cc",
+                  "surface-container": "#edeeef",
+                  "on-tertiary-fixed-variant": "#5a00c6",
+                  "secondary-container": "#dee2ef",
+                  "inverse-on-surface": "#f0f1f2",
+                  "primary": "#3525cd",
+                  "surface-bright": "#f8f9fa",
+                  "on-secondary-container": "#60646f",
+                  "tertiary-fixed": "#eaddff",
+                  "inverse-surface": "#2e3132",
+                  "surface-container-highest": "#e1e3e4",
+                  "priority-medium": "#F59E0B",
+                  "priority-low": "#10B981",
+                  "error-container": "#ffdad6",
+                  "surface-container-low": "#f3f4f5",
+                  "density-light": "#dcfce7",
+                  "density-medium": "#4ade80",
+                  "density-dark": "#166534"
+          },
+          "borderRadius": {
+                  "DEFAULT": "0.25rem",
+                  "lg": "0.5rem",
+                  "xl": "0.75rem",
+                  "full": "9999px"
+          },
+          "spacing": {
+                  "sm": "8px",
+                  "md": "16px",
+                  "gutter": "16px",
+                  "touch-target": "48px",
+                  "xs": "4px",
+                  "lg": "24px",
+                  "xl": "32px",
+                  "margin-screen": "16px"
+          },
+          "fontFamily": {
+                  "label-xs": ["Inter"],
+                  "button-md": ["Inter"],
+                  "headline-md": ["Inter"],
+                  "display-lg": ["Inter"],
+                  "subhead-sm": ["Inter"],
+                  "body-md": ["Inter"]
+          },
+          "fontSize": {
+                  "label-xs": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                  "button-md": ["16px", { "lineHeight": "20px", "fontWeight": "600" }],
+                  "headline-md": ["18px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                  "display-lg": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                  "subhead-sm": ["14px", { "lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600" }],
+                  "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 80px); }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md min-h-screen flex flex-col pt-16 pb-safe">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md flex items-center justify-between px-md h-touch-target bg-background">
+<div class="flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full overflow-hidden bg-surface-variant flex-shrink-0">
+<img alt="User profile photo" class="w-full h-full object-cover" data-alt="A close-up portrait of a professional individual with a neutral expression, serving as an avatar. The lighting is soft and flattering, set against a light mode off-white background. The color palette is minimal, focusing on skin tones and a crisp white shirt, maintaining a clean corporate aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD8YLOGCho5VR3atdUdc7QLgCNHu5VIbCZ2Fu--DWiEf1fjdi-9woekBUvtWClYb7QxMuTXeKTk54vN5VnDhcjKSt2sD3WKXoOCdj8Dgk3uSdwUzODHTEw9T3eCgtaJWWRscjQ4_9dvgLK4jYzHNQXFJoL9vBzJLDtbLd00pF1-b5w0wmDNbyoX3FaqobEfUQQtN_jm2ZYBD9KlymPjBdvXdDDbQQfKkAvHb2eh-Jlu4S6gSwykQSIB2xHq72-9Y9hSYPVyhabPX-I6"/>
+</div>
+<span class="font-headline-md text-headline-md font-bold text-on-surface">Focus</span>
+</div>
+<button class="text-primary hover:bg-surface-container-low transition-colors active:scale-95 duration-100 w-10 h-10 flex items-center justify-center rounded-full">
+<span class="material-symbols-outlined" data-icon="search">search</span>
+</button>
+</header>
+<!-- Main Canvas -->
+<main class="flex-1 px-md flex flex-col gap-lg mt-md">
+<!-- Calendar View -->
+<section class="flex flex-col gap-md bg-surface rounded-xl border border-border-subtle p-md shadow-sm">
+<div class="flex items-center justify-between">
+<h2 class="font-subhead-sm text-subhead-sm text-on-surface">October 2023</h2>
+<div class="flex gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-secondary transition-colors">
+<span class="material-symbols-outlined text-[20px]">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-low text-secondary transition-colors">
+<span class="material-symbols-outlined text-[20px]">chevron_right</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-7 gap-xs text-center mb-2">
+<div class="font-label-xs text-label-xs text-text-muted">S</div>
+<div class="font-label-xs text-label-xs text-text-muted">M</div>
+<div class="font-label-xs text-label-xs text-text-muted">T</div>
+<div class="font-label-xs text-label-xs text-text-muted">W</div>
+<div class="font-label-xs text-label-xs text-text-muted">T</div>
+<div class="font-label-xs text-label-xs text-text-muted">F</div>
+<div class="font-label-xs text-label-xs text-text-muted">S</div>
+</div>
+<div class="grid grid-cols-7 gap-xs">
+<!-- Previous Month Days -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">24</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">25</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">26</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">27</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">28</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">29</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">30</div>
+<!-- Current Month Days -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">1</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          2
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-dark"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          3
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-medium"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg bg-primary text-on-primary font-subhead-sm text-subhead-sm shadow-sm cursor-pointer relative">
+          4
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-surface"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">5</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          6
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-light"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">7</div>
+<!-- Row 3 -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">8</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">9</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          10
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-medium"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">11</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">12</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">13</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">14</div>
+<!-- Row 4 -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">15</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">16</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">17</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">18</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">19</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          20
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-light"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">21</div>
+<!-- Row 5 -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">22</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">23</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          24
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-dark"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">25</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">26</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer relative">
+          27
+          <div class="absolute bottom-2 flex gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-density-medium"></span>
+</div>
+</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">28</div>
+<!-- Row 6 -->
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">29</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">30</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-on-surface font-subhead-sm text-subhead-sm hover:bg-surface-container-low transition-colors cursor-pointer">31</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">1</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">2</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">3</div>
+<div class="aspect-square flex flex-col items-center justify-start pt-1 rounded-lg text-secondary-fixed-dim font-subhead-sm text-subhead-sm">4</div>
+</div>
+</section>
+<!-- Today's Schedule Button -->
+<button class="w-full bg-primary text-on-primary py-3 px-4 rounded-xl font-button-md text-button-md shadow-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[20px]">view_day</span>
+  View Today's Schedule
+</button>
+<!-- Upcoming Today List -->
+<section class="flex flex-col gap-sm">
+<h3 class="font-subhead-sm text-subhead-sm text-secondary uppercase tracking-widest pl-1 mb-1">Upcoming Today</h3>
+<!-- Task Card 1 -->
+<div class="bg-surface border border-border-subtle rounded-lg p-md shadow-sm relative flex flex-col gap-2 hover:border-outline-variant transition-colors">
+<div class="absolute left-0 top-md bottom-md w-1 rounded-r-full bg-priority-high"></div>
+<div class="pl-2">
+<div class="flex justify-between items-start">
+<h4 class="font-button-md text-button-md text-on-surface">Finalize Q3 Presentation</h4>
+<span class="font-label-xs text-label-xs text-text-muted bg-surface-container-low px-2 py-1 rounded-full">10:00 AM</span>
+</div>
+<p class="font-body-md text-body-md text-secondary mt-1 text-sm">Review slides 15-22 with marketing team.</p>
+</div>
+</div>
+<!-- Task Card 2 -->
+<div class="bg-surface border border-border-subtle rounded-lg p-md shadow-sm relative flex flex-col gap-2 hover:border-outline-variant transition-colors">
+<div class="absolute left-0 top-md bottom-md w-1 rounded-r-full bg-primary"></div>
+<div class="pl-2">
+<div class="flex justify-between items-start">
+<h4 class="font-button-md text-button-md text-on-surface">Product Sync</h4>
+<span class="font-label-xs text-label-xs text-text-muted bg-surface-container-low px-2 py-1 rounded-full">1:30 PM</span>
+</div>
+<p class="font-body-md text-body-md text-secondary mt-1 text-sm">Discuss new features deployment timeline.</p>
+</div>
+</div>
+<!-- Task Card 3 -->
+<div class="bg-surface border border-border-subtle rounded-lg p-md shadow-sm relative flex flex-col gap-2 hover:border-outline-variant transition-colors opacity-70">
+<div class="absolute left-0 top-md bottom-md w-1 rounded-r-full bg-priority-low"></div>
+<div class="pl-2 flex items-center gap-3">
+<span class="material-symbols-outlined text-text-muted" data-icon="check_circle" data-weight="fill" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<h4 class="font-button-md text-button-md text-text-muted line-through">Morning Standup</h4>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center h-[80px] bg-surface border-t border-border-subtle shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 px-2 pb-2">
+<button class="flex flex-col items-center justify-center text-secondary px-4 py-2 hover:bg-surface-container-low transition-all active:scale-95 duration-150 rounded-xl min-w-[64px]">
+<span class="material-symbols-outlined mb-1" data-icon="check_circle">check_circle</span>
+<span class="font-label-xs text-label-xs">Tasks</span>
+</button>
+<button class="flex flex-col items-center justify-center text-primary px-4 py-2 hover:bg-surface-container-low transition-all active:scale-95 duration-150 rounded-xl min-w-[64px]">
+<div class="bg-primary-container text-on-primary-container rounded-full px-5 py-1 mb-1">
+<span class="material-symbols-outlined" data-icon="calendar_today" data-weight="fill" style="font-variation-settings: 'FILL' 1;">calendar_today</span>
+</div>
+<span class="font-label-xs text-label-xs font-semibold">Planner</span>
+</button>
+<button class="flex flex-col items-center justify-center text-secondary px-4 py-2 hover:bg-surface-container-low transition-all active:scale-95 duration-150 rounded-xl min-w-[64px]">
+<span class="material-symbols-outlined mb-1" data-icon="settings">settings</span>
+<span class="font-label-xs text-label-xs">Settings</span>
+</button>
+</nav>
+</body></html>

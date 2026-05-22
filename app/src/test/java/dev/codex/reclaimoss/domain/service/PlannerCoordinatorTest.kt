@@ -1,0 +1,885 @@
+package dev.codex.reclaimoss.domain.service
+
+import dev.codex.reclaimoss.data.calendar.NoOpGoogleCalendarGateway
+import dev.codex.reclaimoss.data.repository.PlannerRepository
+import dev.codex.reclaimoss.data.repository.PlannerSnapshot
+import dev.codex.reclaimoss.domain.model.BlockCompletionState
+import dev.codex.reclaimoss.domain.model.BlockLockState
+import dev.codex.reclaimoss.domain.model.BlockSource
+import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.Project
+import dev.codex.reclaimoss.domain.model.RecurrenceRule
+import dev.codex.reclaimoss.domain.model.RecurrenceType
+import dev.codex.reclaimoss.domain.model.Reminder
+import dev.codex.reclaimoss.domain.model.ReminderStatus
+import dev.codex.reclaimoss.domain.model.ScheduleBlock
+import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.SchedulingIssue
+import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.TimePeriod
+import dev.codex.reclaimoss.domain.model.TimePeriodType
+import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
+import java.time.Clock
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class PlannerCoordinatorTest {
+    private val zone = ZoneId.of("America/New_York")
+    private val clock = Clock.fixed(LocalDateTime.of(2026, 5, 21, 20, 0).atZone(zone).toInstant(), zone)
+
+    @Test
+    fun `completing a daily recurring task rolls it to the next day`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = Instant.parse("2026-05-14T21:00:00Z")
+        val task = task(
+            id = "daily",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(RecurrenceType.DAILY),
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "block-daily", dueAt.minusSeconds(3600), dueAt)),
+        )
+
+        coordinator.markBlockDone("block-daily", task.id, 60)
+
+        val updated = repository.getTasks().single()
+        assertEquals(TaskStatus.ACTIVE, updated.status)
+        assertEquals(updated.estimatedMinutes, updated.remainingMinutes)
+        assertTrue(updated.dueAt.isAfter(now()))
+        assertEquals(dueAt.atZone(zone).toLocalTime(), updated.dueAt.atZone(zone).toLocalTime())
+        assertTrue(repository.getBlocks().any { it.taskId == task.id && it.completionState == BlockCompletionState.COMPLETED })
+    }
+
+    @Test
+    fun `weekly recurring task advances to next selected weekday`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = Instant.parse("2026-05-14T21:00:00Z")
+        val task = task(
+            id = "weekly",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.MONDAY, DayOfWeek.FRIDAY)),
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "block-weekly", dueAt.minusSeconds(3600), dueAt)),
+        )
+
+        coordinator.markBlockDone("block-weekly", task.id, 60)
+
+        val updated = repository.getTasks().single()
+        assertEquals(DayOfWeek.FRIDAY, updated.dueAt.atZone(zone).dayOfWeek)
+    }
+
+    @Test
+    fun `life periods block task scheduling`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-lunch", "Lunch", LocalTime.of(12, 0), LocalTime.of(13, 0), type = TimePeriodType.LIFE, sortOrder = 1),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 2),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val date = now().atZone(zone).toLocalDate()
+        val dueAt = date.atTime(14, 0).atZone(zone).toInstant()
+        repository.upsertTask(
+            task(
+                id = "lunch-safe",
+                dueAt = dueAt,
+                recurrenceRule = RecurrenceRule(),
+                preferredTimePeriodId = "period-morning",
+                estimatedMinutes = 240,
+            ),
+        )
+
+        coordinator.scheduleTask("lunch-safe")
+
+        assertTrue(repository.getBlocks().none { block ->
+            val start = block.startAt.atZone(zone).toLocalTime()
+            val end = block.endAt.atZone(zone).toLocalTime()
+            start < LocalTime.of(13, 0) && end > LocalTime.of(12, 0)
+        })
+    }
+
+    @Test
+    fun `creating task linked reminder persists both records`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(3600)
+        val task = task("task-with-reminder", dueAt, RecurrenceRule())
+        repository.upsertTask(task)
+
+        coordinator.createReminderForTask(task.id)
+
+        val reminder = repository.getReminders().single()
+        assertEquals(task.id, reminder.linkedTaskId)
+        assertEquals(task.title, reminder.title)
+        assertEquals(task.dueAt, reminder.dueAt)
+    }
+
+    @Test
+    fun `can create a new linked reminder after completing the previous one`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(3600)
+        val task = task("task-with-reminder", dueAt, RecurrenceRule())
+        repository.upsertTask(task)
+
+        val firstReminderId = coordinator.createReminderForTask(task.id)
+        coordinator.completeReminder(firstReminderId!!)
+        val secondReminderId = coordinator.createReminderForTask(task.id)
+
+        val reminders = repository.getReminders().sortedBy { it.createdAt }
+        assertEquals(2, reminders.size)
+        assertEquals(ReminderStatus.COMPLETED, reminders.first().status)
+        assertEquals(ReminderStatus.ACTIVE, reminders.last().status)
+        assertEquals(secondReminderId, reminders.last().id)
+    }
+
+    @Test
+    fun `dismissing a reminder removes it`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val reminderId = coordinator.createReminder(
+            title = "Dismiss me",
+            description = "Description",
+            dueAt = now().plusSeconds(1800),
+        )
+
+        coordinator.dismissReminder(reminderId)
+
+        assertTrue(repository.getReminders().none { it.id == reminderId })
+    }
+
+    @Test
+    fun `creating daily recurring task materializes upcoming occurrences`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+
+        coordinator.createTask(
+            title = "Daily focus",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(RecurrenceType.DAILY),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertTrue(createdTasks.size > 1)
+        assertTrue(createdTasks.all { it.recurrenceRule.type == RecurrenceType.DAILY })
+        val seriesId = createdTasks.first().recurrenceSeriesId
+        assertTrue(seriesId != null)
+        assertTrue(createdTasks.all { it.recurrenceSeriesId == seriesId })
+        assertEquals(firstDueAt.atZone(zone).toLocalDate(), createdTasks.first().dueAt.atZone(zone).toLocalDate())
+        assertEquals(
+            createdTasks.first().dueAt.atZone(zone).toLocalDate().plusDays(1),
+            createdTasks[1].dueAt.atZone(zone).toLocalDate(),
+        )
+        val weekendTasks = createdTasks.filter {
+            val day = it.dueAt.atZone(zone).dayOfWeek
+            day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY
+        }
+        assertTrue(
+            createdTasks.isNotEmpty() && createdTasks.all { task ->
+                repository.getBlocks().any { block ->
+                    block.taskId == task.id &&
+                        block.startAt.atZone(zone).toLocalDate() == task.dueAt.atZone(zone).toLocalDate()
+                }
+            },
+        )
+        assertTrue(weekendTasks.isNotEmpty())
+        assertTrue(repository.getBlocks().isNotEmpty())
+    }
+
+    @Test
+    fun `creating weekly recurring task respects selected weekdays and preferred period`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val startDate = now().atZone(zone).toLocalDate().plusDays(1)
+        val firstDueAt = startDate.atTime(17, 0).atZone(zone).toInstant()
+
+        coordinator.createTask(
+            title = "Weekly review",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY)),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertTrue(createdTasks.size > 1)
+        val seriesId = createdTasks.first().recurrenceSeriesId
+        assertTrue(seriesId != null)
+        assertTrue(createdTasks.all { it.recurrenceSeriesId == seriesId })
+        assertTrue(createdTasks.all { it.dueAt.atZone(zone).dayOfWeek in setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY) })
+        val weeklyBlocks = repository.getBlocks().filter { block -> createdTasks.any { it.id == block.taskId } }
+        assertTrue(weeklyBlocks.isNotEmpty())
+        assertTrue(weeklyBlocks.all { it.startAt.atZone(zone).toLocalTime() >= LocalTime.of(13, 0) })
+    }
+
+    @Test
+    fun `creating a second long task does not shrink the original scheduled task`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(8, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(14, 0), LocalTime.of(16, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+
+        val originalTaskId = coordinator.createTask(
+            title = "Original four hour task",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-morning",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 240,
+            addReminder = false,
+        ).taskId
+
+        val originalBlocksBefore = repository.getBlocks().filter { it.taskId == originalTaskId }
+        assertEquals(1, originalBlocksBefore.size)
+        assertEquals(240, java.time.Duration.between(originalBlocksBefore.single().startAt, originalBlocksBefore.single().endAt).toMinutes().toInt())
+
+        val secondTaskResult = coordinator.createTask(
+            title = "Second four hour task",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-morning",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 240,
+            addReminder = false,
+        )
+
+        val originalBlocksAfter = repository.getBlocks().filter { it.taskId == originalTaskId }
+
+        assertEquals(1, originalBlocksAfter.size)
+        assertEquals(
+            240,
+            java.time.Duration.between(originalBlocksAfter.single().startAt, originalBlocksAfter.single().endAt).toMinutes().toInt(),
+        )
+        assertFalse(secondTaskResult.scheduled)
+        assertTrue(repository.getBlocks().none { it.taskId == secondTaskResult.taskId })
+    }
+
+    @Test
+    fun `full rebuild preserves an existing long task before placing a conflicting new task`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(8, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(14, 0), LocalTime.of(16, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+
+        val originalTask = task(
+            id = "original",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(),
+            preferredTimePeriodId = "period-morning",
+            estimatedMinutes = 240,
+        )
+        val conflictingTask = task(
+            id = "conflict",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(),
+            preferredTimePeriodId = "period-morning",
+            estimatedMinutes = 240,
+        )
+
+        repository.upsertTask(originalTask)
+        repository.replaceFlexibleBlocks(
+            originalTask.id,
+            listOf(
+                block(
+                    originalTask.id,
+                    "original-block",
+                    now().atZone(zone).toLocalDate().plusDays(1).atTime(8, 0).atZone(zone).toInstant(),
+                    now().atZone(zone).toLocalDate().plusDays(1).atTime(12, 0).atZone(zone).toInstant(),
+                ),
+            ),
+        )
+        repository.upsertTask(conflictingTask)
+
+        coordinator.rebuildSchedule()
+
+        val originalBlocks = repository.getBlocks().filter { it.taskId == originalTask.id }
+        assertEquals(1, originalBlocks.size)
+        assertEquals(240, java.time.Duration.between(originalBlocks.single().startAt, originalBlocks.single().endAt).toMinutes().toInt())
+        assertEquals(LocalTime.of(8, 0), originalBlocks.single().startAt.atZone(zone).toLocalTime())
+        assertTrue(repository.getBlocks().any { it.taskId == conflictingTask.id })
+    }
+
+    @Test
+    fun `rescheduling clears original pending block before rebuilding`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val originalDueAt = now().plusSeconds(60L * 60L * 24L)
+        val newDueAt = now().plusSeconds(60L * 60L * 48L)
+        val task = task("move-me", originalDueAt, RecurrenceRule())
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(
+                block(task.id, "original-block", now().plusSeconds(3600), now().plusSeconds(7200))
+                    .copy(lockState = BlockLockState.LOCKED),
+            ),
+        )
+
+        coordinator.rescheduleToDueDate(task.id, newDueAt)
+
+        assertTrue(repository.getBlocks().none { it.id == "original-block" })
+        assertTrue(repository.getBlocks().any { it.taskId == task.id && it.id != "original-block" })
+    }
+
+    @Test
+    fun `urgent reschedule preserves deadline unless a new deadline is supplied`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(60L * 60L * 48L)
+        val task = task("urgent-preserve-due", dueAt, RecurrenceRule())
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "old-block", now().plusSeconds(3600), now().plusSeconds(7200))),
+        )
+
+        val success = coordinator.rescheduleUrgently(task.id)
+
+        assertTrue(success)
+        val updated = repository.getTasks().single()
+        assertEquals(TaskPriority.URGENT, updated.priority)
+        assertEquals(dueAt, updated.dueAt)
+        assertTrue(repository.getBlocks().none { it.id == "old-block" })
+        assertTrue(repository.getBlocks().any { it.taskId == task.id })
+    }
+
+    @Test
+    fun `non urgent reschedule can use explicit deadline after user changes it`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val originalDueAt = now().plusSeconds(60L * 60L * 48L)
+        val newDueAt = now().plusSeconds(60L * 60L * 96L)
+        val task = task("nonurgent-new-due", originalDueAt, RecurrenceRule(), estimatedMinutes = 30)
+            .copy(priority = TaskPriority.URGENT)
+        repository.upsertTask(task)
+
+        val success = coordinator.rescheduleNextAvailable(task.id, newDueAt)
+
+        assertTrue(success)
+        val updated = repository.getTasks().single()
+        assertEquals(TaskPriority.MEDIUM, updated.priority)
+        assertEquals(newDueAt, updated.dueAt)
+        assertTrue(repository.getBlocks().any { it.taskId == task.id })
+    }
+
+    @Test
+    fun `urgent reschedule rolls overdue deadline forward when no new deadline is supplied`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val overdueDueAt = now().minusSeconds(60L * 60L * 6L)
+        val task = task("urgent-overdue", overdueDueAt, RecurrenceRule())
+        repository.upsertTask(task)
+
+        val success = coordinator.rescheduleUrgently(task.id)
+
+        assertTrue(success)
+        val updated = repository.getTasks().single()
+        assertEquals(TaskPriority.URGENT, updated.priority)
+        assertTrue(updated.dueAt.isAfter(now()))
+        assertTrue(repository.getBlocks().any { it.taskId == task.id })
+    }
+
+    @Test
+    fun `next available reschedule rolls overdue deadline forward when no new deadline is supplied`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val overdueDueAt = now().minusSeconds(60L * 60L * 30L)
+        val task = task("next-available-overdue", overdueDueAt, RecurrenceRule())
+            .copy(priority = TaskPriority.URGENT)
+        repository.upsertTask(task)
+
+        val success = coordinator.rescheduleNextAvailable(task.id)
+
+        assertTrue(success)
+        val updated = repository.getTasks().single()
+        assertEquals(TaskPriority.MEDIUM, updated.priority)
+        assertTrue(updated.dueAt.isAfter(now()))
+        assertTrue(repository.getBlocks().any { it.taskId == task.id })
+    }
+
+    @Test
+    fun `next available reschedule fails when no other slot exists before the deadline and keeps original block`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(8, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val day = now().atZone(zone).toLocalDate().plusDays(1)
+        val dueAt = day.atTime(12, 0).atZone(zone).toInstant()
+        val task = task("keep-slot", dueAt, RecurrenceRule(), preferredTimePeriodId = "period-morning", estimatedMinutes = 120)
+        val originalBlock = block(
+            task.id,
+            "original-slot",
+            day.atTime(8, 0).atZone(zone).toInstant(),
+            day.atTime(10, 0).atZone(zone).toInstant(),
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(task.id, listOf(originalBlock))
+        repository.upsertTask(
+            task("other-task", dueAt, RecurrenceRule(), preferredTimePeriodId = "period-morning", estimatedMinutes = 120),
+        )
+        repository.replaceFlexibleBlocks(
+            "other-task",
+            listOf(
+                block(
+                    "other-task",
+                    "other-slot",
+                    day.atTime(10, 0).atZone(zone).toInstant(),
+                    day.atTime(12, 0).atZone(zone).toInstant(),
+                ),
+            ),
+        )
+
+        val success = coordinator.rescheduleNextAvailable(task.id)
+
+        assertFalse(success)
+        assertTrue(repository.getBlocks().any { it.id == "original-slot" })
+    }
+
+    @Test
+    fun `urgent reschedule can move other tasks when no free alternative exists`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(8, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(14, 0), LocalTime.of(16, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+                TimePeriod("period-night", "Night", LocalTime.of(20, 0), LocalTime.of(22, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 2),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val day = now().atZone(zone).toLocalDate().plusDays(1)
+        val dueAt = day.atTime(22, 0).atZone(zone).toInstant()
+        val task = task("urgent-move", dueAt, RecurrenceRule(), preferredTimePeriodId = "period-morning", estimatedMinutes = 120)
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(
+                block(
+                    task.id,
+                    "urgent-original-slot",
+                    day.atTime(8, 0).atZone(zone).toInstant(),
+                    day.atTime(10, 0).atZone(zone).toInstant(),
+                ),
+            ),
+        )
+        repository.upsertTask(
+            task("other-fixed", dueAt, RecurrenceRule(), preferredTimePeriodId = "period-afternoon", estimatedMinutes = 120),
+        )
+        repository.replaceFlexibleBlocks(
+            "other-fixed",
+            listOf(
+                block(
+                    "other-fixed",
+                    "other-afternoon-slot",
+                    day.atTime(14, 0).atZone(zone).toInstant(),
+                    day.atTime(16, 0).atZone(zone).toInstant(),
+                ),
+            ),
+        )
+
+        val success = coordinator.rescheduleUrgently(task.id)
+
+        assertTrue(success)
+        val movedTaskBlocks = repository.getBlocks().filter { it.taskId == task.id }
+        assertTrue(movedTaskBlocks.isNotEmpty())
+        assertTrue(movedTaskBlocks.none { it.id == "urgent-original-slot" })
+        assertTrue(movedTaskBlocks.none { it.startAt == day.atTime(8, 0).atZone(zone).toInstant() })
+    }
+
+    @Test
+    fun `marking whole task done clears pending blocks`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(60L * 60L * 24L)
+        val task = task("done-task", dueAt, RecurrenceRule())
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "pending-block", now().plusSeconds(3600), now().plusSeconds(7200))),
+        )
+
+        coordinator.markTaskDone(task.id)
+
+        assertEquals(TaskStatus.COMPLETED, repository.getTasks().single().status)
+        assertTrue(repository.getBlocks().none { it.taskId == task.id })
+    }
+
+    @Test
+    fun `marking recurring task done from task detail advances to next occurrence`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+        val createdTaskId = coordinator.createTask(
+            title = "Recurring detail",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(RecurrenceType.DAILY),
+            estimatedMinutes = 60,
+            addReminder = false,
+        ).taskId
+        repository.replaceFlexibleBlocks(
+            createdTaskId,
+            listOf(block(createdTaskId, "pending-block", firstDueAt.minusSeconds(3600), firstDueAt)),
+        )
+
+        coordinator.markTaskDone(createdTaskId)
+
+        val seriesTasks = repository.getTasks().sortedBy { it.dueAt }
+        val completed = seriesTasks.first { it.id == createdTaskId }
+        assertEquals(TaskStatus.COMPLETED, completed.status)
+        assertEquals(0, completed.remainingMinutes)
+        assertTrue(repository.getBlocks().none { it.id == "pending-block" })
+        assertTrue(seriesTasks.any { it.id != createdTaskId && it.status == TaskStatus.ACTIVE })
+        assertTrue(seriesTasks.size >= 2)
+    }
+
+    @Test
+    fun `marking legacy recurring task done does not reschedule before its next occurrence date`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = Instant.parse("2026-05-25T15:12:00Z")
+        val task = task(
+            id = "legacy-weekly",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY)),
+            estimatedMinutes = 90,
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "legacy-weekly-block", Instant.parse("2026-05-22T18:00:00Z"), Instant.parse("2026-05-22T19:30:00Z"))),
+        )
+
+        coordinator.markTaskDone(task.id)
+
+        val updated = repository.getTasks().single { it.id == task.id }
+        assertEquals(Instant.parse("2026-05-28T15:12:00Z"), updated.dueAt)
+        val rescheduledBlocks = repository.getBlocks().filter { it.taskId == task.id }
+        assertTrue(rescheduledBlocks.isNotEmpty())
+        assertTrue(
+            rescheduledBlocks.all { block ->
+                !block.startAt.atZone(zone).toLocalDate().isBefore(updated.dueAt.atZone(zone).toLocalDate())
+            },
+        )
+    }
+
+    @Test
+    fun `marking all recurring tasks done completes entire series`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+        val createdTaskId = coordinator.createTask(
+            title = "Recurring all",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(RecurrenceType.DAILY),
+            estimatedMinutes = 60,
+            addReminder = false,
+        ).taskId
+
+        coordinator.markRecurringSeriesDone(createdTaskId)
+
+        val seriesTasks = repository.getTasks()
+        assertTrue(seriesTasks.isNotEmpty())
+        assertTrue(seriesTasks.all { it.status == TaskStatus.COMPLETED })
+        assertTrue(repository.getBlocks().none { block -> seriesTasks.any { it.id == block.taskId } })
+    }
+
+    @Test
+    fun `creating a follow up task completes the original and schedules the new task`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val sourceDueAt = now().plusSeconds(60L * 60L * 24L)
+        val followUpDueAt = now().plusSeconds(60L * 60L * 72L)
+        val sourceTask = task(
+            id = "source-task",
+            dueAt = sourceDueAt,
+            recurrenceRule = RecurrenceRule(),
+            preferredTimePeriodId = "period-afternoon",
+            estimatedMinutes = 90,
+        ).copy(
+            title = "Review draft",
+            description = "Carry forward notes",
+            priority = TaskPriority.URGENT,
+        )
+        repository.upsertTask(sourceTask)
+        repository.replaceFlexibleBlocks(
+            sourceTask.id,
+            listOf(block(sourceTask.id, "source-block", now().plusSeconds(3600), now().plusSeconds(7200))),
+        )
+
+        val followUpResult = coordinator.createFollowUpTask(
+            sourceTaskId = sourceTask.id,
+            title = "Review draft Follow up",
+            description = sourceTask.description,
+            priority = sourceTask.priority,
+            dueAt = followUpDueAt,
+            preferredTimePeriodId = sourceTask.preferredTimePeriodId,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = sourceTask.estimatedMinutes,
+            addReminder = false,
+        )
+        val followUpTaskId = followUpResult!!.taskId
+
+        val tasks = repository.getTasks()
+        val original = tasks.first { it.id == sourceTask.id }
+        val followUp = tasks.first { it.id == followUpTaskId }
+        assertEquals(TaskStatus.COMPLETED, original.status)
+        assertEquals(0, original.remainingMinutes)
+        assertEquals("Review draft Follow up", followUp.title)
+        assertEquals(sourceTask.description, followUp.description)
+        assertEquals(sourceTask.priority, followUp.priority)
+        assertEquals(sourceTask.preferredTimePeriodId, followUp.preferredTimePeriodId)
+        assertEquals(sourceTask.estimatedMinutes, followUp.estimatedMinutes)
+        assertEquals(followUpDueAt, followUp.dueAt)
+        assertTrue(repository.getBlocks().none { it.id == "source-block" })
+        assertTrue(repository.getBlocks().any { it.taskId == followUpTaskId })
+    }
+
+    @Test
+    fun `create task returns unscheduled when no productive slot is available and task is not kept`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-tiny", "Tiny", LocalTime.of(8, 0), LocalTime.of(8, 30), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(8, 30).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Impossible task",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-tiny",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        assertTrue(!result.scheduled)
+        assertTrue(repository.getTasks().none { it.id == result.taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+    }
+
+    private fun coordinator(repository: PlannerRepository) = PlannerCoordinator(
+        repository = repository,
+        scheduler = SchedulerEngine(),
+        calendarGateway = NoOpGoogleCalendarGateway(),
+        clock = clock,
+    )
+
+    private fun now(): Instant = clock.instant()
+
+    private fun task(
+        id: String,
+        dueAt: Instant,
+        recurrenceRule: RecurrenceRule,
+        preferredTimePeriodId: String? = null,
+        estimatedMinutes: Int = 60,
+    ) = ScheduleTask(
+        id = id,
+        title = id,
+        description = "",
+        priority = TaskPriority.MEDIUM,
+        preferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
+        preferredTimePeriodId = preferredTimePeriodId,
+        dueAt = dueAt,
+        estimatedMinutes = estimatedMinutes,
+        remainingMinutes = estimatedMinutes,
+        recurrenceRule = recurrenceRule,
+        status = TaskStatus.ACTIVE,
+    )
+
+    private fun block(taskId: String, id: String, startAt: Instant, endAt: Instant) = ScheduleBlock(
+        id = id,
+        taskId = taskId,
+        startAt = startAt,
+        endAt = endAt,
+        source = BlockSource.AUTO,
+        lockState = BlockLockState.FLEXIBLE,
+        completionState = BlockCompletionState.PENDING,
+        externalCalendarEventId = null,
+    )
+}
+
+private class FakePlannerRepository(
+    periods: MutableList<TimePeriod>? = null,
+) : PlannerRepository {
+    private val projects = mutableListOf<Project>()
+    private val tasks = mutableListOf<ScheduleTask>()
+    private val blocks = mutableListOf<ScheduleBlock>()
+    private val reminders = mutableListOf<Reminder>()
+    private val schedulingIssues = mutableListOf<SchedulingIssue>()
+    private val timePeriods = periods ?: mutableListOf(
+        TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+        TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+    )
+    private val snapshotFlow = MutableStateFlow(PlannerSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
+
+    override fun observeSnapshot(): Flow<PlannerSnapshot> = snapshotFlow
+
+    override suspend fun upsertProject(project: Project) {
+        projects.removeAll { it.id == project.id }
+        projects += project
+        publish()
+    }
+
+    override suspend fun upsertTask(task: ScheduleTask) {
+        tasks.removeAll { it.id == task.id }
+        tasks += task
+        publish()
+    }
+
+    override suspend fun getTasks(): List<ScheduleTask> = tasks.sortedBy { it.id }
+
+    override suspend fun updateTaskDueDate(taskId: String, dueAt: Instant) {
+        val task = tasks.first { it.id == taskId }
+        upsertTask(task.copy(dueAt = dueAt))
+    }
+
+    override suspend fun updateTaskPriority(taskId: String, priority: TaskPriority) {
+        val task = tasks.first { it.id == taskId }
+        upsertTask(task.copy(priority = priority))
+    }
+
+    override suspend fun updateTaskEstimatedMinutes(taskId: String, estimatedMinutes: Int) {
+        val task = tasks.first { it.id == taskId }
+        upsertTask(task.copy(estimatedMinutes = estimatedMinutes, remainingMinutes = estimatedMinutes))
+    }
+
+    override suspend fun getBlocks(): List<ScheduleBlock> = blocks.sortedBy { it.startAt }
+
+    override suspend fun replaceFlexibleBlocks(taskId: String, blocks: List<ScheduleBlock>) {
+        this.blocks.removeAll { it.taskId == taskId && it.lockState != BlockLockState.LOCKED && it.completionState != BlockCompletionState.COMPLETED }
+        this.blocks += blocks
+        publish()
+    }
+
+    override suspend fun updateBlockLock(blockId: String, lockState: BlockLockState) {
+        replaceBlock(blockId) { copy(lockState = lockState) }
+    }
+
+    override suspend fun updateBlockCompletion(blockId: String, completionState: BlockCompletionState) {
+        replaceBlock(blockId) { copy(completionState = completionState) }
+    }
+
+    override suspend fun updateTaskRemaining(taskId: String, remainingMinutes: Int) {
+        val task = tasks.first { it.id == taskId }
+        upsertTask(task.copy(remainingMinutes = remainingMinutes))
+    }
+
+    override suspend fun deleteTask(taskId: String) {
+        tasks.removeAll { it.id == taskId }
+        blocks.removeAll { it.taskId == taskId }
+        publish()
+    }
+
+    override suspend fun clearAllPendingBlocks(taskId: String) {
+        blocks.removeAll { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
+        publish()
+    }
+
+    override suspend fun getTimePeriods(): List<TimePeriod> = timePeriods.sortedBy { it.sortOrder }
+
+    override suspend fun upsertTimePeriod(period: TimePeriod) {
+        timePeriods.removeAll { it.id == period.id }
+        timePeriods += period
+        publish()
+    }
+
+    override suspend fun deleteTimePeriod(periodId: String) {
+        timePeriods.removeAll { it.id == periodId }
+        tasks.replaceAll { task ->
+            if (task.preferredTimePeriodId == periodId) task.copy(preferredTimePeriodId = null) else task
+        }
+        publish()
+    }
+
+    override suspend fun upsertReminder(reminder: Reminder) {
+        reminders.removeAll { it.id == reminder.id }
+        reminders += reminder
+        publish()
+    }
+
+    override suspend fun deleteReminder(reminderId: String) {
+        reminders.removeAll { it.id == reminderId }
+        publish()
+    }
+
+    override suspend fun getReminders(): List<Reminder> = reminders.sortedBy { it.dueAt }
+
+    override fun observeReminders(): Flow<List<Reminder>> = snapshotFlow.map { it.reminders }
+
+    override suspend fun getSchedulingIssues(): List<SchedulingIssue> = schedulingIssues.sortedBy { it.taskId }
+
+    override suspend fun replaceSchedulingIssuesForTask(taskId: String, issues: List<SchedulingIssue>) {
+        schedulingIssues.removeAll { it.taskId == taskId }
+        schedulingIssues += issues
+        publish()
+    }
+
+    override suspend fun seedDemoDataIfEmpty() = Unit
+
+    private suspend fun replaceBlock(blockId: String, transform: ScheduleBlock.() -> ScheduleBlock) {
+        val block = blocks.first { it.id == blockId }
+        blocks.removeAll { it.id == blockId }
+        blocks += block.transform()
+        publish()
+    }
+
+    private fun publish() {
+        snapshotFlow.value = PlannerSnapshot(
+            projects = projects.toList(),
+            tasks = tasks.sortedBy { it.dueAt },
+            blocks = blocks.sortedBy { it.startAt },
+            timePeriods = timePeriods.sortedBy { it.sortOrder },
+            reminders = reminders.sortedBy { it.dueAt },
+            schedulingIssues = schedulingIssues.sortedBy { it.taskId },
+        )
+    }
+}

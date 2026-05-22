@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create</title>
+  <link rel="stylesheet" href="app-theme.css">
+  <script src="mock-data.js"></script>
+</head>
+<body class="preview-body">
+  <main class="app-screen create-task-screen">
+    <div class="topbar compact create-task-bar">
+      <a class="icon-button plain" id="closeLink" href="tasks.html" aria-label="Close">&times;</a>
+      <h1 class="screen-title" id="screenTitle">Create</h1>
+      <div style="width:36px;"></div>
+    </div>
+
+    <section class="create-task-layout">
+      <div class="mode-switch" role="tablist" aria-label="Create type">
+        <button class="segment-button active" id="taskModeButton" type="button" data-mode="task" aria-pressed="true">Task</button>
+        <button class="segment-button" id="reminderModeButton" type="button" data-mode="reminder" aria-pressed="false">Reminder</button>
+      </div>
+
+      <div class="field">
+        <label class="create-section-title" for="titleInput" id="titleLabel">Task Title</label>
+        <input class="text-input create-title-input" id="titleInput" type="text" placeholder="Add title">
+      </div>
+
+      <div class="field">
+        <label class="create-field-kicker" for="notesInput">Notes</label>
+        <textarea class="textarea-input create-task-textarea notes-textarea" id="notesInput" placeholder="Add notes or details"></textarea>
+      </div>
+
+      <section class="field mode-only-task" id="taskPrioritySection">
+        <span class="create-field-kicker">Priority</span>
+        <div class="priority-row">
+          <button class="priority-pill active" type="button" data-priority="normal">Normal</button>
+          <button class="priority-pill urgent" type="button" data-priority="urgent">Urgent</button>
+        </div>
+      </section>
+
+      <section class="field">
+        <span class="create-field-kicker">Repeat</span>
+        <div class="priority-row">
+          <button class="priority-pill repeat-pill active" type="button" data-repeat="none">One-time</button>
+          <button class="priority-pill repeat-pill" type="button" data-repeat="daily">Daily</button>
+          <button class="priority-pill repeat-pill" type="button" data-repeat="weekly">Weekly</button>
+        </div>
+      </section>
+
+      <section class="field" id="dateSection">
+        <span class="create-field-kicker" id="dateLabel">Deadline</span>
+        <input class="selection-row input-like" id="dateInput" type="date">
+      </section>
+
+      <section class="field mode-reminder-only hidden" id="timeSection">
+        <span class="create-field-kicker">Time</span>
+        <input class="selection-row input-like" id="timeInput" type="time" step="1800">
+      </section>
+
+      <section class="field hidden" id="repeatSummarySection">
+        <p class="subtle-copy hidden" id="dailySummary">Repeats daily starting today.</p>
+        <div class="weekday-row hidden" id="weekdayRow"></div>
+        <p class="subtle-copy hidden" id="weekdaySummary">Repeats on Tue</p>
+      </section>
+
+      <section class="field mode-only-task picker-field" id="preferredPeriodSection">
+        <span class="create-field-kicker">Preferred Period</span>
+        <button class="selection-row picker-trigger" type="button" id="preferredPeriodButton">
+          <span id="preferredPeriodLabel">Afternoon · 2:00 PM - 5:00 PM</span>
+          <span class="selection-icon">&#8964;</span>
+        </button>
+        <div class="card picker-dropdown hidden" id="periodDropdown">
+          <div class="picker-dropdown-list" id="periodSheetList"></div>
+        </div>
+      </section>
+
+      <section class="field mode-only-task" id="durationSection">
+        <span class="create-field-kicker">Duration</span>
+        <div class="duration-picker">
+          <label class="duration-field" for="durationHours">
+            <span class="duration-label">Hours</span>
+            <select class="selection-row input-like duration-select" id="durationHours">
+              <option value="0">0 hr</option>
+              <option value="1" selected>1 hr</option>
+              <option value="2">2 hr</option>
+              <option value="3">3 hr</option>
+              <option value="4">4 hr</option>
+              <option value="5">5 hr</option>
+              <option value="6">6 hr</option>
+              <option value="7">7 hr</option>
+              <option value="8">8 hr</option>
+            </select>
+          </label>
+          <label class="duration-field" for="durationMinutes">
+            <span class="duration-label">Minutes</span>
+            <select class="selection-row input-like duration-select" id="durationMinutes">
+              <option value="0" selected>00 min</option>
+              <option value="15">15 min</option>
+              <option value="30">30 min</option>
+              <option value="45">45 min</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="mode-only-task">
+        <div class="recurring-head">
+          <div class="create-field-kicker">Add Also As Reminder</div>
+          <button class="toggle-switch" type="button" id="reminderToggle" aria-pressed="false">
+            <span class="toggle-knob"></span>
+          </button>
+        </div>
+      </section>
+    </section>
+
+    <div class="create-task-footer">
+      <button class="primary-button create-task-submit" id="saveButton" type="button">Schedule Task</button>
+    </div>
+
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const initialMode = params.get('mode') === 'reminder' ? 'reminder' : 'task';
+    const from = params.get('from') || (initialMode === 'reminder' ? 'reminders.html' : 'tasks.html');
+    const defaultDate = window.FocusPreviewData.DEFAULT_SCHEDULE_DATE;
+    const defaultWeekday = new Date(`${defaultDate}T00:00:00`).getDay();
+    const weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    const closeLink = document.getElementById('closeLink');
+    const screenTitle = document.getElementById('screenTitle');
+    const titleLabel = document.getElementById('titleLabel');
+    const titleInput = document.getElementById('titleInput');
+    const notesInput = document.getElementById('notesInput');
+    const taskModeButton = document.getElementById('taskModeButton');
+    const reminderModeButton = document.getElementById('reminderModeButton');
+    const priorityButtons = [...document.querySelectorAll('[data-priority]')];
+    const repeatButtons = [...document.querySelectorAll('[data-repeat]')];
+    const taskPrioritySection = document.getElementById('taskPrioritySection');
+    const dateSection = document.getElementById('dateSection');
+    const dateLabel = document.getElementById('dateLabel');
+    const dateInput = document.getElementById('dateInput');
+    const timeSection = document.getElementById('timeSection');
+    const timeInput = document.getElementById('timeInput');
+    const repeatSummarySection = document.getElementById('repeatSummarySection');
+    const dailySummary = document.getElementById('dailySummary');
+    const preferredPeriodSection = document.getElementById('preferredPeriodSection');
+    const preferredPeriodButton = document.getElementById('preferredPeriodButton');
+    const preferredPeriodLabel = document.getElementById('preferredPeriodLabel');
+    const periodDropdown = document.getElementById('periodDropdown');
+    const periodSheetList = document.getElementById('periodSheetList');
+    const durationSection = document.getElementById('durationSection');
+    const durationHours = document.getElementById('durationHours');
+    const durationMinutes = document.getElementById('durationMinutes');
+    const reminderToggle = document.getElementById('reminderToggle');
+    const saveButton = document.getElementById('saveButton');
+    const weekdayRow = document.getElementById('weekdayRow');
+    const weekdaySummary = document.getElementById('weekdaySummary');
+
+    let mode = initialMode;
+    let priority = 'normal';
+    let repeatMode = 'none';
+    let selectedWeekdays = [defaultWeekday];
+    let addReminder = false;
+    let selectedPeriodName = 'Afternoon';
+
+    closeLink.href = from;
+    dateInput.value = defaultDate;
+    timeInput.value = '09:00';
+
+    function closePeriodDropdown() {
+      periodDropdown.classList.add('hidden');
+    }
+
+    function periodDisplayText(period) {
+      return `${period.name} · ${window.FocusPreviewData.formatRange(period.start, period.end)}`;
+    }
+
+    function updateWeekdaySummary() {
+      const labels = selectedWeekdays
+        .slice()
+        .sort((a, b) => a - b)
+        .map((index) => weekdayNames[index]);
+      const summary = labels.length ? labels.join(', ') : weekdayNames[defaultWeekday];
+      weekdaySummary.textContent = `Repeats on ${summary}`;
+    }
+
+    function renderWeekdayButtons() {
+      weekdayRow.innerHTML = weekdayLabels.map((label, index) => `
+        <button class="weekday-chip ${selectedWeekdays.includes(index) ? 'active' : ''}" type="button" data-day="${index}">${label}</button>
+      `).join('');
+      weekdayRow.querySelectorAll('[data-day]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const day = Number(button.dataset.day);
+          if (selectedWeekdays.includes(day)) {
+            if (selectedWeekdays.length > 1) {
+              selectedWeekdays = selectedWeekdays.filter((item) => item !== day);
+            }
+          } else {
+            selectedWeekdays = [...selectedWeekdays, day];
+          }
+          renderWeekdayButtons();
+          updateWeekdaySummary();
+        });
+      });
+    }
+
+    function renderPeriodOptions() {
+      const periods = window.FocusPreviewData.productivePeriods();
+      if (!periods.length) {
+        preferredPeriodLabel.textContent = 'No productive periods';
+        preferredPeriodButton.disabled = true;
+        periodSheetList.innerHTML = '<div class="sheet-empty">No productive periods available.</div>';
+        return;
+      }
+
+      preferredPeriodButton.disabled = false;
+      if (!periods.some((period) => period.name === selectedPeriodName)) {
+        selectedPeriodName = periods.some((period) => period.name === 'Afternoon') ? 'Afternoon' : periods[0].name;
+      }
+
+      const selectedPeriod = periods.find((period) => period.name === selectedPeriodName) || periods[0];
+      preferredPeriodLabel.textContent = periodDisplayText(selectedPeriod);
+
+      periodSheetList.innerHTML = periods.map((period) => `
+        <button class="sheet-option picker-option ${period.name === selectedPeriodName ? 'active' : ''}" type="button" data-name="${period.name}">
+          <span class="picker-option-copy">
+            <span class="picker-option-title">${period.name}</span>
+            <span class="picker-option-meta">${window.FocusPreviewData.formatRange(period.start, period.end)}</span>
+          </span>
+          <span class="picker-option-check">${period.name === selectedPeriodName ? '&#10003;' : ''}</span>
+        </button>
+      `).join('');
+
+      periodSheetList.querySelectorAll('[data-name]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedPeriodName = button.dataset.name;
+          renderPeriodOptions();
+          closePeriodDropdown();
+        });
+      });
+    }
+
+    function syncModeButtons() {
+      taskModeButton.classList.toggle('active', mode === 'task');
+      taskModeButton.setAttribute('aria-pressed', String(mode === 'task'));
+      reminderModeButton.classList.toggle('active', mode === 'reminder');
+      reminderModeButton.setAttribute('aria-pressed', String(mode === 'reminder'));
+    }
+
+    function renderMode() {
+      syncModeButtons();
+      const isTask = mode === 'task';
+      screenTitle.textContent = isTask ? 'Create Task' : 'Create Reminder';
+      titleLabel.textContent = isTask ? 'Task Title' : 'Reminder Title';
+      titleInput.placeholder = isTask ? 'Add title' : 'Add reminder';
+      saveButton.textContent = isTask ? 'Schedule Task' : 'Save Reminder';
+      taskPrioritySection.classList.toggle('hidden', !isTask);
+      preferredPeriodSection.classList.toggle('hidden', !isTask);
+      durationSection.classList.toggle('hidden', !isTask);
+      reminderToggle.closest('.mode-only-task').classList.toggle('hidden', !isTask);
+      if (!isTask) {
+        addReminder = false;
+        reminderToggle.setAttribute('aria-pressed', 'false');
+        reminderToggle.classList.remove('active');
+      }
+      renderRepeatMode();
+    }
+
+    function renderRepeatMode() {
+      repeatButtons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.repeat === repeatMode);
+      });
+
+      const isTask = mode === 'task';
+      const isOneTime = repeatMode === 'none';
+      const isWeekly = repeatMode === 'weekly';
+      const isDaily = repeatMode === 'daily';
+
+      dateSection.classList.toggle('hidden', !isOneTime);
+      timeSection.classList.toggle('hidden', isTask);
+      repeatSummarySection.classList.toggle('hidden', isOneTime);
+      dailySummary.classList.toggle('hidden', !isDaily);
+      weekdayRow.classList.toggle('hidden', !isWeekly);
+      weekdaySummary.classList.toggle('hidden', !isWeekly);
+
+      if (isTask) {
+        dateLabel.textContent = 'Deadline';
+      } else {
+        dateLabel.textContent = 'Date';
+      }
+
+      if (isTask && !isOneTime) {
+        dateSection.classList.add('hidden');
+      }
+
+      if (isWeekly) {
+        updateWeekdaySummary();
+      }
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      renderMode();
+    }
+
+    taskModeButton.addEventListener('click', () => setMode('task'));
+    reminderModeButton.addEventListener('click', () => setMode('reminder'));
+
+    priorityButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        priority = button.dataset.priority;
+        priorityButtons.forEach((item) => item.classList.toggle('active', item === button));
+      });
+    });
+
+    repeatButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        repeatMode = button.dataset.repeat;
+        if (repeatMode === 'weekly' && !selectedWeekdays.length) {
+          selectedWeekdays = [defaultWeekday];
+        }
+        renderRepeatMode();
+      });
+    });
+
+    preferredPeriodButton.addEventListener('click', () => {
+      periodDropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', (event) => {
+      if (periodDropdown.classList.contains('hidden')) return;
+      if (preferredPeriodSection.contains(event.target)) return;
+      closePeriodDropdown();
+    });
+
+      reminderToggle.addEventListener('click', () => {
+      addReminder = reminderToggle.getAttribute('aria-pressed') !== 'true';
+      reminderToggle.setAttribute('aria-pressed', String(addReminder));
+      reminderToggle.classList.toggle('active', addReminder);
+    });
+
+    saveButton.addEventListener('click', () => {
+      const title = titleInput.value.trim() || (mode === 'task' ? 'New task' : 'New reminder');
+      const description = notesInput.value.trim();
+      const repeatDays = repeatMode === 'weekly' ? selectedWeekdays.slice().sort((a, b) => a - b) : [];
+      const durationTotalMinutes = (Number(durationHours.value) * 60) + Number(durationMinutes.value || 0);
+
+      if (mode === 'task') {
+        const task = window.FocusPreviewData.addTask({
+          title,
+          description,
+          priority,
+          durationMinutes: Math.max(15, durationTotalMinutes || 0),
+          dueDate: repeatMode === 'none' ? (dateInput.value || defaultDate) : defaultDate,
+          preferredPeriod: selectedPeriodName,
+          repeatMode,
+          repeatDays,
+          repeatStartDate: defaultDate,
+          scheduleDate: defaultDate
+        });
+
+        if (addReminder) {
+          window.FocusPreviewData.createReminderForTask(task.id, {
+            title,
+            description
+          });
+        }
+
+        window.location.href = 'tasks.html';
+        return;
+      }
+
+      window.FocusPreviewData.addReminder({
+        title,
+        description,
+        date: repeatMode === 'none' ? (dateInput.value || defaultDate) : defaultDate,
+        time: timeInput.value || '09:00',
+        repeatMode,
+        repeatDays,
+        repeatStartDate: defaultDate
+      });
+      window.location.href = 'reminders.html';
+    });
+
+    renderPeriodOptions();
+    renderWeekdayButtons();
+    renderMode();
+  </script>
+</body>
+</html>
+

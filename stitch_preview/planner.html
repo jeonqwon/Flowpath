@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planner</title>
+  <link rel="stylesheet" href="app-theme.css">
+  <script src="mock-data.js"></script>
+</head>
+<body class="preview-body">
+  <main class="app-screen has-sticky-header">
+    <div class="topbar compact sticky-topbar">
+      <h1 class="screen-title">Tuesday, Oct 6</h1>
+      <a class="primary-button add-task-button" href="create_task.html?mode=task&from=planner.html" aria-label="Add task">
+        <span class="add-task-plus">+</span>
+        <span>Add Task</span>
+      </a>
+    </div>
+
+    <section class="card calendar-card">
+      <div class="calendar-head">
+        <h2 class="calendar-title" id="monthTitle">October 2026</h2>
+        <div style="display:flex; gap:8px;">
+          <button class="circle-button" id="prevMonth" aria-label="Previous month">&#8249;</button>
+          <button class="circle-button" id="nextMonth" aria-label="Next month">&#8250;</button>
+        </div>
+      </div>
+
+      <div class="weekdays">
+        <div class="weekday">S</div>
+        <div class="weekday">M</div>
+        <div class="weekday">T</div>
+        <div class="weekday">W</div>
+        <div class="weekday">T</div>
+        <div class="weekday">F</div>
+        <div class="weekday">S</div>
+      </div>
+
+      <div class="calendar-grid" id="calendarGrid"></div>
+    </section>
+
+    <section class="agenda-card" style="margin-top:16px;">
+      <div class="agenda-head">
+        <h3 class="agenda-title" id="agendaTitle">Thursday, Oct 8</h3>
+      </div>
+      <div class="stack" id="agendaList"></div>
+    </section>
+
+    <nav class="bottom-nav">
+      <a class="nav-link" href="tasks.html"><span>Tasks</span></a>
+      <a class="nav-link active" href="planner.html"><strong>Planner</strong></a>
+      <a class="nav-link" href="reminders.html"><span>Reminders</span></a>
+      <a class="nav-link" href="combined_settings_edit.html"><span>Settings</span></a>
+    </nav>
+  </main>
+
+  <script>
+    const monthTitle = document.getElementById('monthTitle');
+    const calendarGrid = document.getElementById('calendarGrid');
+    const agendaTitle = document.getElementById('agendaTitle');
+    const agendaList = document.getElementById('agendaList');
+    const prevMonth = document.getElementById('prevMonth');
+    const nextMonth = document.getElementById('nextMonth');
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    let currentYear = 2026;
+    let currentMonth = 9;
+    let selectedDay = 6;
+
+    function selectedDateIso() {
+      return `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
+    }
+
+    function dotLevel(count) {
+      return Math.min(Math.max(count, 0), 4);
+    }
+
+    function renderCalendar() {
+      monthTitle.textContent = `${monthNames[currentMonth]} ${currentYear}`;
+      const firstDay = new Date(currentYear, currentMonth, 1).getDay();
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const prevMonthDays = new Date(currentYear, currentMonth, 0).getDate();
+      const cells = [];
+
+      for (let i = 0; i < firstDay; i += 1) {
+        const day = prevMonthDays - firstDay + i + 1;
+        cells.push(`<button class="day-cell empty" type="button"><div class="day-number" style="color:#bac1d2;">${day}</div></button>`);
+      }
+
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const tasks = window.FocusPreviewData.taskCountForDate(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+        const activeClass = day === selectedDay ? 'active' : '';
+        const dot = tasks > 0 ? `<div class="calendar-dot level-${dotLevel(tasks)}"></div>` : `<div style="width:6px; height:6px;"></div>`;
+        cells.push(`
+          <button class="day-cell ${activeClass}" type="button" data-day="${day}">
+            <div class="day-number">${day}</div>
+            ${dot}
+          </button>
+        `);
+      }
+
+      while (cells.length % 7 !== 0) {
+        const trailingDay = cells.length - (firstDay + daysInMonth) + 1;
+        cells.push(`<button class="day-cell empty" type="button"><div class="day-number" style="color:#bac1d2;">${trailingDay}</div></button>`);
+      }
+
+      calendarGrid.innerHTML = cells.join('');
+
+      calendarGrid.querySelectorAll('[data-day]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedDay = Number(button.dataset.day);
+          renderCalendar();
+          renderAgenda();
+        });
+      });
+    }
+
+    function renderAgenda() {
+      const dateIso = selectedDateIso();
+      agendaTitle.textContent = `${weekdays[new Date(currentYear, currentMonth, selectedDay).getDay()]}, ${monthNames[currentMonth].slice(0, 3)} ${selectedDay}`;
+      const taskItems = window.FocusPreviewData.plannerAgendaItems(dateIso);
+      const reminderItems = window.FocusPreviewData.remindersForDate(dateIso);
+
+      if (taskItems.length === 0 && reminderItems.length === 0) {
+        agendaList.innerHTML = `
+          <article class="card soft task-card">
+            <div>
+              <h4 class="task-title">Nothing scheduled</h4>
+            </div>
+          </article>
+        `;
+        return;
+      }
+
+      const taskMarkup = taskItems.map((task) => `
+        <article class="agenda-item-row agenda-task-link" data-task-id="${task.id}" tabindex="0" role="button">
+          <div>
+            <h4 class="task-title">${task.title}</h4>
+            <p class="task-meta">${task.time}</p>
+          </div>
+        </article>
+      `).join('');
+
+      const reminderMarkup = reminderItems.map((reminder) => `
+        <article class="agenda-item-row agenda-reminder-row">
+          <div>
+            <h4 class="task-title">${reminder.title}</h4>
+            <p class="task-meta">${window.FocusPreviewData.formatTime(reminder.start)}</p>
+            ${reminder.repeatNote ? `<p class="helper-copy">${reminder.repeatNote}</p>` : ''}
+          </div>
+        </article>
+      `).join('');
+
+      const sections = [];
+      if (taskMarkup) {
+        sections.push(`
+          <section class="agenda-section">
+            <p class="agenda-section-label">Tasks</p>
+            <div class="card agenda-group-card agenda-section-stack">${taskMarkup}</div>
+          </section>
+        `);
+      }
+      if (reminderMarkup) {
+        sections.push(`
+          <section class="agenda-section">
+            <p class="agenda-section-label">Reminders</p>
+            <div class="card soft agenda-group-card agenda-section-stack">${reminderMarkup}</div>
+          </section>
+        `);
+      }
+
+      agendaList.innerHTML = sections.join('');
+
+      agendaList.querySelectorAll('.agenda-task-link').forEach((card) => {
+        card.addEventListener('click', () => {
+          window.location.href = `task_detail.html?id=${card.dataset.taskId}&from=planner.html`;
+        });
+        card.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            window.location.href = `task_detail.html?id=${card.dataset.taskId}&from=planner.html`;
+          }
+        });
+      });
+    }
+
+    prevMonth.addEventListener('click', () => {
+      currentMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+      if (currentMonth === 11) currentYear -= 1;
+      renderCalendar();
+      renderAgenda();
+    });
+
+    nextMonth.addEventListener('click', () => {
+      currentMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+      if (currentMonth === 0) currentYear += 1;
+      renderCalendar();
+      renderAgenda();
+    });
+
+    renderCalendar();
+    renderAgenda();
+  </script>
+</body>
+</html>

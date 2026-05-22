@@ -1,0 +1,13 @@
+{
+  "name": "focus-preview-local",
+  "private": true,
+  "scripts": {
+    "start:web": "node stitch_preview/server.js",
+    "test:api": "node --test stitch_preview/tests/api.test.mjs",
+    "test:e2e": "playwright test --config=stitch_preview/playwright.config.mjs",
+    "test": "npm run test:api && npm run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
+  }
+}

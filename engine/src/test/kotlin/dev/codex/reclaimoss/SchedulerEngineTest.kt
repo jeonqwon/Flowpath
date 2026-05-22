@@ -1,0 +1,610 @@
+package dev.codex.reclaimoss
+
+import dev.codex.reclaimoss.domain.model.BlockCompletionState
+import dev.codex.reclaimoss.domain.model.BlockLockState
+import dev.codex.reclaimoss.domain.model.BlockSource
+import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.RecurrenceRule
+import dev.codex.reclaimoss.domain.model.ScheduleBlock
+import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.SchedulingIssueType
+import dev.codex.reclaimoss.domain.model.SchedulingPolicy
+import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.TimeWindow
+import dev.codex.reclaimoss.domain.model.TimePeriod
+import dev.codex.reclaimoss.domain.model.WorkHoursDay
+import dev.codex.reclaimoss.domain.model.WorkHoursProfile
+import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
+import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SchedulerEngineTest {
+    private val zone = ZoneId.of("America/New_York")
+    private val policy = SchedulingPolicy(
+        minBlockMinutes = 30,
+        maxBlockMinutes = 120,
+        breakBetweenBlocksMinutes = 15,
+        priorityWeight = 1.5,
+        deadlineUrgencyWeight = 2.0,
+        lookAheadDays = 14,
+    )
+    private val workHours = WorkHoursProfile(
+        timezone = zone.id,
+        days = DayOfWeek.entries.associateWith { day ->
+            when (day) {
+                DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> WorkHoursDay(emptyList())
+                else -> WorkHoursDay(
+                    windows = listOf(
+                        TimeWindow(LocalTime.of(9, 0), LocalTime.of(12, 0)),
+                        TimeWindow(LocalTime.of(13, 0), LocalTime.of(17, 0)),
+                    ),
+                )
+            }
+        },
+    )
+
+    private val scheduler = SchedulerEngine()
+    private val timePeriods = listOf(
+        TimePeriod(
+            id = "period-morning",
+            label = "Morning",
+            start = LocalTime.of(9, 0),
+            end = LocalTime.of(12, 0),
+        ),
+        TimePeriod(
+            id = "period-afternoon",
+            label = "Afternoon",
+            start = LocalTime.of(13, 0),
+            end = LocalTime.of(17, 0),
+        ),
+    )
+
+    @Test
+    fun `places work blocks inside working hours only`() {
+        val start = ZonedDateTime.of(LocalDate.of(2026, 5, 18), LocalTime.of(8, 0), zone).toInstant()
+        val task = task(
+            id = "task-1",
+            deadline = ZonedDateTime.of(LocalDate.of(2026, 5, 19), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 180,
+            remainingMinutes = 180,
+            priority = TaskPriority.HIGH,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = start,
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(1, plan.blocks.size)
+        assertTrue(plan.blocks.all { block ->
+            val dateTime = block.startAt.atZone(zone)
+            dateTime.toLocalTime() >= LocalTime.of(9, 0) && block.endAt.atZone(zone).toLocalTime() <= LocalTime.of(17, 0)
+        })
+    }
+
+    @Test
+    fun `keeps locked blocks and reschedules only remaining work`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val lockedBlock = ScheduleBlock(
+            id = "block-locked",
+            taskId = "task-1",
+            startAt = ZonedDateTime.of(date, LocalTime.of(9, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(10, 0), zone).toInstant(),
+            source = BlockSource.MANUAL,
+            lockState = BlockLockState.LOCKED,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+        val task = task(
+            id = "task-1",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 180,
+            remainingMinutes = 120,
+            priority = TaskPriority.MEDIUM,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = listOf(lockedBlock),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.TaskMissed("task-1"),
+        )
+
+        assertTrue(plan.blocks.any { it.id == "block-locked" })
+        assertEquals(2, plan.blocks.size)
+        assertEquals("block-locked", plan.blocks.first().id)
+    }
+
+    @Test
+    fun `higher priority work wins earlier slots when deadlines are similar`() {
+        val start = ZonedDateTime.of(LocalDate.of(2026, 5, 18), LocalTime.of(8, 0), zone).toInstant()
+        val high = task(
+            id = "high",
+            deadline = ZonedDateTime.of(LocalDate.of(2026, 5, 20), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+        )
+        val low = task(
+            id = "low",
+            deadline = ZonedDateTime.of(LocalDate.of(2026, 5, 20), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.LOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(low, high),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = start,
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals("high", plan.blocks.first().taskId)
+        assertEquals("low", plan.blocks.last().taskId)
+    }
+
+    @Test
+    fun `busy calendar windows force work into next available slot`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "task-busy",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+        )
+        val busy = listOf(
+            SchedulerEngine.BusyWindow(
+                startAt = ZonedDateTime.of(date, LocalTime.of(9, 0), zone).toInstant(),
+                endAt = ZonedDateTime.of(date, LocalTime.of(11, 30), zone).toInstant(),
+            ),
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = busy,
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.CalendarConflict("task-busy"),
+        )
+
+        assertEquals(LocalTime.of(13, 0), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `preferred time period is used before other open slots`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val task = task(
+            id = "task-morning",
+            deadline = ZonedDateTime.of(date, LocalTime.of(23, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(LocalTime.of(13, 0), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `preferred time period wins across days before same day fallback`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val task = task(
+            id = "task-next-morning",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(23, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-morning",
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(13, 10), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val scheduled = plan.blocks.single()
+        assertEquals(date.plusDays(1), scheduled.startAt.atZone(zone).toLocalDate())
+        assertEquals(LocalTime.of(9, 0), scheduled.startAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `keeps one contiguous block when the full task fits in an empty period`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(
+                    windows = listOf(
+                        TimeWindow(LocalTime.of(13, 0), LocalTime.of(17, 0)),
+                    ),
+                )
+            },
+        )
+        val task = task(
+            id = "task-four-hours",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 240,
+            remainingMinutes = 240,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = afternoonOnly,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(1, plan.blocks.size)
+        assertEquals(LocalTime.of(13, 0), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+        assertEquals(LocalTime.of(17, 0), plan.blocks.single().endAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `pending blocks for other tasks remain occupied during targeted scheduling`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val existingOtherTaskBlock = ScheduleBlock(
+            id = "block-other",
+            taskId = "other-task",
+            startAt = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant(),
+            source = BlockSource.AUTO,
+            lockState = BlockLockState.FLEXIBLE,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+        val task = task(
+            id = "new-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+            preferredTimePeriodId = "period-afternoon",
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = listOf(existingOtherTaskBlock),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(12, 45), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val scheduled = plan.blocks.single { it.taskId == "new-task" }
+        assertTrue(scheduled.startAt >= existingOtherTaskBlock.endAt)
+    }
+
+    @Test
+    fun `full rebuild keeps an existing valid long block and moves the conflicting new task instead`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val longMorningHours = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(
+                    windows = listOf(
+                        TimeWindow(LocalTime.of(8, 0), LocalTime.of(12, 0)),
+                        TimeWindow(LocalTime.of(14, 0), LocalTime.of(16, 0)),
+                    ),
+                )
+            },
+        )
+        val longMorningPeriods = listOf(
+            TimePeriod(
+                id = "period-morning",
+                label = "Morning",
+                start = LocalTime.of(8, 0),
+                end = LocalTime.of(12, 0),
+            ),
+            TimePeriod(
+                id = "period-afternoon",
+                label = "Afternoon",
+                start = LocalTime.of(14, 0),
+                end = LocalTime.of(16, 0),
+            ),
+        )
+        val original = task(
+            id = "original",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 240,
+            remainingMinutes = 240,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-morning",
+        )
+        val conflicting = task(
+            id = "conflicting",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 240,
+            remainingMinutes = 240,
+            priority = TaskPriority.HIGH,
+            preferredTimePeriodId = "period-morning",
+        )
+        val existingOriginalBlock = ScheduleBlock(
+            id = "original-block",
+            taskId = original.id,
+            startAt = ZonedDateTime.of(date.plusDays(1), LocalTime.of(8, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date.plusDays(1), LocalTime.of(12, 0), zone).toInstant(),
+            source = BlockSource.AUTO,
+            lockState = BlockLockState.FLEXIBLE,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(original, conflicting),
+            existingBlocks = listOf(existingOriginalBlock),
+            busyWindows = emptyList(),
+            workHours = longMorningHours,
+            timePeriods = longMorningPeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val originalBlocks = plan.blocks.filter { it.taskId == original.id }
+        assertEquals(1, originalBlocks.size)
+        assertEquals(existingOriginalBlock.startAt, originalBlocks.single().startAt)
+        assertEquals(existingOriginalBlock.endAt, originalBlocks.single().endAt)
+        assertTrue(plan.blocks.any { it.taskId == conflicting.id })
+        assertTrue(plan.blocks.none { it.taskId == conflicting.id && it.startAt == existingOriginalBlock.startAt })
+    }
+
+    @Test
+    fun `task blocks start on hour or half hour boundaries`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "aligned-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 45,
+            remainingMinutes = 45,
+            priority = TaskPriority.MEDIUM,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(9, 10), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(LocalTime.of(9, 30), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `busy windows ending off boundary still schedule on next half hour`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "post-busy-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+        )
+        val busy = listOf(
+            SchedulerEngine.BusyWindow(
+                startAt = ZonedDateTime.of(date, LocalTime.of(9, 0), zone).toInstant(),
+                endAt = ZonedDateTime.of(date, LocalTime.of(10, 10), zone).toInstant(),
+            ),
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = busy,
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(LocalTime.of(10, 30), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+    }
+
+    @Test
+    fun `aligned partial blocks smaller than minimum are skipped`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "too-small-after-align",
+            deadline = ZonedDateTime.of(date, LocalTime.of(10, 40), zone).toInstant(),
+            estimatedMinutes = 30,
+            remainingMinutes = 30,
+            priority = TaskPriority.URGENT,
+        )
+        val narrowWorkHours = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(10, 10), LocalTime.of(10, 40))))
+            },
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = narrowWorkHours,
+            timePeriods = emptyList(),
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(10, 10), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertTrue(plan.blocks.isEmpty())
+        assertEquals(SchedulingIssueType.UNSCHEDULED, plan.issues.single().type)
+    }
+
+    @Test
+    fun `long task is split across one hour periods when enough days exist`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val oneHourWorkHours = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith { day ->
+                when (day) {
+                    DayOfWeek.SATURDAY, DayOfWeek.SUNDAY -> WorkHoursDay(emptyList())
+                    else -> WorkHoursDay(
+                        listOf(
+                            TimeWindow(LocalTime.of(9, 0), LocalTime.of(10, 0)),
+                            TimeWindow(LocalTime.of(11, 0), LocalTime.of(12, 0)),
+                            TimeWindow(LocalTime.of(13, 0), LocalTime.of(14, 0)),
+                        ),
+                    )
+                }
+            },
+        )
+        val task = task(
+            id = "six-hour-task",
+            deadline = ZonedDateTime.of(date.plusDays(3), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 360,
+            remainingMinutes = 360,
+            priority = TaskPriority.MEDIUM,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = oneHourWorkHours,
+            timePeriods = emptyList(),
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(6, plan.blocks.size)
+        assertEquals(360, plan.blocks.sumOf { java.time.Duration.between(it.startAt, it.endAt).toMinutes().toInt() })
+        assertTrue(plan.issues.isEmpty())
+    }
+
+    @Test
+    fun `reports partial scheduling with remaining unscheduled minutes`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "partial-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(10, 0), zone).toInstant(),
+            estimatedMinutes = 180,
+            remainingMinutes = 180,
+            priority = TaskPriority.URGENT,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals(1, plan.blocks.size)
+        assertEquals(listOf("partial-task"), plan.unscheduledTaskIds)
+        assertEquals(SchedulingIssueType.PARTIAL, plan.issues.single().type)
+        assertEquals(120, plan.issues.single().unscheduledMinutes)
+    }
+
+    @Test
+    fun `reports unscheduled when no valid slot exists before deadline`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val task = task(
+            id = "unscheduled-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(8, 30), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.URGENT,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertTrue(plan.blocks.none { it.taskId == "unscheduled-task" })
+        assertEquals(listOf("unscheduled-task"), plan.unscheduledTaskIds)
+        assertEquals(SchedulingIssueType.UNSCHEDULED, plan.issues.single().type)
+        assertEquals(60, plan.issues.single().unscheduledMinutes)
+    }
+
+    private fun task(
+        id: String,
+        deadline: Instant,
+        estimatedMinutes: Int,
+        remainingMinutes: Int,
+        priority: TaskPriority,
+        preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
+        preferredTimePeriodId: String? = null,
+    ) = ScheduleTask(
+        id = id,
+        title = id,
+        priority = priority,
+        dueAt = deadline,
+        estimatedMinutes = estimatedMinutes,
+        remainingMinutes = remainingMinutes,
+        preferredTimeOfDay = preferredTimeOfDay,
+        preferredTimePeriodId = preferredTimePeriodId,
+        recurrenceRule = RecurrenceRule(),
+        status = TaskStatus.ACTIVE,
+    )
+}

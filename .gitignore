@@ -1,0 +1,11 @@
+.gradle/
+/build/
+/app/build/
+/local.properties
+/gradle-8.10.2/
+/gradle-8.10.2-bin.zip
+/.idea/
+*.iml
+node_modules/
+test-results/
+stitch_preview/data/
