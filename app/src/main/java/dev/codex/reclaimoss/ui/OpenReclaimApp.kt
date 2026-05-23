@@ -146,6 +146,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
+    var onboardingStep by rememberSaveable { mutableStateOf<Int?>(null) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -154,6 +155,53 @@ fun OpenReclaimApp(appGraph: AppGraph) {
 
     LaunchedEffect(Unit) {
         viewModel.seedIfNeeded()
+    }
+
+    LaunchedEffect(state.settings.hasCompletedOnboarding) {
+        if (!state.settings.hasCompletedOnboarding) {
+            selectedTab = AppTab.Settings
+            if (onboardingStep == null) onboardingStep = 0
+        }
+    }
+
+    if (onboardingStep != null && !state.settings.hasCompletedOnboarding) {
+        val step = onboardingStep!!
+        val (title, body) = when (step) {
+            0 -> "Set your day first" to "Open Daily Flow and add productive slots for when you can work. Add meal, rest, or sleep periods too. Use Edit Flow, then tap an empty gap to create a period."
+            1 -> "Then add tasks" to "After your slots are set, go to Tasks and tap Add Task. Choose a duration, deadline, and preferred period. Flowpath only schedules inside productive slots."
+            else -> "Use Planner and Reminders" to "Planner shows your scheduled day and completed history. Reminders shows what needs attention. Open a task to mark it done, reschedule it, or create a follow-up."
+        }
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(title, fontWeight = FontWeight.Bold) },
+            text = { Text(body) },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch { viewModel.setHasCompletedOnboarding(true) }
+                        onboardingStep = null
+                        selectedTab = AppTab.Tasks
+                    },
+                ) {
+                    Text("Skip")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (step < 2) {
+                            onboardingStep = step + 1
+                        } else {
+                            scope.launch { viewModel.setHasCompletedOnboarding(true) }
+                            onboardingStep = null
+                            selectedTab = AppTab.Tasks
+                        }
+                    },
+                ) {
+                    Text(if (step < 2) "Next" else "Start using Flowpath")
+                }
+            },
+        )
     }
 
     if (showingCreate) {
@@ -463,6 +511,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 padding = padding,
                 periods = state.snapshot.timePeriods,
                 settings = state.settings,
+                startInDailyFlow = !state.settings.hasCompletedOnboarding,
                 onSavePeriod = { draft ->
                     scope.launch {
                         viewModel.saveTimePeriod(draft)

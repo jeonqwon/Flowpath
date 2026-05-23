@@ -58,6 +58,7 @@ data class AppSettings(
     val reminderTimingMode: ReminderTimingMode = ReminderTimingMode.AT_TASK_TIME,
     val reminderLeadMinutes: Int = 15,
     val historyRetention: HistoryRetention = HistoryRetention.THIRTY_DAYS,
+    val hasCompletedOnboarding: Boolean = false,
 )
 
 class AppSettingsRepository(
@@ -86,6 +87,7 @@ class AppSettingsRepository(
     suspend fun setReminderTimingMode(value: ReminderTimingMode) = updateString(REMINDER_TIMING_MODE, value.name)
     suspend fun setReminderLeadMinutes(value: Int) = updateInt(REMINDER_LEAD_MINUTES, value.coerceIn(5, 120))
     suspend fun setHistoryRetention(value: HistoryRetention) = updateString(HISTORY_RETENTION, value.name)
+    suspend fun setHasCompletedOnboarding(value: Boolean) = updateBoolean(HAS_COMPLETED_ONBOARDING, value)
 
     private suspend fun updateString(key: Preferences.Key<String>, value: String) {
         context.settingsDataStore.edit { prefs -> prefs[key] = value }
@@ -113,6 +115,7 @@ class AppSettingsRepository(
             reminderTimingMode = prefs[REMINDER_TIMING_MODE].safeEnumOrDefault(AppSettings().reminderTimingMode),
             reminderLeadMinutes = prefs[REMINDER_LEAD_MINUTES] ?: AppSettings().reminderLeadMinutes,
             historyRetention = prefs[HISTORY_RETENTION].safeEnumOrDefault(AppSettings().historyRetention),
+            hasCompletedOnboarding = prefs[HAS_COMPLETED_ONBOARDING] ?: AppSettings().hasCompletedOnboarding,
         )
 
     private companion object {
@@ -128,6 +131,7 @@ class AppSettingsRepository(
         val REMINDER_TIMING_MODE = stringPreferencesKey("reminder_timing_mode")
         val REMINDER_LEAD_MINUTES = intPreferencesKey("reminder_lead_minutes")
         val HISTORY_RETENTION = stringPreferencesKey("history_retention")
+        val HAS_COMPLETED_ONBOARDING = booleanPreferencesKey("has_completed_onboarding")
     }
 }
 

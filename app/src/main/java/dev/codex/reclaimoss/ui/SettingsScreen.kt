@@ -149,6 +149,7 @@ fun SettingsScreen(
     padding: PaddingValues,
     periods: List<TimePeriod>,
     settings: AppSettings,
+    startInDailyFlow: Boolean = false,
     onSavePeriod: (TimePeriodDraft) -> Unit,
     onDeletePeriod: (String) -> Unit,
     onThemeModeChanged: (ThemeMode) -> Unit,
@@ -166,7 +167,13 @@ fun SettingsScreen(
 ) {
     var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
     var editFlow by rememberSaveable { mutableStateOf(false) }
-    var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    var section by rememberSaveable { mutableStateOf<SettingsSection?>(if (startInDailyFlow) SettingsSection.DailyFlow else null) }
+
+    LaunchedEffect(startInDailyFlow) {
+        if (startInDailyFlow && section == null) {
+            section = SettingsSection.DailyFlow
+        }
+    }
 
     if (editingPeriod != null) {
         TimePeriodDialog(
