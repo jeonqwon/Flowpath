@@ -83,6 +83,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
@@ -144,6 +146,17 @@ private enum class SettingsSection(val title: String) {
     DailyFlow("Daily Flow"),
 }
 
+private enum class SettingsHubGroup(val title: String, val sections: List<SettingsSection>) {
+    Schedule(
+        "Schedule",
+        listOf(SettingsSection.DailyFlow, SettingsSection.TaskRules),
+    ),
+    Preferences(
+        "Preferences",
+        listOf(SettingsSection.Appearance, SettingsSection.Reminders, SettingsSection.History),
+    ),
+}
+
 @Composable
 fun SettingsScreen(
     padding: PaddingValues,
@@ -168,6 +181,7 @@ fun SettingsScreen(
     onHistoryRetentionChanged: (HistoryRetention) -> Unit,
     onFinishDailyFlowOnboarding: () -> Unit,
 ) {
+    val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
     var editingPeriodError by remember { mutableStateOf<String?>(null) }
     var editFlow by rememberSaveable { mutableStateOf(startInEditFlow) }
@@ -214,22 +228,36 @@ fun SettingsScreen(
         )
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(settingsPageBackground(isDarkSettings))
             .padding(padding)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        if (section == null) {
-            Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 120.dp),
-            ) {
-                item {
-                    SettingsGroupSurface {
-                        SettingsSection.entries.forEachIndexed { index, item ->
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (section == null) {
+                Text(
+                    "Settings",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = settingsPrimaryTextColor(isDarkSettings),
+                )
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    contentPadding = PaddingValues(bottom = 120.dp),
+                ) {
+                    listOf(
+                        SettingsSection.DailyFlow,
+                        SettingsSection.TaskRules,
+                        SettingsSection.Appearance,
+                        SettingsSection.Reminders,
+                        SettingsSection.History,
+                    ).forEach { item ->
+                        item {
                             SettingsNavigationRow(
                                 title = item.title,
                                 subtitle = when (item) {
@@ -239,44 +267,51 @@ fun SettingsScreen(
                                     SettingsSection.History -> "Completed task retention"
                                     SettingsSection.DailyFlow -> "Work, meal, and rest periods"
                                 },
+                                icon = settingsSectionIcon(item),
+                                isDarkSettings = isDarkSettings,
                                 onClick = { section = item },
                             )
-                            if (index != SettingsSection.entries.lastIndex) {
-                                SettingsDivider()
-                            }
                         }
                     }
                 }
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            } else {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    IconButton(onClick = { section = null }) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        IconButton(onClick = { section = null }) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = "Back",
+                                tint = settingsPrimaryTextColor(isDarkSettings),
+                            )
+                        }
+                        Text(
+                            section!!.title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = settingsPrimaryTextColor(isDarkSettings),
+                        )
                     }
-                    Text(section!!.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    if (section == SettingsSection.DailyFlow) {
+                        HeaderActionButton(
+                            label = if (editFlow) "Done" else "Edit Flow",
+                            onClick = { editFlow = !editFlow },
+                            width = 156.dp,
+                        )
+                    }
                 }
-                if (section == SettingsSection.DailyFlow) {
-                    HeaderActionButton(
-                        label = if (editFlow) "Done" else "Edit Flow",
-                        onClick = { editFlow = !editFlow },
-                        width = 156.dp,
-                    )
-                }
-            }
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 120.dp),
-            ) {
-                item {
-                    when (section) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(bottom = 120.dp),
+                ) {
+                    item {
+                        when (section) {
                         SettingsSection.Appearance -> SettingsGroupSurface {
                             SettingsControlRow(
                                 title = "Theme",
@@ -302,7 +337,7 @@ fun SettingsScreen(
                         }
 
                         SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            SettingsGroupSurface {
+                            SettingsGroupSurface(isDarkSettings = isDarkSettings) {
                                 SettingsControlRow(
                                     title = "Break buffer",
                                     subtitle = "Gap after each work task",
@@ -314,7 +349,7 @@ fun SettingsScreen(
                                         onMinutesChanged = onBreakBufferChanged,
                                     )
                                 }
-                                SettingsDivider()
+                                SettingsDivider(isDarkSettings)
                                 SettingsControlRow(
                                     title = "Task alignment",
                                     subtitle = "Snap task starts to fixed intervals",
@@ -332,14 +367,14 @@ fun SettingsScreen(
                                         onSelected = onAlignmentChanged,
                                     )
                                 }
-                                SettingsDivider()
+                                SettingsDivider(isDarkSettings)
                                 SettingsInlineSwitchRow(
                                     title = "Allow task splitting",
                                     subtitle = "Break long tasks across open slots",
                                     checked = settings.allowTaskSplitting,
                                     onCheckedChange = onAllowTaskSplittingChanged,
                                 )
-                                SettingsDivider()
+                                SettingsDivider(isDarkSettings)
                                 SettingsControlRow(
                                     title = "Max task chunk",
                                     subtitle = "Longest block before a task can split",
@@ -353,14 +388,14 @@ fun SettingsScreen(
                             }
                         }
 
-                        SettingsSection.Reminders -> SettingsGroupSurface {
+                        SettingsSection.Reminders -> SettingsGroupSurface(isDarkSettings = isDarkSettings) {
                             SettingsInlineSwitchRow(
                                 title = "Default reminder for tasks",
                                 subtitle = if (settings.defaultTaskReminder) "New tasks also create reminders" else "New tasks stay reminder-free",
                                 checked = settings.defaultTaskReminder,
                                 onCheckedChange = onDefaultTaskReminderChanged,
                             )
-                            SettingsDivider()
+                            SettingsDivider(isDarkSettings)
                             SettingsControlRow(
                                 title = "Reminder timing for tasks",
                                 subtitle = "Choose when linked reminders should appear",
@@ -379,7 +414,7 @@ fun SettingsScreen(
                             }
                         }
 
-                        SettingsSection.History -> SettingsGroupSurface {
+                        SettingsSection.History -> SettingsGroupSurface(isDarkSettings = isDarkSettings) {
                             SettingsControlRow(
                                 title = "Keep completed tasks",
                                 subtitle = "How long completed work stays visible",
@@ -436,7 +471,8 @@ fun SettingsScreen(
                             )
                         }
 
-                        null -> Unit
+                            null -> Unit
+                        }
                     }
                 }
             }
@@ -693,14 +729,15 @@ fun SettingsOptionCard(
 
 @Composable
 fun SettingsGroupSurface(
+    isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = settingsSurfaceColor(isDarkSettings)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, settingsDividerColor(isDarkSettings)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(content = content)
     }
@@ -710,28 +747,48 @@ fun SettingsGroupSurface(
 fun SettingsNavigationRow(
     title: String,
     subtitle: String,
+    icon: ImageVector,
+    isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
     onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 18.dp, vertical = 18.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
+        Row(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                icon,
+                contentDescription = title,
+                tint = settingsPrimaryTextColor(isDarkSettings),
+                modifier = Modifier.size(24.dp),
             )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = settingsPrimaryTextColor(isDarkSettings),
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = settingsSecondaryTextColor(isDarkSettings),
+                )
+            }
         }
-        Icon(Icons.Outlined.ChevronRight, contentDescription = title, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(
+            Icons.Outlined.ChevronRight,
+            contentDescription = title,
+            tint = settingsSecondaryTextColor(isDarkSettings),
+        )
     }
 }
 
@@ -741,6 +798,7 @@ fun SettingsControlRow(
     subtitle: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -748,11 +806,16 @@ fun SettingsControlRow(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = settingsPrimaryTextColor(isDarkSettings),
+            )
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(isDarkSettings),
             )
         }
         content()
@@ -766,6 +829,7 @@ fun SettingsInlineSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -777,11 +841,16 @@ fun SettingsInlineSwitchRow(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = settingsPrimaryTextColor(isDarkSettings),
+            )
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = settingsSecondaryTextColor(isDarkSettings),
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
@@ -789,13 +858,15 @@ fun SettingsInlineSwitchRow(
 }
 
 @Composable
-fun SettingsDivider() {
+fun SettingsDivider(
+    isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp)
             .height(1.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+            .background(settingsDividerColor(isDarkSettings)),
     )
 }
 
@@ -806,13 +877,33 @@ fun <T> SegmentedEnumRow(
     labelFor: (T) -> String,
     onSelected: (T) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         options.forEach { option ->
-            FilterChip(
-                selected = selected == option,
-                onClick = { onSelected(option) },
-                label = { Text(labelFor(option)) },
-            )
+            val isSelected = selected == option
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+                    .clickable { onSelected(option) },
+                shape = RoundedCornerShape(18.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.outlineVariant,
+                ),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        labelFor(option),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }
@@ -969,20 +1060,59 @@ fun TimePeriodDialog(
 
 @Composable
 fun EmptyCard(message: String) {
+    val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = settingsSurfaceColor(isDarkSettings)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, settingsDividerColor(isDarkSettings)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Text(
             message,
             modifier = Modifier.padding(20.dp),
             style = MaterialTheme.typography.bodyMedium,
+            color = settingsSecondaryTextColor(isDarkSettings),
         )
     }
 }
+
+@Composable
+private fun SettingsSectionLabel(
+    title: String,
+    isDarkSettings: Boolean,
+) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = settingsPrimaryTextColor(isDarkSettings),
+    )
+}
+
+private fun settingsSectionIcon(section: SettingsSection): ImageVector =
+    when (section) {
+        SettingsSection.Appearance -> Icons.Outlined.Settings
+        SettingsSection.TaskRules -> Icons.Outlined.Checklist
+        SettingsSection.Reminders -> Icons.Outlined.Notifications
+        SettingsSection.History -> Icons.Outlined.MoreHoriz
+        SettingsSection.DailyFlow -> Icons.Outlined.CalendarMonth
+    }
+
+private fun settingsPageBackground(isDarkSettings: Boolean): Color =
+    if (isDarkSettings) Color(0xFF050505) else Color(0xFFF8F9FB)
+
+private fun settingsSurfaceColor(isDarkSettings: Boolean): Color =
+    if (isDarkSettings) Color(0xFF131313) else Color.White
+
+private fun settingsPrimaryTextColor(isDarkSettings: Boolean): Color =
+    if (isDarkSettings) Color(0xFFF5F5F5) else Color(0xFF121212)
+
+private fun settingsSecondaryTextColor(isDarkSettings: Boolean): Color =
+    if (isDarkSettings) Color(0xFFB7B7B7) else Color(0xFF6B7280)
+
+private fun settingsDividerColor(isDarkSettings: Boolean): Color =
+    if (isDarkSettings) Color(0xFF242424) else Color(0xFFE5E7EB)
 
 fun recurrenceSummary(rule: RecurrenceRule): String =
     when (rule.type) {

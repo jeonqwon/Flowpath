@@ -158,6 +158,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         viewModel.seedIfNeeded()
     }
 
+    if (!state.settingsLoaded) {
+        InitialLoadingScreen()
+        return
+    }
+
     val shouldShowOnboarding = state.settingsLoaded &&
         !state.settings.hasCompletedOnboarding &&
         !onboardingDismissedThisSession
@@ -525,8 +530,20 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 showDailyFlowOnboardingPrompt = shouldShowOnboarding,
                 onSavePeriod = { draft ->
                     scope.launch {
+                        val isFirstProductiveOnboardingPeriod =
+                            shouldShowOnboarding &&
+                                draft.type == TimePeriodType.PRODUCTIVE &&
+                                state.snapshot.timePeriods.none { it.type == TimePeriodType.PRODUCTIVE }
                         viewModel.saveTimePeriod(draft)
-                        snackbarHostState.showSnackbar("Time period saved")
+                        if (isFirstProductiveOnboardingPeriod) {
+                            onboardingDismissedThisSession = true
+                            onboardingStep = null
+                            selectedTab = AppTab.Tasks
+                            viewModel.setHasCompletedOnboarding(true)
+                            snackbarHostState.showSnackbar("Productive time added. You can start adding tasks.")
+                        } else {
+                            snackbarHostState.showSnackbar("Time period saved")
+                        }
                     }
                 },
                 onDeletePeriod = { periodId ->
@@ -554,6 +571,36 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     scope.launch { viewModel.setHasCompletedOnboarding(true) }
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun InitialLoadingScreen() {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Flowpath",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    "Loading your schedule...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
