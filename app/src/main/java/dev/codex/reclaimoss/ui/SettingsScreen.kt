@@ -150,6 +150,8 @@ fun SettingsScreen(
     periods: List<TimePeriod>,
     settings: AppSettings,
     startInDailyFlow: Boolean = false,
+    startInEditFlow: Boolean = false,
+    showDailyFlowOnboardingPrompt: Boolean = false,
     onSavePeriod: (TimePeriodDraft) -> Unit,
     onDeletePeriod: (String) -> Unit,
     onThemeModeChanged: (ThemeMode) -> Unit,
@@ -164,9 +166,11 @@ fun SettingsScreen(
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
     onReminderLeadMinutesChanged: (Int) -> Unit,
     onHistoryRetentionChanged: (HistoryRetention) -> Unit,
+    onFinishDailyFlowOnboarding: () -> Unit,
 ) {
     var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
-    var editFlow by rememberSaveable { mutableStateOf(false) }
+    var editingPeriodError by remember { mutableStateOf<String?>(null) }
+    var editFlow by rememberSaveable { mutableStateOf(startInEditFlow) }
     var section by rememberSaveable { mutableStateOf<SettingsSection?>(if (startInDailyFlow) SettingsSection.DailyFlow else null) }
 
     LaunchedEffect(startInDailyFlow) {
@@ -174,14 +178,38 @@ fun SettingsScreen(
             section = SettingsSection.DailyFlow
         }
     }
+    LaunchedEffect(startInEditFlow, section) {
+        if (startInEditFlow && section == SettingsSection.DailyFlow) {
+            editFlow = true
+        }
+    }
 
     if (editingPeriod != null) {
         TimePeriodDialog(
             initial = editingPeriod!!,
-            onDismiss = { editingPeriod = null },
-            onSave = {
-                onSavePeriod(it)
+            errorMessage = editingPeriodError,
+            onDismiss = {
                 editingPeriod = null
+                editingPeriodError = null
+            },
+            onDraftChanged = { editingPeriodError = null },
+            onSave = {
+                val candidate = TimePeriod(
+                    id = it.id.ifBlank { "draft-period" },
+                    label = it.label.trim(),
+                    start = it.start,
+                    end = it.end,
+                    type = it.type,
+                    sortOrder = it.sortOrder,
+                )
+                val overlap = findOverlappingTimePeriod(candidate, periods)
+                if (overlap != null) {
+                    editingPeriodError = timePeriodOverlapMessage(candidate.label, overlap)
+                } else {
+                    onSavePeriod(it)
+                    editingPeriod = null
+                    editingPeriodError = null
+                }
             },
         )
     }
@@ -373,6 +401,12 @@ fun SettingsScreen(
                         }
 
                         SettingsSection.DailyFlow -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            if (showDailyFlowOnboardingPrompt) {
+                                DailyFlowOnboardingCard(
+                                    hasProductivePeriods = periods.any { it.type == TimePeriodType.PRODUCTIVE },
+                                    onContinue = onFinishDailyFlowOnboarding,
+                                )
+                            }
                             SettingsFullDayTimeline(
                                 periods = periods,
                                 editFlow = editFlow,
@@ -405,6 +439,48 @@ fun SettingsScreen(
                         null -> Unit
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyFlowOnboardingCard(
+    hasProductivePeriods: Boolean,
+    onContinue: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                if (hasProductivePeriods) "You are ready to start using Flowpath"
+                else "Now add your productive times",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                if (hasProductivePeriods) {
+                    "Your life periods are set. You can keep editing here, or continue to Tasks and start adding work."
+                } else {
+                    "Tap an empty gap to create a productive period. Flowpath only schedules tasks inside productive time."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onContinue,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 14.dp),
+            ) {
+                Text(if (hasProductivePeriods) "Continue to Tasks" else "Skip for now")
             }
         }
     }
@@ -783,7 +859,9 @@ fun <T> EnumDropdownRow(
 @Composable
 fun TimePeriodDialog(
     initial: TimePeriodDraft,
+    errorMessage: String?,
     onDismiss: () -> Unit,
+    onDraftChanged: () -> Unit,
     onSave: (TimePeriodDraft) -> Unit,
 ) {
     var draft by remember(initial) { mutableStateOf(initial) }
@@ -800,7 +878,10 @@ fun TimePeriodDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = draft.label,
-                    onValueChange = { draft = draft.copy(label = it) },
+                    onValueChange = {
+                        draft = draft.copy(label = it)
+                        onDraftChanged()
+                    },
                     label = { Text("Label") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
@@ -809,12 +890,18 @@ fun TimePeriodDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = draft.type == TimePeriodType.PRODUCTIVE,
-                        onClick = { draft = draft.copy(type = TimePeriodType.PRODUCTIVE) },
+                        onClick = {
+                            draft = draft.copy(type = TimePeriodType.PRODUCTIVE)
+                            onDraftChanged()
+                        },
                         label = { Text("Productive") },
                     )
                     FilterChip(
                         selected = draft.type == TimePeriodType.LIFE,
-                        onClick = { draft = draft.copy(type = TimePeriodType.LIFE) },
+                        onClick = {
+                            draft = draft.copy(type = TimePeriodType.LIFE)
+                            onDraftChanged()
+                        },
                         label = { Text("Meal / rest") },
                     )
                 }
@@ -841,6 +928,7 @@ fun TimePeriodDialog(
                                     start = minutesToLocalTime(snappedStart),
                                     end = minutesToLocalTime(snappedEnd),
                                 )
+                                onDraftChanged()
                             },
                             valueRange = minMinutes.toFloat()..maxMinutes.toFloat(),
                             steps = sliderSteps,
@@ -853,6 +941,13 @@ fun TimePeriodDialog(
                             Text(minutesToLocalTime(maxMinutes).formatAsClock(), style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                }
+                if (errorMessage != null) {
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         },
@@ -959,6 +1054,35 @@ data class FreeGap(
     val startMinutes: Int,
     val endMinutes: Int,
 )
+
+fun findOverlappingTimePeriod(
+    candidate: TimePeriod,
+    periods: List<TimePeriod>,
+): TimePeriod? {
+    val candidateRanges = periodSegments(candidate).map { segment ->
+        minutesFromStart(segment.start) to (minutesFromStart(segment.start) + segment.minutes).coerceAtMost(24 * 60)
+    }
+    return periods
+        .asSequence()
+        .filterNot { it.id == candidate.id }
+        .firstOrNull { existing ->
+            periodSegments(existing).any { segment ->
+                val existingStart = minutesFromStart(segment.start)
+                val existingEnd = (existingStart + segment.minutes).coerceAtMost(24 * 60)
+                candidateRanges.any { (candidateStart, candidateEnd) ->
+                    candidateStart < existingEnd && existingStart < candidateEnd
+                }
+            }
+        }
+}
+
+fun timePeriodOverlapMessage(
+    candidateLabel: String,
+    overlappingPeriod: TimePeriod,
+): String {
+    val subject = candidateLabel.ifBlank { "This period" }
+    return "$subject overlaps with ${overlappingPeriod.label} (${overlappingPeriod.start.formatAsClock()} - ${overlappingPeriod.end.formatAsClock()}). Choose a different time."
+}
 
 fun periodSegments(period: TimePeriod): List<PeriodSegment> {
     val startMinutes = minutesFromStart(period.start)

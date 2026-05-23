@@ -146,7 +146,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
-    var onboardingStep by rememberSaveable { mutableStateOf<Int?>(null) }
+    var onboardingStep by rememberSaveable { mutableStateOf<OnboardingStep?>(null) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -157,51 +157,55 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         viewModel.seedIfNeeded()
     }
 
-    LaunchedEffect(state.settings.hasCompletedOnboarding) {
+    LaunchedEffect(state.settings.hasCompletedOnboarding, onboardingStep) {
         if (!state.settings.hasCompletedOnboarding) {
             selectedTab = AppTab.Settings
-            if (onboardingStep == null) onboardingStep = 0
+            if (onboardingStep == null) onboardingStep = OnboardingStep.Sleep
         }
     }
 
-    if (onboardingStep != null && !state.settings.hasCompletedOnboarding) {
+    if (!state.settings.hasCompletedOnboarding && onboardingStep != null && onboardingStep != OnboardingStep.DailyFlow) {
         val step = onboardingStep!!
-        val (title, body) = when (step) {
-            0 -> "Set your day first" to "Open Daily Flow and add productive slots for when you can work. Add meal, rest, or sleep periods too. Use Edit Flow, then tap an empty gap to create a period."
-            1 -> "Then add tasks" to "After your slots are set, go to Tasks and tap Add Task. Choose a duration, deadline, and preferred period. Flowpath only schedules inside productive slots."
-            else -> "Use Planner and Reminders" to "Planner shows your scheduled day and completed history. Reminders shows what needs attention. Open a task to mark it done, reschedule it, or create a follow-up."
-        }
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text(title, fontWeight = FontWeight.Bold) },
-            text = { Text(body) },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        scope.launch { viewModel.setHasCompletedOnboarding(true) }
-                        onboardingStep = null
-                        selectedTab = AppTab.Tasks
-                    },
-                ) {
-                    Text("Skip")
+        val initialRange = existingOnboardingRange(step, state.snapshot.timePeriods)
+        OnboardingSetupScreen(
+            step = step,
+            initialRange = initialRange,
+            onNext = { range ->
+                scope.launch {
+                    val period = onboardingPeriodForStep(step, range)
+                    val overlap = findOverlappingTimePeriod(period, state.snapshot.timePeriods)
+                    if (overlap != null) {
+                        snackbarHostState.showSnackbar(timePeriodOverlapMessage(period.label, overlap))
+                    } else {
+                        viewModel.saveTimePeriod(
+                            TimePeriodDraft(
+                                id = period.id,
+                                label = period.label,
+                                start = period.start,
+                                end = period.end,
+                                boundStart = LocalTime.MIDNIGHT,
+                                boundEnd = LocalTime.MIDNIGHT,
+                                type = period.type,
+                                sortOrder = period.sortOrder,
+                            ),
+                        )
+                        onboardingStep = step.nextStep()
+                    }
                 }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (step < 2) {
-                            onboardingStep = step + 1
-                        } else {
-                            scope.launch { viewModel.setHasCompletedOnboarding(true) }
-                            onboardingStep = null
-                            selectedTab = AppTab.Tasks
-                        }
-                    },
-                ) {
-                    Text(if (step < 2) "Next" else "Start using Flowpath")
+            onSkip = if (step == OnboardingStep.Sleep) {
+                null
+            } else {
+                {
+                    scope.launch {
+                        val periodId = onboardingPeriodForStep(step, initialRange).id
+                        viewModel.deleteTimePeriod(periodId)
+                        onboardingStep = step.nextStep()
+                    }
                 }
             },
         )
+        return
     }
 
     if (showingCreate) {
@@ -511,7 +515,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 padding = padding,
                 periods = state.snapshot.timePeriods,
                 settings = state.settings,
-                startInDailyFlow = !state.settings.hasCompletedOnboarding,
+                startInDailyFlow = !state.settings.hasCompletedOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                startInEditFlow = !state.settings.hasCompletedOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                showDailyFlowOnboardingPrompt = !state.settings.hasCompletedOnboarding,
                 onSavePeriod = { draft ->
                     scope.launch {
                         viewModel.saveTimePeriod(draft)
@@ -536,6 +542,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
                 onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
                 onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
+                onFinishDailyFlowOnboarding = {
+                    scope.launch { viewModel.setHasCompletedOnboarding(true) }
+                    onboardingStep = null
+                    selectedTab = AppTab.Tasks
+                },
             )
         }
     }
