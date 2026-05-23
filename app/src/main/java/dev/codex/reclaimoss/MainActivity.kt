@@ -4,11 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.getValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.graphics.Color
+import dev.codex.reclaimoss.settings.ThemeMode
 import dev.codex.reclaimoss.ui.OpenReclaimApp
 
 private val OpenReclaimLightColors = lightColorScheme(
@@ -50,7 +53,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val app = application as OpenReclaimApplication
         setContent {
-            val colorScheme = if (isSystemInDarkTheme()) OpenReclaimDarkColors else OpenReclaimLightColors
+            val settings by app.appGraph.appSettingsRepository.settings.collectAsStateWithLifecycle(
+                initialValue = dev.codex.reclaimoss.settings.AppSettings(),
+            )
+            val useDarkTheme = when (settings.themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            val colorScheme = if (useDarkTheme) OpenReclaimDarkColors else OpenReclaimLightColors
             MaterialTheme(colorScheme = colorScheme) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     OpenReclaimApp(app.appGraph)

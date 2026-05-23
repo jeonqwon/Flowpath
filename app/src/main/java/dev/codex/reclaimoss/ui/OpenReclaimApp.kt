@@ -136,7 +136,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 if (modelClass.isAssignableFrom(PlannerViewModel::class.java)) {
                     @Suppress("UNCHECKED_CAST")
-                    return PlannerViewModel(appGraph.plannerCoordinator) as T
+                    return PlannerViewModel(appGraph.plannerCoordinator, appGraph.appSettingsRepository) as T
                 }
                 throw IllegalArgumentException("Unsupported ViewModel class: ${modelClass.name}")
             }
@@ -174,7 +174,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 padding = padding,
                 periods = state.snapshot.timePeriods,
                 initialMode = CreateMode.Task,
-                initialTaskDraft = createTaskDraftOverride,
+                initialTaskDraft = createTaskDraftOverride ?: TaskDraft(
+                    preferredTimePeriodId = state.snapshot.timePeriods.firstOrNull { it.type == TimePeriodType.PRODUCTIVE }?.id,
+                    addReminder = state.settings.defaultTaskReminder,
+                ),
                 followUpMode = followUpSourceTaskId != null,
                 onBack = {
                     showingCreate = false
@@ -392,6 +395,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             AppTab.Tasks -> TasksScreen(
                 padding = padding,
                 state = state,
+                settings = state.settings,
                 onAddTask = {
                     followUpSourceTaskId = null
                     createTaskDraftOverride = null
@@ -409,6 +413,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             AppTab.Planner -> PlannerScreen(
                 padding = padding,
                 state = state,
+                settings = state.settings,
                 onRebuild = {
                     scope.launch {
                         viewModel.rebuildSchedule()
@@ -457,6 +462,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             AppTab.Settings -> SettingsScreen(
                 padding = padding,
                 periods = state.snapshot.timePeriods,
+                settings = state.settings,
                 onSavePeriod = { draft ->
                     scope.launch {
                         viewModel.saveTimePeriod(draft)
@@ -469,6 +475,18 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         snackbarHostState.showSnackbar("Time period deleted")
                     }
                 },
+                onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
+                onWeekStartChanged = { value -> scope.launch { viewModel.setWeekStart(value) } },
+                onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
+                onAlignmentChanged = { value -> scope.launch { viewModel.setAlignmentMinutes(value) } },
+                onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
+                onMaxTaskChunkChanged = { value -> scope.launch { viewModel.setMaxTaskChunkMinutes(value) } },
+                onPreferredFallbackChanged = { value -> scope.launch { viewModel.setPreferredPeriodFallbackMode(value) } },
+                onUrgentRescheduleChanged = { value -> scope.launch { viewModel.setUrgentRescheduleMode(value) } },
+                onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
+                onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
+                onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
+                onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
             )
         }
     }

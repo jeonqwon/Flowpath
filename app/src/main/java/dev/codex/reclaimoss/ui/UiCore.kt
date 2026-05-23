@@ -114,6 +114,14 @@ import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import dev.codex.reclaimoss.settings.AppSettings
+import dev.codex.reclaimoss.settings.AppSettingsRepository
+import dev.codex.reclaimoss.settings.HistoryRetention
+import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
+import dev.codex.reclaimoss.settings.ReminderTimingMode
+import dev.codex.reclaimoss.settings.ThemeMode
+import dev.codex.reclaimoss.settings.UrgentRescheduleMode
+import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -154,6 +162,7 @@ data class PlannerUiState(
         blocks = emptyList(),
         timePeriods = emptyList(),
     ),
+    val settings: AppSettings = AppSettings(),
 )
 
 data class TaskDraft(
@@ -204,6 +213,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
 
 class PlannerViewModel(
     private val coordinator: PlannerCoordinator,
+    private val settingsRepository: AppSettingsRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(PlannerUiState())
     val uiState: StateFlow<PlannerUiState> = _uiState.asStateFlow()
@@ -211,7 +221,12 @@ class PlannerViewModel(
     init {
         viewModelScope.launch {
             coordinator.snapshot.collect { snapshot ->
-                _uiState.value = PlannerUiState(snapshot)
+                _uiState.value = _uiState.value.copy(snapshot = snapshot)
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.settings.collect { settings ->
+                _uiState.value = _uiState.value.copy(settings = settings)
             }
         }
     }
@@ -335,6 +350,19 @@ class PlannerViewModel(
     suspend fun deleteTimePeriod(periodId: String) {
         coordinator.deleteTimePeriod(periodId)
     }
+
+    suspend fun setThemeMode(value: ThemeMode) = settingsRepository.setThemeMode(value)
+    suspend fun setWeekStart(value: WeekStart) = settingsRepository.setWeekStart(value)
+    suspend fun setBreakBufferMinutes(value: Int) = settingsRepository.setBreakBufferMinutes(value)
+    suspend fun setAlignmentMinutes(value: Int) = settingsRepository.setAlignmentMinutes(value)
+    suspend fun setAllowTaskSplitting(value: Boolean) = settingsRepository.setAllowTaskSplitting(value)
+    suspend fun setMaxTaskChunkMinutes(value: Int) = settingsRepository.setMaxTaskChunkMinutes(value)
+    suspend fun setPreferredPeriodFallbackMode(value: PreferredPeriodFallbackMode) = settingsRepository.setPreferredPeriodFallbackMode(value)
+    suspend fun setUrgentRescheduleMode(value: UrgentRescheduleMode) = settingsRepository.setUrgentRescheduleMode(value)
+    suspend fun setDefaultTaskReminder(value: Boolean) = settingsRepository.setDefaultTaskReminder(value)
+    suspend fun setReminderTimingMode(value: ReminderTimingMode) = settingsRepository.setReminderTimingMode(value)
+    suspend fun setReminderLeadMinutes(value: Int) = settingsRepository.setReminderLeadMinutes(value)
+    suspend fun setHistoryRetention(value: HistoryRetention) = settingsRepository.setHistoryRetention(value)
 }
 
 private fun TaskDraft.taskDueAtInstant(): Instant =

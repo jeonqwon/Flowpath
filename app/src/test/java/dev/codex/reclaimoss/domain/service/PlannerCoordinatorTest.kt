@@ -120,6 +120,28 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `tasks do not schedule when no productive periods exist`() = runTest {
+        val repository = FakePlannerRepository(periods = mutableListOf())
+        val coordinator = coordinator(repository)
+        val dueAt = now().plusSeconds(24 * 60 * 60)
+
+        val result = coordinator.createTask(
+            title = "Needs productive time",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        assertFalse(result.scheduled)
+        assertTrue(repository.getBlocks().isEmpty())
+        assertTrue(repository.getSchedulingIssues().any { it.taskId == result.taskId })
+    }
+
+    @Test
     fun `creating task linked reminder persists both records`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)

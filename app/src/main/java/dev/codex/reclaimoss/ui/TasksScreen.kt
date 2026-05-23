@@ -115,8 +115,8 @@ import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import dev.codex.reclaimoss.settings.AppSettings
 import java.time.DayOfWeek
-import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -134,6 +134,7 @@ import kotlinx.coroutines.launch
 fun TasksScreen(
     padding: PaddingValues,
     state: PlannerUiState,
+    settings: AppSettings,
     onAddTask: () -> Unit,
     onDeleteTask: (String) -> Unit,
     onOpenTask: (String) -> Unit,
@@ -141,7 +142,6 @@ fun TasksScreen(
     val zoneId = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zoneId) }
     var selectedDate by rememberSaveable { mutableStateOf(today) }
-    var showHistory by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val blocksToday = remember(state.snapshot.blocks, selectedDate) {
@@ -152,15 +152,6 @@ fun TasksScreen(
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
     val lifePeriods = remember(state.snapshot.timePeriods) {
         state.snapshot.timePeriods.filter { it.type == TimePeriodType.LIFE }
-    }
-    val completedHistory = remember(state.snapshot.tasks) {
-        val completed = state.snapshot.tasks.filter { it.status == TaskStatus.COMPLETED }
-        val recurringLatest = completed
-            .filter { it.recurrenceSeriesId != null }
-            .groupBy { it.recurrenceSeriesId }
-            .mapNotNull { (_, items) -> items.maxByOrNull { it.updatedAt } }
-        val oneOff = completed.filter { it.recurrenceSeriesId == null }
-        (oneOff + recurringLatest).distinctBy { it.id }.sortedByDescending { it.updatedAt }
     }
     val hourHeight = 144.dp
 
@@ -224,26 +215,6 @@ fun TasksScreen(
                     onOpenTask = onOpenTask,
                     onDeleteTask = onDeleteTask,
                 )
-            }
-            if (completedHistory.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { showHistory = !showHistory },
-                        shape = RoundedCornerShape(999.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-                    ) {
-                        Text(if (showHistory) "Hide history" else "Show history")
-                    }
-                }
-                if (showHistory) {
-                    item {
-                        Text("History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    }
-                    items(completedHistory, key = { it.id }) { task ->
-                        CompletedTaskHistoryCard(task = task, zoneId = zoneId)
-                    }
-                }
             }
         }
     }

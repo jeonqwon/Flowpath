@@ -448,10 +448,10 @@ fun DateTimeSection(
 @Composable
 fun DurationSlider(
     minutes: Int,
+    minMinutes: Int = 15,
     maxMinutes: Int = 360,
     onMinutesChanged: (Int) -> Unit,
 ) {
-    val minMinutes = 15
     val stepMinutes = 15
     val effectiveMax = maxMinutes.coerceAtLeast(minMinutes)
     val snapped = snapToStep(minutes.coerceIn(minMinutes, effectiveMax), stepMinutes).coerceIn(minMinutes, effectiveMax)

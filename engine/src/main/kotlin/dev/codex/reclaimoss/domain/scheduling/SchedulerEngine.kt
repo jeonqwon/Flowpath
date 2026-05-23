@@ -261,13 +261,17 @@ class SchedulerEngine {
                 maxBlockMinutes = policy.maxBlockMinutes,
                 minBlockMinutes = policy.minBlockMinutes,
                 zoneId = zoneId,
+                alignmentMinutes = policy.alignmentMinutes,
+                allowTaskSplitting = policy.allowTaskSplitting,
             )?.let { return it }
-            if (earliestFallback == null) {
+            if (!policy.strictPreferredPeriod && earliestFallback == null) {
                 earliestFallback = fallbackSegments.firstBlock(
                     remainingMinutes = remainingMinutes,
                     maxBlockMinutes = policy.maxBlockMinutes,
                     minBlockMinutes = policy.minBlockMinutes,
                     zoneId = zoneId,
+                    alignmentMinutes = policy.alignmentMinutes,
+                    allowTaskSplitting = policy.allowTaskSplitting,
                 )
             }
 
@@ -281,33 +285,36 @@ class SchedulerEngine {
         maxBlockMinutes: Int,
         minBlockMinutes: Int,
         zoneId: ZoneId,
+        alignmentMinutes: Int,
+        allowTaskSplitting: Boolean,
     ): BusyWindow? {
         firstOrNull { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             Duration.between(alignedStart, segment.endAt).toMinutes().toInt() >= remainingMinutes
         }?.let { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             return BusyWindow(
                 startAt = alignedStart,
                 endAt = alignedStart.plus(remainingMinutes.toLong(), ChronoUnit.MINUTES),
             )
         }
+        if (!allowTaskSplitting) return null
         val preferredBlockMinutes = min(remainingMinutes, maxBlockMinutes)
         firstOrNull { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             Duration.between(alignedStart, segment.endAt).toMinutes().toInt() >= preferredBlockMinutes
         }?.let { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             return BusyWindow(
                 startAt = alignedStart,
                 endAt = alignedStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
             )
         }
         firstOrNull { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             Duration.between(alignedStart, segment.endAt).toMinutes().toInt() >= minBlockMinutes
         }?.let { segment ->
-            val alignedStart = alignToNextHalfHour(segment.startAt, zoneId)
+            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
             val partialBlockMinutes = min(
                 min(
                     Duration.between(alignedStart, segment.endAt).toMinutes().toInt(),
@@ -375,15 +382,16 @@ class SchedulerEngine {
 
     private fun maxInstant(a: Instant, b: Instant): Instant = if (a >= b) a else b
 
-    private fun alignToNextHalfHour(instant: Instant, zoneId: ZoneId): Instant {
+    private fun alignToNextAlignment(instant: Instant, zoneId: ZoneId, alignmentMinutes: Int): Instant {
         val local = instant.atZone(zoneId)
         val minute = local.minute
         val hasSubMinute = local.second != 0 || local.nano != 0
+        val effectiveAlignment = alignmentMinutes.coerceAtLeast(1)
+        val remainder = minute % effectiveAlignment
         val minutesToAdd = when {
-            minute == 0 && !hasSubMinute -> 0
-            minute == 30 && !hasSubMinute -> 0
-            minute < 30 -> 30 - minute
-            else -> 60 - minute
+            remainder == 0 && !hasSubMinute -> 0
+            remainder == 0 -> effectiveAlignment
+            else -> effectiveAlignment - remainder
         }
         return local
             .truncatedTo(ChronoUnit.MINUTES)

@@ -8,6 +8,7 @@ import dev.codex.reclaimoss.data.repository.PlannerRepository
 import dev.codex.reclaimoss.data.repository.PlannerRepositoryImpl
 import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
+import dev.codex.reclaimoss.settings.AppSettingsRepository
 
 class AppGraph(context: Context) {
     private val database = Room.databaseBuilder(
@@ -21,6 +22,7 @@ class AppGraph(context: Context) {
 
     private val calendarGateway = NoOpGoogleCalendarGateway()
     private val schedulerEngine = SchedulerEngine()
+    val appSettingsRepository = AppSettingsRepository(context)
 
     val plannerRepository: PlannerRepository = PlannerRepositoryImpl(
         projectDao = database.projectDao(),
@@ -35,5 +37,6 @@ class AppGraph(context: Context) {
         repository = plannerRepository,
         scheduler = schedulerEngine,
         calendarGateway = calendarGateway,
+        getSettings = { appSettingsRepository.current() },
     )
 }

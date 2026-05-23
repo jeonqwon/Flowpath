@@ -114,6 +114,9 @@ import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import dev.codex.reclaimoss.settings.AppSettings
+import dev.codex.reclaimoss.settings.HistoryRetention
+import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -133,6 +136,7 @@ import kotlinx.coroutines.launch
 fun PlannerScreen(
     padding: PaddingValues,
     state: PlannerUiState,
+    settings: AppSettings,
     onRebuild: () -> Unit,
     onAddTask: () -> Unit,
     onToggleLock: (ScheduleBlock) -> Unit,
@@ -155,6 +159,19 @@ fun PlannerScreen(
         state.snapshot.reminders
             .filter { it.status != ReminderStatus.COMPLETED }
             .groupBy { it.dueAt.atZone(zoneId).toLocalDate() }
+    }
+    val historyCutoff = remember(settings.historyRetention) {
+        when (settings.historyRetention) {
+            HistoryRetention.SEVEN_DAYS -> Instant.now().minusSeconds(7L * 24L * 60L * 60L)
+            HistoryRetention.THIRTY_DAYS -> Instant.now().minusSeconds(30L * 24L * 60L * 60L)
+            HistoryRetention.FOREVER -> null
+        }
+    }
+    val completedTasksByDate = remember(state.snapshot.tasks, settings.historyRetention) {
+        state.snapshot.tasks
+            .filter { it.status == TaskStatus.COMPLETED }
+            .filter { historyCutoff == null || !it.updatedAt.isBefore(historyCutoff) }
+            .groupBy { it.updatedAt.atZone(zoneId).toLocalDate() }
     }
 
     LazyColumn(
@@ -179,6 +196,7 @@ fun PlannerScreen(
             CalendarCard(
                 month = visibleMonth,
                 selectedDate = selectedDate,
+                weekStart = settings.weekStart,
                 blocksByDate = blocksByDate,
                 remindersByDate = remindersByDate,
                 tasksById = tasksById,
@@ -191,6 +209,7 @@ fun PlannerScreen(
             selectedDate = selectedDate,
             blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
             reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
+            completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
             tasksById = tasksById,
             zoneId = zoneId,
             onToggleLock = onToggleLock,
@@ -205,6 +224,7 @@ fun LazyListScope.selectedDayOverview(
     selectedDate: LocalDate,
     blocks: List<ScheduleBlock>,
     reminders: List<Reminder>,
+    completedTasks: List<ScheduleTask>,
     tasksById: Map<String, ScheduleTask>,
     zoneId: ZoneId,
     onToggleLock: (ScheduleBlock) -> Unit,
@@ -247,6 +267,19 @@ fun LazyListScope.selectedDayOverview(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     reminders.forEach { reminder ->
                         ReminderMiniCard(reminder = reminder, zoneId = zoneId)
+                    }
+                }
+            }
+        }
+    }
+    item {
+        OverviewCard(title = "History") {
+            if (completedTasks.isEmpty()) {
+                Text("No completed tasks.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    completedTasks.forEach { task ->
+                        CompletedTaskHistoryCard(task = task, zoneId = zoneId)
                     }
                 }
             }
@@ -408,6 +441,7 @@ fun CompactTaskRow(
 fun CalendarCard(
     month: YearMonth,
     selectedDate: LocalDate,
+    weekStart: WeekStart,
     blocksByDate: Map<LocalDate, List<ScheduleBlock>>,
     remindersByDate: Map<LocalDate, List<Reminder>>,
     tasksById: Map<String, ScheduleTask>,
@@ -416,10 +450,21 @@ fun CalendarCard(
     onDateSelected: (LocalDate) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
-    val daysInMonth = remember(month) {
+    val dayLabels = remember(weekStart) {
+        if (weekStart == WeekStart.MONDAY) {
+            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        } else {
+            listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        }
+    }
+    val daysInMonth = remember(month, weekStart) {
         buildList<LocalDate?> {
             val first = month.atDay(1)
-            repeat(first.dayOfWeek.value % 7) { add(null) }
+            val leadingSlots = when (weekStart) {
+                WeekStart.SUNDAY -> first.dayOfWeek.value % 7
+                WeekStart.MONDAY -> first.dayOfWeek.value - 1
+            }
+            repeat(leadingSlots) { add(null) }
             for (day in 1..month.lengthOfMonth()) {
                 add(month.atDay(day))
             }
@@ -452,7 +497,7 @@ fun CalendarCard(
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { dayName ->
+                dayLabels.forEach { dayName ->
                     Text(dayName, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
                 }
             }

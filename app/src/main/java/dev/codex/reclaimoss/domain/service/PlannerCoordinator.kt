@@ -22,6 +22,10 @@ import dev.codex.reclaimoss.domain.model.WorkHoursProfile
 import java.time.Clock
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
+import dev.codex.reclaimoss.settings.AppSettings
+import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
+import dev.codex.reclaimoss.settings.ReminderTimingMode
+import dev.codex.reclaimoss.settings.UrgentRescheduleMode
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -43,28 +47,17 @@ class PlannerCoordinator(
     private val repository: PlannerRepository,
     private val scheduler: SchedulerEngine,
     private val calendarGateway: GoogleCalendarGateway,
+    private val getSettings: suspend () -> AppSettings = { AppSettings() },
     private val clock: Clock = Clock.systemDefaultZone(),
 ) {
     val snapshot = repository.observeSnapshot()
     private val recurrenceMaterializationDays = 180
 
-    private val defaultPolicy = SchedulingPolicy(
-        minBlockMinutes = 30,
-        maxBlockMinutes = 120,
-        breakBetweenBlocksMinutes = 15,
-        priorityWeight = 1.5,
-        deadlineUrgencyWeight = 2.0,
-        lookAheadDays = 14,
-    )
-
-    private val defaultWorkHours = WorkHoursProfile(
+    private val emptyWorkHours = WorkHoursProfile(
         timezone = clock.zone.id,
         days = DayOfWeek.entries.associateWith {
             WorkHoursDay(
-                windows = listOf(
-                    TimeWindow(LocalTime.of(9, 0), LocalTime.of(12, 0)),
-                    TimeWindow(LocalTime.of(13, 0), LocalTime.of(17, 0)),
-                ),
+                windows = emptyList(),
             )
         },
     )
@@ -246,10 +239,11 @@ class PlannerCoordinator(
             dueAt = effectiveRescheduleDueAt(task, dueAt),
             updatedAt = now(),
         )
+        val settings = getSettings()
         return performReschedule(
             originalTask = task,
             updatedTask = updatedTask,
-            allowMovingOtherTasks = true,
+            allowMovingOtherTasks = settings.urgentRescheduleMode == UrgentRescheduleMode.MOVE_OTHER_FLEXIBLE_IF_NEEDED,
         )
     }
 
@@ -284,7 +278,8 @@ class PlannerCoordinator(
         val existingBlocks = repository.getBlocks()
         val timePeriods = repository.getTimePeriods()
         val rangeStart = now()
-        val rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * defaultPolicy.lookAheadDays)
+        val policy = schedulingPolicy(getSettings())
+        val rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays)
         val busyEvents = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) + lifePeriodBusyWindows(
             timePeriods = timePeriods,
             rangeStart = rangeStart,
@@ -296,7 +291,7 @@ class PlannerCoordinator(
             busyWindows = busyEvents,
             workHours = workHoursFromProductivePeriods(timePeriods),
             timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
-            policy = defaultPolicy,
+            policy = policy,
             rangeStart = rangeStart,
             reason = reason,
         )
@@ -469,24 +464,27 @@ class PlannerCoordinator(
         rangeStart: Instant,
         extraBusyWindows: List<SchedulerEngine.BusyWindow>,
         preserveExistingPendingBlocks: Boolean,
-    ) = scheduler.rebuildSchedule(
-        tasks = tasks,
-        existingBlocks = existingBlocks,
-        busyWindows = calendarGateway.syncBusyEvents(
-            rangeStart,
-            rangeStart.plusSeconds(60L * 60L * 24L * defaultPolicy.lookAheadDays),
-        ) + lifePeriodBusyWindows(
-            timePeriods = timePeriods,
+    ): dev.codex.reclaimoss.domain.model.SchedulePlan {
+        val policy = schedulingPolicy(getSettings())
+        return scheduler.rebuildSchedule(
+            tasks = tasks,
+            existingBlocks = existingBlocks,
+            busyWindows = calendarGateway.syncBusyEvents(
+                rangeStart,
+                rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays),
+            ) + lifePeriodBusyWindows(
+                timePeriods = timePeriods,
+                rangeStart = rangeStart,
+                rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays),
+            ) + extraBusyWindows,
+            workHours = workHoursFromProductivePeriods(timePeriods),
+            timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
+            policy = policy,
             rangeStart = rangeStart,
-            rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * defaultPolicy.lookAheadDays),
-        ) + extraBusyWindows,
-        workHours = workHoursFromProductivePeriods(timePeriods),
-        timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
-        policy = defaultPolicy,
-        rangeStart = rangeStart,
-        reason = ScheduleRebuildReason.ManualRebuild,
-        preserveExistingPendingBlocks = preserveExistingPendingBlocks,
-    )
+            reason = ScheduleRebuildReason.ManualRebuild,
+            preserveExistingPendingBlocks = preserveExistingPendingBlocks,
+        )
+    }
 
     private suspend fun applyPlanForTasks(
         plan: dev.codex.reclaimoss.domain.model.SchedulePlan,
@@ -610,7 +608,7 @@ class PlannerCoordinator(
             .filter { it.type == TimePeriodType.PRODUCTIVE }
             .map { TimeWindow(it.start, it.end) }
             .sortedBy { it.start }
-        if (productiveWindows.isEmpty()) return defaultWorkHours
+        if (productiveWindows.isEmpty()) return emptyWorkHours
 
         return WorkHoursProfile(
             timezone = zoneId().id,
@@ -692,11 +690,28 @@ class PlannerCoordinator(
         return candidate.toInstant()
     }
 
-    private suspend fun reminderDueAtForTask(taskId: String, fallbackDueAt: Instant): Instant =
-        repository.getBlocks()
-            .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
-            .maxOfOrNull { it.endAt }
-            ?: fallbackDueAt
+    private suspend fun reminderDueAtForTask(taskId: String, fallbackDueAt: Instant): Instant {
+        val settings = getSettings()
+        return when (settings.reminderTimingMode) {
+            ReminderTimingMode.AT_DUE_DATE -> fallbackDueAt
+            ReminderTimingMode.AT_TASK_TIME -> repository.getBlocks()
+                .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
+                .maxOfOrNull { it.endAt }
+                ?: fallbackDueAt
+        }
+    }
+
+    private fun schedulingPolicy(settings: AppSettings) = SchedulingPolicy(
+        minBlockMinutes = 30,
+        maxBlockMinutes = settings.maxTaskChunkMinutes,
+        breakBetweenBlocksMinutes = settings.breakBufferMinutes,
+        priorityWeight = 1.5,
+        deadlineUrgencyWeight = 2.0,
+        lookAheadDays = 14,
+        alignmentMinutes = settings.alignmentMinutes,
+        allowTaskSplitting = settings.allowTaskSplitting,
+        strictPreferredPeriod = settings.preferredPeriodFallbackMode == PreferredPeriodFallbackMode.STRICT,
+    )
 
     private fun newId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
 

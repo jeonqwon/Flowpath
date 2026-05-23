@@ -114,6 +114,13 @@ import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import dev.codex.reclaimoss.settings.AppSettings
+import dev.codex.reclaimoss.settings.HistoryRetention
+import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
+import dev.codex.reclaimoss.settings.ReminderTimingMode
+import dev.codex.reclaimoss.settings.ThemeMode
+import dev.codex.reclaimoss.settings.UrgentRescheduleMode
+import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -129,15 +136,37 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+private enum class SettingsSection(val title: String) {
+    Appearance("Appearance"),
+    TaskRules("Task Rules"),
+    Reminders("Reminders"),
+    History("History"),
+    DailyFlow("Daily Flow"),
+}
+
 @Composable
 fun SettingsScreen(
     padding: PaddingValues,
     periods: List<TimePeriod>,
+    settings: AppSettings,
     onSavePeriod: (TimePeriodDraft) -> Unit,
     onDeletePeriod: (String) -> Unit,
+    onThemeModeChanged: (ThemeMode) -> Unit,
+    onWeekStartChanged: (WeekStart) -> Unit,
+    onBreakBufferChanged: (Int) -> Unit,
+    onAlignmentChanged: (Int) -> Unit,
+    onAllowTaskSplittingChanged: (Boolean) -> Unit,
+    onMaxTaskChunkChanged: (Int) -> Unit,
+    onPreferredFallbackChanged: (PreferredPeriodFallbackMode) -> Unit,
+    onUrgentRescheduleChanged: (UrgentRescheduleMode) -> Unit,
+    onDefaultTaskReminderChanged: (Boolean) -> Unit,
+    onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
+    onReminderLeadMinutesChanged: (Int) -> Unit,
+    onHistoryRetentionChanged: (HistoryRetention) -> Unit,
 ) {
     var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
     var editFlow by rememberSaveable { mutableStateOf(false) }
+    var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
 
     if (editingPeriod != null) {
         TimePeriodDialog(
@@ -157,56 +186,217 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            }
-            HeaderActionButton(
-                label = if (editFlow) "Done" else "Edit Flow",
-                onClick = {
-                    editFlow = !editFlow
-                },
-                width = 156.dp,
-            )
-        }
-        LazyColumn(
-            contentPadding = PaddingValues(bottom = 120.dp),
-        ) {
-            if (periods.isEmpty()) {
-                item { EmptyCard("No time periods yet.") }
-            } else {
+        if (section == null) {
+            Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 120.dp),
+            ) {
                 item {
-                    SettingsFullDayTimeline(
-                        periods = periods,
-                        editFlow = editFlow,
-                        onEditPeriod = { period ->
-                            val bounds = editableBoundsForPeriod(period, periods)
-                            editingPeriod = TimePeriodDraft(
-                                id = period.id,
-                                label = period.label,
-                                start = period.start,
-                                end = period.end,
-                                boundStart = minutesToLocalTime(bounds.startMinutes),
-                                boundEnd = minutesToLocalTime(bounds.endMinutes),
-                                type = period.type,
-                                sortOrder = period.sortOrder,
+                    SettingsGroupSurface {
+                        SettingsSection.entries.forEachIndexed { index, item ->
+                            SettingsNavigationRow(
+                                title = item.title,
+                                subtitle = when (item) {
+                                    SettingsSection.Appearance -> "Theme and display"
+                                    SettingsSection.TaskRules -> "Scheduling behavior"
+                                    SettingsSection.Reminders -> "Task reminder defaults"
+                                    SettingsSection.History -> "Completed task retention"
+                                    SettingsSection.DailyFlow -> "Work, meal, and rest periods"
+                                },
+                                onClick = { section = item },
                             )
-                        },
-                        onSelectFreeGap = { gap ->
-                            editingPeriod = TimePeriodDraft(
-                                sortOrder = periods.size,
-                                start = minutesToLocalTime(gap.startMinutes),
-                                end = minutesToLocalTime(gap.endMinutes),
-                                boundStart = minutesToLocalTime(gap.startMinutes),
-                                boundEnd = minutesToLocalTime(gap.endMinutes),
-                            )
-                        },
-                        onDeletePeriod = onDeletePeriod,
+                            if (index != SettingsSection.entries.lastIndex) {
+                                SettingsDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IconButton(onClick = { section = null }) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Text(section!!.title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                }
+                if (section == SettingsSection.DailyFlow) {
+                    HeaderActionButton(
+                        label = if (editFlow) "Done" else "Edit Flow",
+                        onClick = { editFlow = !editFlow },
+                        width = 156.dp,
                     )
+                }
+            }
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 120.dp),
+            ) {
+                item {
+                    when (section) {
+                        SettingsSection.Appearance -> SettingsGroupSurface {
+                            SettingsControlRow(
+                                title = "Theme",
+                                subtitle = when (settings.themeMode) {
+                                    ThemeMode.SYSTEM -> "Follow device theme"
+                                    ThemeMode.LIGHT -> "Always use light mode"
+                                    ThemeMode.DARK -> "Always use dark mode"
+                                },
+                            ) {
+                                SegmentedEnumRow(
+                                    options = ThemeMode.entries,
+                                    selected = settings.themeMode,
+                                    labelFor = {
+                                        when (it) {
+                                            ThemeMode.SYSTEM -> "System"
+                                            ThemeMode.LIGHT -> "Light"
+                                            ThemeMode.DARK -> "Dark"
+                                        }
+                                    },
+                                    onSelected = onThemeModeChanged,
+                                )
+                            }
+                        }
+
+                        SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SettingsGroupSurface {
+                                SettingsControlRow(
+                                    title = "Break buffer",
+                                    subtitle = "Gap after each work task",
+                                ) {
+                                    DurationSlider(
+                                        minutes = settings.breakBufferMinutes,
+                                        minMinutes = 0,
+                                        maxMinutes = 60,
+                                        onMinutesChanged = onBreakBufferChanged,
+                                    )
+                                }
+                                SettingsDivider()
+                                SettingsControlRow(
+                                    title = "Task alignment",
+                                    subtitle = "Snap task starts to fixed intervals",
+                                ) {
+                                    SegmentedEnumRow(
+                                        options = listOf(15, 30, 60),
+                                        selected = settings.alignmentMinutes,
+                                        labelFor = {
+                                            when (it) {
+                                                15 -> "15 min"
+                                                30 -> "30 min"
+                                                else -> "60 min"
+                                            }
+                                        },
+                                        onSelected = onAlignmentChanged,
+                                    )
+                                }
+                                SettingsDivider()
+                                SettingsInlineSwitchRow(
+                                    title = "Allow task splitting",
+                                    subtitle = "Break long tasks across open slots",
+                                    checked = settings.allowTaskSplitting,
+                                    onCheckedChange = onAllowTaskSplittingChanged,
+                                )
+                                SettingsDivider()
+                                SettingsControlRow(
+                                    title = "Max task chunk",
+                                    subtitle = "Longest block before a task can split",
+                                ) {
+                                    DurationSlider(
+                                        minutes = settings.maxTaskChunkMinutes,
+                                        maxMinutes = 360,
+                                        onMinutesChanged = onMaxTaskChunkChanged,
+                                    )
+                                }
+                            }
+                        }
+
+                        SettingsSection.Reminders -> SettingsGroupSurface {
+                            SettingsInlineSwitchRow(
+                                title = "Default reminder for tasks",
+                                subtitle = if (settings.defaultTaskReminder) "New tasks also create reminders" else "New tasks stay reminder-free",
+                                checked = settings.defaultTaskReminder,
+                                onCheckedChange = onDefaultTaskReminderChanged,
+                            )
+                            SettingsDivider()
+                            SettingsControlRow(
+                                title = "Reminder timing for tasks",
+                                subtitle = "Choose when linked reminders should appear",
+                            ) {
+                                SegmentedEnumRow(
+                                    options = ReminderTimingMode.entries,
+                                    selected = settings.reminderTimingMode,
+                                    labelFor = {
+                                        when (it) {
+                                            ReminderTimingMode.AT_DUE_DATE -> "At due date"
+                                            ReminderTimingMode.AT_TASK_TIME -> "At task time"
+                                        }
+                                    },
+                                    onSelected = onReminderTimingModeChanged,
+                                )
+                            }
+                        }
+
+                        SettingsSection.History -> SettingsGroupSurface {
+                            SettingsControlRow(
+                                title = "Keep completed tasks",
+                                subtitle = "How long completed work stays visible",
+                            ) {
+                                EnumDropdownRow(
+                                    title = "Retention",
+                                    selected = settings.historyRetention,
+                                    options = HistoryRetention.entries,
+                                    labelFor = {
+                                        when (it) {
+                                            HistoryRetention.SEVEN_DAYS -> "7 days"
+                                            HistoryRetention.THIRTY_DAYS -> "30 days"
+                                            HistoryRetention.FOREVER -> "Forever"
+                                        }
+                                    },
+                                    onSelected = onHistoryRetentionChanged,
+                                )
+                            }
+                        }
+
+                        SettingsSection.DailyFlow -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SettingsFullDayTimeline(
+                                periods = periods,
+                                editFlow = editFlow,
+                                onEditPeriod = { period ->
+                                    val bounds = editableBoundsForPeriod(period, periods)
+                                    editingPeriod = TimePeriodDraft(
+                                        id = period.id,
+                                        label = period.label,
+                                        start = period.start,
+                                        end = period.end,
+                                        boundStart = minutesToLocalTime(bounds.startMinutes),
+                                        boundEnd = minutesToLocalTime(bounds.endMinutes),
+                                        type = period.type,
+                                        sortOrder = period.sortOrder,
+                                    )
+                                },
+                                onSelectFreeGap = { gap ->
+                                    editingPeriod = TimePeriodDraft(
+                                        sortOrder = periods.size,
+                                        start = minutesToLocalTime(gap.startMinutes),
+                                        end = minutesToLocalTime(gap.endMinutes),
+                                        boundStart = minutesToLocalTime(gap.startMinutes),
+                                        boundEnd = minutesToLocalTime(gap.endMinutes),
+                                    )
+                                },
+                                onDeletePeriod = onDeletePeriod,
+                            )
+                        }
+
+                        null -> Unit
+                    }
                 }
             }
         }
@@ -380,12 +570,204 @@ fun SettingsFreeGapBlock(
             MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
         ),
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            contentAlignment = Alignment.TopStart,
+        ) {
             Text(
                 "+ Select Time Slot",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsOptionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            content()
+        }
+    }
+}
+
+@Composable
+fun SettingsGroupSurface(
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(content = content)
+    }
+}
+
+@Composable
+fun SettingsNavigationRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(Icons.Outlined.ChevronRight, contentDescription = title, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun SettingsControlRow(
+    title: String,
+    subtitle: String,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        content()
+    }
+}
+
+@Composable
+fun SettingsInlineSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+fun SettingsDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+    )
+}
+
+@Composable
+fun <T> SegmentedEnumRow(
+    options: List<T>,
+    selected: T,
+    labelFor: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { option ->
+            FilterChip(
+                selected = selected == option,
+                onClick = { onSelected(option) },
+                label = { Text(labelFor(option)) },
+            )
+        }
+    }
+}
+
+@Composable
+fun <T> EnumDropdownRow(
+    title: String,
+    selected: T,
+    options: List<T>,
+    labelFor: (T) -> String,
+    onSelected: (T) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    TaskSectionTitle(title)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = true },
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Box(Modifier.padding(horizontal = 18.dp, vertical = 18.dp)) {
+            Text(
+                labelFor(selected),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        options.forEach { option ->
+            DropdownMenuItem(
+                text = { Text(labelFor(option)) },
+                onClick = {
+                    onSelected(option)
+                    expanded = false
+                },
             )
         }
     }

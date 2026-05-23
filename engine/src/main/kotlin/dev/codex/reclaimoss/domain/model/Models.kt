@@ -93,6 +93,9 @@ data class SchedulingPolicy(
     val priorityWeight: Double,
     val deadlineUrgencyWeight: Double,
     val lookAheadDays: Int,
+    val alignmentMinutes: Int = 30,
+    val allowTaskSplitting: Boolean = true,
+    val strictPreferredPeriod: Boolean = false,
 )
 
 data class Project(

@@ -1,4 +1,4 @@
-# OpenReclaim
+# Flowpath
 
 Plan tasks into your day with local-first scheduling, reminders, and recurring routines.
 
