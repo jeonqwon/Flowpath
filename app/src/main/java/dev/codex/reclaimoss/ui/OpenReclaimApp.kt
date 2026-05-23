@@ -147,6 +147,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
     var onboardingStep by rememberSaveable { mutableStateOf<OnboardingStep?>(null) }
+    var onboardingDismissedThisSession by rememberSaveable { mutableStateOf(false) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -157,14 +158,18 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         viewModel.seedIfNeeded()
     }
 
-    LaunchedEffect(state.settings.hasCompletedOnboarding, onboardingStep) {
-        if (!state.settings.hasCompletedOnboarding) {
+    val shouldShowOnboarding = state.settingsLoaded &&
+        !state.settings.hasCompletedOnboarding &&
+        !onboardingDismissedThisSession
+
+    LaunchedEffect(shouldShowOnboarding, onboardingStep) {
+        if (shouldShowOnboarding) {
             selectedTab = AppTab.Settings
             if (onboardingStep == null) onboardingStep = OnboardingStep.Sleep
         }
     }
 
-    if (!state.settings.hasCompletedOnboarding && onboardingStep != null && onboardingStep != OnboardingStep.DailyFlow) {
+    if (shouldShowOnboarding && onboardingStep != null && onboardingStep != OnboardingStep.DailyFlow) {
         val step = onboardingStep!!
         val initialRange = existingOnboardingRange(step, state.snapshot.timePeriods)
         OnboardingSetupScreen(
@@ -515,9 +520,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 padding = padding,
                 periods = state.snapshot.timePeriods,
                 settings = state.settings,
-                startInDailyFlow = !state.settings.hasCompletedOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                startInEditFlow = !state.settings.hasCompletedOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                showDailyFlowOnboardingPrompt = !state.settings.hasCompletedOnboarding,
+                startInDailyFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                startInEditFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                showDailyFlowOnboardingPrompt = shouldShowOnboarding,
                 onSavePeriod = { draft ->
                     scope.launch {
                         viewModel.saveTimePeriod(draft)
@@ -543,9 +548,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
                 onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
                 onFinishDailyFlowOnboarding = {
-                    scope.launch { viewModel.setHasCompletedOnboarding(true) }
+                    onboardingDismissedThisSession = true
                     onboardingStep = null
                     selectedTab = AppTab.Tasks
+                    scope.launch { viewModel.setHasCompletedOnboarding(true) }
                 },
             )
         }

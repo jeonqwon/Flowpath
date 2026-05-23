@@ -163,6 +163,7 @@ data class PlannerUiState(
         timePeriods = emptyList(),
     ),
     val settings: AppSettings = AppSettings(),
+    val settingsLoaded: Boolean = false,
 )
 
 data class TaskDraft(
@@ -226,7 +227,7 @@ class PlannerViewModel(
         }
         viewModelScope.launch {
             settingsRepository.settings.collect { settings ->
-                _uiState.value = _uiState.value.copy(settings = settings)
+                _uiState.value = _uiState.value.copy(settings = settings, settingsLoaded = true)
             }
         }
     }
