@@ -2,6 +2,7 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -79,6 +82,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,6 +128,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -154,6 +159,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var followUpSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
     var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var tasksSelectedDateEpochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
+    var tasksScrollOffset by rememberSaveable { mutableStateOf(0) }
+    var tasksAutoPositionNonce by rememberSaveable { mutableStateOf(1) }
+    val pagerState = rememberPagerState(initialPage = selectedTab.ordinal, pageCount = { AppTab.entries.size })
 
     LaunchedEffect(Unit) {
         viewModel.seedIfNeeded()
@@ -173,6 +182,29 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             selectedTab = AppTab.Settings
             if (onboardingStep == null) onboardingStep = OnboardingStep.Sleep
         }
+    }
+    LaunchedEffect(selectedTab) {
+        if (pagerState.currentPage != selectedTab.ordinal) {
+            pagerState.animateScrollToPage(selectedTab.ordinal)
+        }
+    }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collectLatest { page ->
+            val tab = AppTab.entries[page]
+            if (selectedTab != tab) selectedTab = tab
+        }
+    }
+
+    BackHandler(enabled = showingCreate) {
+        showingCreate = false
+        followUpSourceTaskId = null
+        createTaskDraftOverride = null
+    }
+    BackHandler(enabled = selectedReminderId != null) {
+        selectedReminderId = null
+    }
+    BackHandler(enabled = selectedTaskId != null) {
+        selectedTaskId = null
     }
 
     if (shouldShowOnboarding && onboardingStep != null && onboardingStep != OnboardingStep.DailyFlow) {
@@ -459,124 +491,141 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        when (selectedTab) {
-            AppTab.Tasks -> TasksScreen(
-                padding = padding,
-                state = state,
-                settings = state.settings,
-                onAddTask = {
-                    followUpSourceTaskId = null
-                    createTaskDraftOverride = null
-                    showingCreate = true
-                },
-                onDeleteTask = { taskId ->
-                    scope.launch {
-                        viewModel.deleteTask(taskId)
-                        snackbarHostState.showSnackbar("Task deleted")
-                    }
-                },
-                onOpenTask = { selectedTaskId = it },
-            )
-
-            AppTab.Planner -> PlannerScreen(
-                padding = padding,
-                state = state,
-                settings = state.settings,
-                onRebuild = {
-                    scope.launch {
-                        viewModel.rebuildSchedule()
-                        snackbarHostState.showSnackbar("Schedule rebuilt")
-                    }
-                },
-                onToggleLock = { block ->
-                    scope.launch { viewModel.toggleLock(block) }
-                },
-                onMarkDone = { block ->
-                    scope.launch {
-                        viewModel.completeBlock(block, state.snapshot.tasks)
-                        snackbarHostState.showSnackbar("Task updated")
-                    }
-                },
-                onReschedule = { taskId ->
-                    scope.launch { viewModel.rescheduleMissed(taskId) }
-                },
-                onAddTask = {
-                    followUpSourceTaskId = null
-                    createTaskDraftOverride = null
-                    showingCreate = true
-                },
-                onOpenTask = { selectedTaskId = it },
-            )
-
-            AppTab.Reminders -> RemindersScreen(
-                padding = padding,
-                reminders = state.snapshot.reminders,
-                tasksById = state.snapshot.tasks.associateBy { it.id },
-                onAddTask = {
-                    followUpSourceTaskId = null
-                    createTaskDraftOverride = null
-                    showingCreate = true
-                },
-                onOpenReminder = { reminder ->
-                    val linkedTaskId = reminder.linkedTaskId
-                    if (linkedTaskId != null && state.snapshot.tasks.any { it.id == linkedTaskId }) {
-                        selectedTaskId = linkedTaskId
-                    } else {
-                        selectedReminderId = reminder.id
-                    }
-                },
-            )
-
-            AppTab.Settings -> SettingsScreen(
-                padding = padding,
-                periods = state.snapshot.timePeriods,
-                settings = state.settings,
-                startInDailyFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                startInEditFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                showDailyFlowOnboardingPrompt = shouldShowOnboarding,
-                onSavePeriod = { draft ->
-                    scope.launch {
-                        val isFirstProductiveOnboardingPeriod =
-                            shouldShowOnboarding &&
-                                draft.type == TimePeriodType.PRODUCTIVE &&
-                                state.snapshot.timePeriods.none { it.type == TimePeriodType.PRODUCTIVE }
-                        viewModel.saveTimePeriod(draft)
-                        if (isFirstProductiveOnboardingPeriod) {
-                            onboardingDismissedThisSession = true
-                            onboardingStep = null
-                            selectedTab = AppTab.Tasks
-                            viewModel.setHasCompletedOnboarding(true)
-                            snackbarHostState.showSnackbar("Productive time added. You can start adding tasks.")
-                        } else {
-                            snackbarHostState.showSnackbar("Time period saved")
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = !shouldShowOnboarding,
+        ) { page ->
+            when (AppTab.entries[page]) {
+                AppTab.Tasks -> TasksScreen(
+                    padding = padding,
+                    state = state,
+                    settings = state.settings,
+                    selectedDate = LocalDate.ofEpochDay(tasksSelectedDateEpochDay),
+                    savedScrollOffset = tasksScrollOffset,
+                    autoPositionNonce = tasksAutoPositionNonce,
+                    onSelectedDateChange = { newDate ->
+                        tasksSelectedDateEpochDay = newDate.toEpochDay()
+                        tasksScrollOffset = 0
+                        tasksAutoPositionNonce += 1
+                    },
+                    onScrollOffsetChange = { tasksScrollOffset = it },
+                    onAddTask = {
+                        followUpSourceTaskId = null
+                        createTaskDraftOverride = null
+                        showingCreate = true
+                    },
+                    onDeleteTask = { taskId ->
+                        scope.launch {
+                            viewModel.deleteTask(taskId)
+                            snackbarHostState.showSnackbar("Task deleted")
                         }
-                    }
-                },
-                onDeletePeriod = { periodId ->
-                    scope.launch {
-                        viewModel.deleteTimePeriod(periodId)
-                        snackbarHostState.showSnackbar("Time period deleted")
-                    }
-                },
-                onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
-                onWeekStartChanged = { value -> scope.launch { viewModel.setWeekStart(value) } },
-                onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
-                onAlignmentChanged = { value -> scope.launch { viewModel.setAlignmentMinutes(value) } },
-                onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
-                onMaxTaskChunkChanged = { value -> scope.launch { viewModel.setMaxTaskChunkMinutes(value) } },
-                onPreferredFallbackChanged = { value -> scope.launch { viewModel.setPreferredPeriodFallbackMode(value) } },
-                onUrgentRescheduleChanged = { value -> scope.launch { viewModel.setUrgentRescheduleMode(value) } },
-                onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
-                onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
-                onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
-                onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
-                onFinishDailyFlowOnboarding = {
-                    onboardingDismissedThisSession = true
-                    onboardingStep = null
-                    selectedTab = AppTab.Tasks
-                    scope.launch { viewModel.setHasCompletedOnboarding(true) }
-                },
-            )
+                    },
+                    onOpenTask = { selectedTaskId = it },
+                )
+
+                AppTab.Planner -> PlannerScreen(
+                    padding = padding,
+                    state = state,
+                    settings = state.settings,
+                    onRebuild = {
+                        scope.launch {
+                            viewModel.rebuildSchedule()
+                            snackbarHostState.showSnackbar("Schedule rebuilt")
+                        }
+                    },
+                    onToggleLock = { block ->
+                        scope.launch { viewModel.toggleLock(block) }
+                    },
+                    onMarkDone = { block ->
+                        scope.launch {
+                            viewModel.completeBlock(block, state.snapshot.tasks)
+                            snackbarHostState.showSnackbar("Task updated")
+                        }
+                    },
+                    onReschedule = { taskId ->
+                        scope.launch { viewModel.rescheduleMissed(taskId) }
+                    },
+                    onAddTask = {
+                        followUpSourceTaskId = null
+                        createTaskDraftOverride = null
+                        showingCreate = true
+                    },
+                    onOpenTask = { selectedTaskId = it },
+                )
+
+                AppTab.Reminders -> RemindersScreen(
+                    padding = padding,
+                    reminders = state.snapshot.reminders,
+                    tasksById = state.snapshot.tasks.associateBy { it.id },
+                    settings = state.settings,
+                    onAddTask = {
+                        followUpSourceTaskId = null
+                        createTaskDraftOverride = null
+                        showingCreate = true
+                    },
+                    onOpenReminder = { reminder ->
+                        val linkedTaskId = reminder.linkedTaskId
+                        if (linkedTaskId != null && state.snapshot.tasks.any { it.id == linkedTaskId }) {
+                            selectedTaskId = linkedTaskId
+                        } else {
+                            selectedReminderId = reminder.id
+                        }
+                    },
+                )
+
+                AppTab.Settings -> SettingsScreen(
+                    padding = padding,
+                    periods = state.snapshot.timePeriods,
+                    settings = state.settings,
+                    startInDailyFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                    startInEditFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
+                    showDailyFlowOnboardingPrompt = shouldShowOnboarding,
+                    onSavePeriod = { draft ->
+                        scope.launch {
+                            val isFirstProductiveOnboardingPeriod =
+                                shouldShowOnboarding &&
+                                    draft.type == TimePeriodType.PRODUCTIVE &&
+                                    state.snapshot.timePeriods.none { it.type == TimePeriodType.PRODUCTIVE }
+                            viewModel.saveTimePeriod(draft)
+                            if (isFirstProductiveOnboardingPeriod) {
+                                onboardingDismissedThisSession = true
+                                onboardingStep = null
+                                selectedTab = AppTab.Tasks
+                                viewModel.setHasCompletedOnboarding(true)
+                                snackbarHostState.showSnackbar("Productive time added. You can start adding tasks.")
+                            } else {
+                                snackbarHostState.showSnackbar("Time period saved")
+                            }
+                        }
+                    },
+                    onDeletePeriod = { periodId ->
+                        scope.launch {
+                            viewModel.deleteTimePeriod(periodId)
+                            snackbarHostState.showSnackbar("Time period deleted")
+                        }
+                    },
+                    onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
+                    onDateFormatPreferenceChanged = { value -> scope.launch { viewModel.setDateFormatPreference(value) } },
+                    onWeekStartChanged = { value -> scope.launch { viewModel.setWeekStart(value) } },
+                    onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
+                    onAlignmentChanged = { value -> scope.launch { viewModel.setAlignmentMinutes(value) } },
+                    onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
+                    onMaxTaskChunkChanged = { value -> scope.launch { viewModel.setMaxTaskChunkMinutes(value) } },
+                    onPreferredFallbackChanged = { value -> scope.launch { viewModel.setPreferredPeriodFallbackMode(value) } },
+                    onUrgentRescheduleChanged = { value -> scope.launch { viewModel.setUrgentRescheduleMode(value) } },
+                    onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
+                    onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
+                    onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
+                    onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
+                    onFinishDailyFlowOnboarding = {
+                        onboardingDismissedThisSession = true
+                        onboardingStep = null
+                        selectedTab = AppTab.Tasks
+                        scope.launch { viewModel.setHasCompletedOnboarding(true) }
+                    },
+                )
+            }
         }
     }
 }

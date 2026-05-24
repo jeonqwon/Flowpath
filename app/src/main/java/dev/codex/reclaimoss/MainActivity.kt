@@ -1,16 +1,22 @@
 package dev.codex.reclaimoss
 
 import android.os.Bundle
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.Color
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import dev.codex.reclaimoss.settings.ThemeMode
 import dev.codex.reclaimoss.ui.OpenReclaimApp
 
@@ -32,20 +38,20 @@ private val OpenReclaimLightColors = lightColorScheme(
 )
 
 private val OpenReclaimDarkColors = darkColorScheme(
-    primary = Color(0xFFAAC0FF),
-    onPrimary = Color(0xFF102457),
-    primaryContainer = Color(0xFF27418A),
-    onPrimaryContainer = Color(0xFFE2E9FF),
-    secondary = Color(0xFFA5C8BC),
-    secondaryContainer = Color(0xFF29453D),
-    onSecondaryContainer = Color(0xFFE4F6EF),
-    background = Color(0xFF0F1722),
-    surface = Color(0xFF151E2A),
-    surfaceVariant = Color(0xFF1D2836),
-    outline = Color(0xFF445365),
-    outlineVariant = Color(0xFF2D3847),
-    onSurface = Color(0xFFF2F5FA),
-    onSurfaceVariant = Color(0xFFAEBBCA),
+    primary = Color(0xFFB8C7FF),
+    onPrimary = Color(0xFF132762),
+    primaryContainer = Color(0xFF2A448F),
+    onPrimaryContainer = Color(0xFFE3E9FF),
+    secondary = Color(0xFFA6CCBE),
+    secondaryContainer = Color(0xFF334C44),
+    onSecondaryContainer = Color(0xFFE5F4EE),
+    background = Color(0xFF1A1C1E),
+    surface = Color(0xFF1E2024),
+    surfaceVariant = Color(0xFF292D33),
+    outline = Color(0xFF8E9199),
+    outlineVariant = Color(0xFF43474E),
+    onSurface = Color(0xFFE2E2E6),
+    onSurfaceVariant = Color(0xFFC3C6CF),
 )
 
 class MainActivity : ComponentActivity() {
@@ -62,6 +68,20 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.DARK -> true
             }
             val colorScheme = if (useDarkTheme) OpenReclaimDarkColors else OpenReclaimLightColors
+            val view = LocalView.current
+            SideEffect {
+                window.statusBarColor = colorScheme.background.toArgb()
+                window.navigationBarColor = colorScheme.surface.toArgb()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    window.isNavigationBarContrastEnforced = false
+                    window.isStatusBarContrastEnforced = false
+                }
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                WindowInsetsControllerCompat(window, view).apply {
+                    isAppearanceLightStatusBars = !useDarkTheme
+                    isAppearanceLightNavigationBars = !useDarkTheme
+                }
+            }
             MaterialTheme(colorScheme = colorScheme) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     OpenReclaimApp(app.appGraph)

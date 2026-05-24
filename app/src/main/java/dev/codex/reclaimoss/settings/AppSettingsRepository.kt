@@ -19,6 +19,11 @@ enum class ThemeMode {
     DARK,
 }
 
+enum class DateFormatPreference {
+    MONTH_DAY_YEAR,
+    DAY_MONTH_YEAR,
+}
+
 enum class WeekStart {
     SUNDAY,
     MONDAY,
@@ -47,6 +52,7 @@ enum class HistoryRetention {
 
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val dateFormatPreference: DateFormatPreference = DateFormatPreference.MONTH_DAY_YEAR,
     val weekStart: WeekStart = WeekStart.SUNDAY,
     val breakBufferMinutes: Int = 0,
     val alignmentMinutes: Int = 30,
@@ -69,6 +75,7 @@ class AppSettingsRepository(
     suspend fun current(): AppSettings = settings.first()
 
     suspend fun setThemeMode(value: ThemeMode) = updateString(THEME_MODE, value.name)
+    suspend fun setDateFormatPreference(value: DateFormatPreference) = updateString(DATE_FORMAT_PREFERENCE, value.name)
     suspend fun setWeekStart(value: WeekStart) = updateString(WEEK_START, value.name)
     suspend fun setBreakBufferMinutes(value: Int) = updateInt(BREAK_BUFFER_MINUTES, value.coerceIn(0, 60))
     suspend fun setAlignmentMinutes(value: Int) = updateInt(
@@ -104,6 +111,7 @@ class AppSettingsRepository(
     private fun toSettings(prefs: Preferences): AppSettings =
         AppSettings(
             themeMode = prefs[THEME_MODE].safeEnumOrDefault(AppSettings().themeMode),
+            dateFormatPreference = prefs[DATE_FORMAT_PREFERENCE].safeEnumOrDefault(AppSettings().dateFormatPreference),
             weekStart = prefs[WEEK_START].safeEnumOrDefault(AppSettings().weekStart),
             breakBufferMinutes = prefs[BREAK_BUFFER_MINUTES] ?: AppSettings().breakBufferMinutes,
             alignmentMinutes = prefs[ALIGNMENT_MINUTES] ?: AppSettings().alignmentMinutes,
@@ -120,6 +128,7 @@ class AppSettingsRepository(
 
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val DATE_FORMAT_PREFERENCE = stringPreferencesKey("date_format_preference")
         val WEEK_START = stringPreferencesKey("week_start")
         val BREAK_BUFFER_MINUTES = intPreferencesKey("break_buffer_minutes")
         val ALIGNMENT_MINUTES = intPreferencesKey("alignment_minutes")

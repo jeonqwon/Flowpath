@@ -188,7 +188,35 @@ fun PlannerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(todayHeader(LocalDate.now(zoneId)), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    IconButton(onClick = {
+                        val newDate = selectedDate.minusDays(1)
+                        selectedDate = newDate
+                        visibleMonth = YearMonth.from(newDate)
+                    }) {
+                        Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
+                    }
+                    Text(
+                        headerDateLabel(selectedDate, settings.dateFormatPreference),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconButton(onClick = {
+                        val newDate = selectedDate.plusDays(1)
+                        selectedDate = newDate
+                        visibleMonth = YearMonth.from(newDate)
+                    }) {
+                        Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
+                    }
+                }
                 HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
             }
         }
@@ -207,6 +235,7 @@ fun PlannerScreen(
         }
         selectedDayOverview(
             selectedDate = selectedDate,
+            settings = settings,
             blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
             reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
             completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
@@ -222,6 +251,7 @@ fun PlannerScreen(
 
 fun LazyListScope.selectedDayOverview(
     selectedDate: LocalDate,
+    settings: AppSettings,
     blocks: List<ScheduleBlock>,
     reminders: List<Reminder>,
     completedTasks: List<ScheduleTask>,
@@ -234,9 +264,11 @@ fun LazyListScope.selectedDayOverview(
 ) {
     item {
         Text(
-            selectedDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()) + " " + selectedDate.dayOfMonth,
+            headerDateLabel(selectedDate, settings.dateFormatPreference),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
     item {
@@ -536,10 +568,11 @@ fun CalendarDayCell(
     hasReminders: Boolean,
     onClick: () -> Unit,
 ) {
-    val borderColor = when {
-        isSelected -> MaterialTheme.colorScheme.primary
-        isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
-        else -> Color.Transparent
+    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+    val todayOutlineColor = if (isToday) {
+        if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.92f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
+    } else {
+        Color.Transparent
     }
     val background = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
     Box(
@@ -550,6 +583,14 @@ fun CalendarDayCell(
             .clickable(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 3.dp),
     ) {
+        if (isToday) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(2.dp)
+                    .border(1.dp, todayOutlineColor, RoundedCornerShape(10.dp)),
+            )
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween,

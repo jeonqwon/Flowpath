@@ -114,6 +114,7 @@ import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
+import dev.codex.reclaimoss.settings.AppSettings
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -134,18 +135,19 @@ fun RemindersScreen(
     padding: PaddingValues,
     reminders: List<Reminder>,
     tasksById: Map<String, ScheduleTask>,
+    settings: AppSettings,
     onAddTask: () -> Unit,
     onOpenReminder: (Reminder) -> Unit,
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
-    val today = remember { LocalDate.now(zoneId) }
-    val formatter = remember { DateTimeFormatter.ofPattern("MMM d, h:mm a") }
+    var anchorDate by rememberSaveable { mutableStateOf(LocalDate.now(zoneId)) }
+    val formatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
     val active = reminders
         .filter { it.status != ReminderStatus.COMPLETED }
         .sortedBy { it.dueAt }
-    val overdue = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isBefore(today) }
-    val dueToday = active.filter { it.dueAt.atZone(zoneId).toLocalDate() == today }
-    val upcoming = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isAfter(today) }
+    val overdue = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isBefore(anchorDate) }
+    val dueToday = active.filter { it.dueAt.atZone(zoneId).toLocalDate() == anchorDate }
+    val upcoming = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isAfter(anchorDate) }
 
     LazyColumn(
         modifier = Modifier
@@ -161,7 +163,27 @@ fun RemindersScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(todayHeader(today), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    IconButton(onClick = { anchorDate = anchorDate.minusDays(1) }) {
+                        Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
+                    }
+                    Text(
+                        headerDateLabel(anchorDate, settings.dateFormatPreference),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    IconButton(onClick = { anchorDate = anchorDate.plusDays(1) }) {
+                        Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
+                    }
+                }
                 HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
             }
         }

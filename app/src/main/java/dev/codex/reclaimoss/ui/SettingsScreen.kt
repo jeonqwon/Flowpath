@@ -2,6 +2,7 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -118,6 +119,7 @@ import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import dev.codex.reclaimoss.settings.HistoryRetention
+import dev.codex.reclaimoss.settings.DateFormatPreference
 import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
 import dev.codex.reclaimoss.settings.ReminderTimingMode
 import dev.codex.reclaimoss.settings.ThemeMode
@@ -168,6 +170,7 @@ fun SettingsScreen(
     onSavePeriod: (TimePeriodDraft) -> Unit,
     onDeletePeriod: (String) -> Unit,
     onThemeModeChanged: (ThemeMode) -> Unit,
+    onDateFormatPreferenceChanged: (DateFormatPreference) -> Unit,
     onWeekStartChanged: (WeekStart) -> Unit,
     onBreakBufferChanged: (Int) -> Unit,
     onAlignmentChanged: (Int) -> Unit,
@@ -196,6 +199,9 @@ fun SettingsScreen(
         if (startInEditFlow && section == SettingsSection.DailyFlow) {
             editFlow = true
         }
+    }
+    BackHandler(enabled = section != null) {
+        section = null
     }
 
     if (editingPeriod != null) {
@@ -231,7 +237,7 @@ fun SettingsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(settingsPageBackground(isDarkSettings))
+            .background(MaterialTheme.colorScheme.background)
             .padding(padding)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
@@ -260,13 +266,6 @@ fun SettingsScreen(
                         item {
                             SettingsNavigationRow(
                                 title = item.title,
-                                subtitle = when (item) {
-                                    SettingsSection.Appearance -> "Theme and display"
-                                    SettingsSection.TaskRules -> "Scheduling behavior"
-                                    SettingsSection.Reminders -> "Task reminder defaults"
-                                    SettingsSection.History -> "Completed task retention"
-                                    SettingsSection.DailyFlow -> "Work, meal, and rest periods"
-                                },
                                 icon = settingsSectionIcon(item),
                                 isDarkSettings = isDarkSettings,
                                 onClick = { section = item },
@@ -307,12 +306,12 @@ fun SettingsScreen(
                     }
                 }
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 120.dp),
                 ) {
                     item {
                         when (section) {
-                        SettingsSection.Appearance -> SettingsGroupSurface {
+                        SettingsSection.Appearance -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsControlRow(
                                 title = "Theme",
                                 subtitle = when (settings.themeMode) {
@@ -334,68 +333,78 @@ fun SettingsScreen(
                                     onSelected = onThemeModeChanged,
                                 )
                             }
-                        }
-
-                        SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            SettingsGroupSurface(isDarkSettings = isDarkSettings) {
-                                SettingsControlRow(
-                                    title = "Break buffer",
-                                    subtitle = "Gap after each work task",
-                                ) {
-                                    DurationSlider(
-                                        minutes = settings.breakBufferMinutes,
-                                        minMinutes = 0,
-                                        maxMinutes = 60,
-                                        onMinutesChanged = onBreakBufferChanged,
-                                    )
-                                }
-                                SettingsDivider(isDarkSettings)
-                                SettingsControlRow(
-                                    title = "Task alignment",
-                                    subtitle = "Snap task starts to fixed intervals",
-                                ) {
-                                    SegmentedEnumRow(
-                                        options = listOf(15, 30, 60),
-                                        selected = settings.alignmentMinutes,
-                                        labelFor = {
-                                            when (it) {
-                                                15 -> "15 min"
-                                                30 -> "30 min"
-                                                else -> "60 min"
-                                            }
-                                        },
-                                        onSelected = onAlignmentChanged,
-                                    )
-                                }
-                                SettingsDivider(isDarkSettings)
-                                SettingsInlineSwitchRow(
-                                    title = "Allow task splitting",
-                                    subtitle = "Break long tasks across open slots",
-                                    checked = settings.allowTaskSplitting,
-                                    onCheckedChange = onAllowTaskSplittingChanged,
+                            SettingsControlRow(
+                                title = "Date format",
+                                subtitle = "Choose how dates appear across the app",
+                            ) {
+                                SegmentedEnumRow(
+                                    options = DateFormatPreference.entries,
+                                    selected = settings.dateFormatPreference,
+                                    labelFor = {
+                                        when (it) {
+                                            DateFormatPreference.MONTH_DAY_YEAR -> "MM/DD/YY"
+                                            DateFormatPreference.DAY_MONTH_YEAR -> "DD/MM/YY"
+                                        }
+                                    },
+                                    onSelected = onDateFormatPreferenceChanged,
                                 )
-                                SettingsDivider(isDarkSettings)
-                                SettingsControlRow(
-                                    title = "Max task chunk",
-                                    subtitle = "Longest block before a task can split",
-                                ) {
-                                    DurationSlider(
-                                        minutes = settings.maxTaskChunkMinutes,
-                                        maxMinutes = 360,
-                                        onMinutesChanged = onMaxTaskChunkChanged,
-                                    )
-                                }
                             }
                         }
 
-                        SettingsSection.Reminders -> SettingsGroupSurface(isDarkSettings = isDarkSettings) {
+                        SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SettingsControlRow(
+                                title = "Break buffer",
+                                subtitle = "Gap after each work task",
+                            ) {
+                                DurationSlider(
+                                    minutes = settings.breakBufferMinutes,
+                                    minMinutes = 0,
+                                    maxMinutes = 60,
+                                    onMinutesChanged = onBreakBufferChanged,
+                                )
+                            }
+                            SettingsControlRow(
+                                title = "Task alignment",
+                                subtitle = "Snap task starts to fixed intervals",
+                            ) {
+                                SegmentedEnumRow(
+                                    options = listOf(15, 30, 60),
+                                    selected = settings.alignmentMinutes,
+                                    labelFor = {
+                                        when (it) {
+                                            15 -> "15 min"
+                                            30 -> "30 min"
+                                            else -> "60 min"
+                                        }
+                                    },
+                                    onSelected = onAlignmentChanged,
+                                )
+                            }
+                            SettingsInlineSwitchRow(
+                                title = "Allow task splitting",
+                                subtitle = "Break long tasks across open slots",
+                                checked = settings.allowTaskSplitting,
+                                onCheckedChange = onAllowTaskSplittingChanged,
+                            )
+                            SettingsControlRow(
+                                title = "Max task chunk",
+                                subtitle = "Longest block before a task can split",
+                            ) {
+                                DurationSlider(
+                                    minutes = settings.maxTaskChunkMinutes,
+                                    maxMinutes = 360,
+                                    onMinutesChanged = onMaxTaskChunkChanged,
+                                )
+                            }
+                        }
+
+                        SettingsSection.Reminders -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsInlineSwitchRow(
                                 title = "Default reminder for tasks",
                                 subtitle = if (settings.defaultTaskReminder) "New tasks also create reminders" else "New tasks stay reminder-free",
                                 checked = settings.defaultTaskReminder,
                                 onCheckedChange = onDefaultTaskReminderChanged,
                             )
-                            SettingsDivider(isDarkSettings)
                             SettingsControlRow(
                                 title = "Reminder timing for tasks",
                                 subtitle = "Choose when linked reminders should appear",
@@ -414,7 +423,7 @@ fun SettingsScreen(
                             }
                         }
 
-                        SettingsSection.History -> SettingsGroupSurface(isDarkSettings = isDarkSettings) {
+                        SettingsSection.History -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsControlRow(
                                 title = "Keep completed tasks",
                                 subtitle = "How long completed work stays visible",
@@ -732,21 +741,12 @@ fun SettingsGroupSurface(
     isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = settingsSurfaceColor(isDarkSettings)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, settingsDividerColor(isDarkSettings)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(content = content)
-    }
+    Column(modifier = Modifier.fillMaxWidth(), content = content)
 }
 
 @Composable
 fun SettingsNavigationRow(
     title: String,
-    subtitle: String,
     icon: ImageVector,
     isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
     onClick: () -> Unit,
@@ -776,11 +776,6 @@ fun SettingsNavigationRow(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = settingsPrimaryTextColor(isDarkSettings),
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = settingsSecondaryTextColor(isDarkSettings),
                 )
             }
         }
@@ -1099,20 +1094,25 @@ private fun settingsSectionIcon(section: SettingsSection): ImageVector =
         SettingsSection.DailyFlow -> Icons.Outlined.CalendarMonth
     }
 
+@Composable
 private fun settingsPageBackground(isDarkSettings: Boolean): Color =
-    if (isDarkSettings) Color(0xFF050505) else Color(0xFFF8F9FB)
+    MaterialTheme.colorScheme.background
 
+@Composable
 private fun settingsSurfaceColor(isDarkSettings: Boolean): Color =
-    if (isDarkSettings) Color(0xFF131313) else Color.White
+    MaterialTheme.colorScheme.surface
 
+@Composable
 private fun settingsPrimaryTextColor(isDarkSettings: Boolean): Color =
-    if (isDarkSettings) Color(0xFFF5F5F5) else Color(0xFF121212)
+    MaterialTheme.colorScheme.onSurface
 
+@Composable
 private fun settingsSecondaryTextColor(isDarkSettings: Boolean): Color =
-    if (isDarkSettings) Color(0xFFB7B7B7) else Color(0xFF6B7280)
+    MaterialTheme.colorScheme.onSurfaceVariant
 
+@Composable
 private fun settingsDividerColor(isDarkSettings: Boolean): Color =
-    if (isDarkSettings) Color(0xFF242424) else Color(0xFFE5E7EB)
+    MaterialTheme.colorScheme.outlineVariant
 
 fun recurrenceSummary(rule: RecurrenceRule): String =
     when (rule.type) {
@@ -1296,13 +1296,19 @@ fun timelineBlockHeight(minutes: Int, hourHeight: Dp, minHeight: Dp): Dp {
     return if (proportional < minHeight) minHeight else proportional
 }
 
-fun todayHeader(date: LocalDate): String =
-    date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault()) + ", " +
-        date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()) + " " + date.dayOfMonth
+fun headerDateLabel(date: LocalDate, formatPreference: DateFormatPreference): String {
+    val order = when (formatPreference) {
+        DateFormatPreference.MONTH_DAY_YEAR -> "${date.monthValue}/${date.dayOfMonth}"
+        DateFormatPreference.DAY_MONTH_YEAR -> "${date.dayOfMonth}/${date.monthValue}"
+    }
+    return "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())}, $order"
+}
 
-fun tasksHeader(date: LocalDate): String =
-    date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()) + " " +
-        date.monthValue + "/" + date.dayOfMonth
+fun reminderDateTimeFormatter(formatPreference: DateFormatPreference): DateTimeFormatter =
+    when (formatPreference) {
+        DateFormatPreference.MONTH_DAY_YEAR -> DateTimeFormatter.ofPattern("MMM d, h:mm a")
+        DateFormatPreference.DAY_MONTH_YEAR -> DateTimeFormatter.ofPattern("d MMM, h:mm a")
+    }
 
 fun Int.durationLabel(): String =
     if (this < 60) "${this}m" else "${this / 60}h${if (this % 60 == 0) "" else " ${this % 60}m"}"

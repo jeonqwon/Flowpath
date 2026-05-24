@@ -116,6 +116,7 @@ import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import dev.codex.reclaimoss.settings.AppSettingsRepository
+import dev.codex.reclaimoss.settings.DateFormatPreference
 import dev.codex.reclaimoss.settings.HistoryRetention
 import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
 import dev.codex.reclaimoss.settings.ReminderTimingMode
@@ -353,6 +354,7 @@ class PlannerViewModel(
     }
 
     suspend fun setThemeMode(value: ThemeMode) = settingsRepository.setThemeMode(value)
+    suspend fun setDateFormatPreference(value: DateFormatPreference) = settingsRepository.setDateFormatPreference(value)
     suspend fun setWeekStart(value: WeekStart) = settingsRepository.setWeekStart(value)
     suspend fun setBreakBufferMinutes(value: Int) = settingsRepository.setBreakBufferMinutes(value)
     suspend fun setAlignmentMinutes(value: Int) = settingsRepository.setAlignmentMinutes(value)

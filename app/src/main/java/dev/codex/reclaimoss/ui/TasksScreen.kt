@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -135,14 +136,18 @@ fun TasksScreen(
     padding: PaddingValues,
     state: PlannerUiState,
     settings: AppSettings,
+    selectedDate: LocalDate,
+    savedScrollOffset: Int,
+    autoPositionNonce: Int,
+    onSelectedDateChange: (LocalDate) -> Unit,
+    onScrollOffsetChange: (Int) -> Unit,
     onAddTask: () -> Unit,
     onDeleteTask: (String) -> Unit,
     onOpenTask: (String) -> Unit,
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zoneId) }
-    var selectedDate by rememberSaveable { mutableStateOf(today) }
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = 0, initialFirstVisibleItemScrollOffset = savedScrollOffset)
     val density = LocalDensity.current
     val blocksToday = remember(state.snapshot.blocks, selectedDate) {
         state.snapshot.blocks
@@ -155,7 +160,7 @@ fun TasksScreen(
     }
     val hourHeight = 144.dp
 
-    LaunchedEffect(selectedDate) {
+    LaunchedEffect(autoPositionNonce, selectedDate) {
         val offsetMinutes = if (selectedDate == today) {
             (minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0)
         } else {
@@ -163,6 +168,11 @@ fun TasksScreen(
         }
         val offsetPx = with(density) { timelineOffset(offsetMinutes, hourHeight).roundToPx() }
         listState.scrollToItem(index = 0, scrollOffset = offsetPx)
+        onScrollOffsetChange(offsetPx)
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemScrollOffset }
+            .collect { offset -> onScrollOffsetChange(offset) }
     }
 
     Column(
@@ -182,18 +192,19 @@ fun TasksScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                IconButton(onClick = { selectedDate = selectedDate.minusDays(1) }) {
+                IconButton(onClick = { onSelectedDateChange(selectedDate.minusDays(1)) }) {
                     Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
                 }
                 Text(
-                    tasksHeader(selectedDate),
+                    headerDateLabel(selectedDate, settings.dateFormatPreference),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                IconButton(onClick = { selectedDate = selectedDate.plusDays(1) }) {
+                IconButton(onClick = { onSelectedDateChange(selectedDate.plusDays(1)) }) {
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
