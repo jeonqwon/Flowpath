@@ -153,6 +153,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var followUpSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
+    var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         viewModel.seedIfNeeded()
@@ -180,13 +181,15 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         OnboardingSetupScreen(
             step = step,
             initialRange = initialRange,
+            errorMessage = onboardingErrorMessage,
             onNext = { range ->
                 scope.launch {
                     val period = onboardingPeriodForStep(step, range)
                     val overlap = findOverlappingTimePeriod(period, state.snapshot.timePeriods)
                     if (overlap != null) {
-                        snackbarHostState.showSnackbar(timePeriodOverlapMessage(period.label, overlap))
+                        onboardingErrorMessage = timePeriodOverlapMessage(period.label, overlap)
                     } else {
+                        onboardingErrorMessage = null
                         viewModel.saveTimePeriod(
                             TimePeriodDraft(
                                 id = period.id,
@@ -208,6 +211,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             } else {
                 {
                     scope.launch {
+                        onboardingErrorMessage = null
                         val periodId = onboardingPeriodForStep(step, initialRange).id
                         viewModel.deleteTimePeriod(periodId)
                         onboardingStep = step.nextStep()
