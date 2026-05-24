@@ -3,6 +3,7 @@ package dev.codex.reclaimoss.ui
 import dev.codex.reclaimoss.domain.model.TimePeriodType
 import java.time.LocalTime
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class OnboardingSetupTest {
@@ -50,5 +51,29 @@ class OnboardingSetupTest {
         assertEquals(ONBOARDING_DINNER_PERIOD_ID, dinner.id)
         assertEquals("Dinner", dinner.label)
         assertEquals(3, dinner.sortOrder)
+    }
+
+    @Test
+    fun `existing onboarding period falls back to matching life period label`() {
+        val existingSleep = dev.codex.reclaimoss.domain.model.TimePeriod(
+            id = "user-sleep",
+            label = "Sleep",
+            start = LocalTime.of(23, 0),
+            end = LocalTime.of(7, 30),
+            type = TimePeriodType.LIFE,
+            sortOrder = 7,
+        )
+
+        val found = existingOnboardingPeriod(OnboardingStep.Sleep, listOf(existingSleep))
+        val updated = onboardingPeriodForStep(
+            step = OnboardingStep.Sleep,
+            range = OnboardingTimeRange(LocalTime.of(22, 0), LocalTime.of(7, 0)),
+            existingPeriod = found,
+        )
+
+        assertNotNull(found)
+        assertEquals("user-sleep", updated.id)
+        assertEquals(7, updated.sortOrder)
+        assertEquals("Sleep", updated.label)
     }
 }

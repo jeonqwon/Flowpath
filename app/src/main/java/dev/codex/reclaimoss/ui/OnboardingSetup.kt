@@ -56,24 +56,44 @@ data class OnboardingTimeRange(
     val end: LocalTime,
 )
 
+private data class OnboardingPeriodSpec(
+    val id: String,
+    val label: String,
+    val sortOrder: Int,
+)
+
+private fun onboardingPeriodSpec(step: OnboardingStep): OnboardingPeriodSpec =
+    when (step) {
+        OnboardingStep.Sleep -> OnboardingPeriodSpec(ONBOARDING_SLEEP_PERIOD_ID, "Sleep", 0)
+        OnboardingStep.Breakfast -> OnboardingPeriodSpec(ONBOARDING_BREAKFAST_PERIOD_ID, "Breakfast", 1)
+        OnboardingStep.Lunch -> OnboardingPeriodSpec(ONBOARDING_LUNCH_PERIOD_ID, "Lunch", 2)
+        OnboardingStep.Dinner -> OnboardingPeriodSpec(ONBOARDING_DINNER_PERIOD_ID, "Dinner", 3)
+        OnboardingStep.DailyFlow -> error("Daily Flow is not a period step")
+    }
+
+fun existingOnboardingPeriod(
+    step: OnboardingStep,
+    periods: List<TimePeriod>,
+): TimePeriod? {
+    val spec = onboardingPeriodSpec(step)
+    return periods.firstOrNull { it.id == spec.id } ?: periods.firstOrNull {
+        it.type == TimePeriodType.LIFE && it.label.equals(spec.label, ignoreCase = true)
+    }
+}
+
 fun onboardingPeriodForStep(
     step: OnboardingStep,
     range: OnboardingTimeRange,
+    existingPeriod: TimePeriod? = null,
 ): TimePeriod {
-    val (id, label, sortOrder) = when (step) {
-        OnboardingStep.Sleep -> Triple(ONBOARDING_SLEEP_PERIOD_ID, "Sleep", 0)
-        OnboardingStep.Breakfast -> Triple(ONBOARDING_BREAKFAST_PERIOD_ID, "Breakfast", 1)
-        OnboardingStep.Lunch -> Triple(ONBOARDING_LUNCH_PERIOD_ID, "Lunch", 2)
-        OnboardingStep.Dinner -> Triple(ONBOARDING_DINNER_PERIOD_ID, "Dinner", 3)
-        OnboardingStep.DailyFlow -> error("Daily Flow is not a period step")
-    }
+    val spec = onboardingPeriodSpec(step)
     return TimePeriod(
-        id = id,
-        label = label,
+        id = existingPeriod?.id ?: spec.id,
+        label = existingPeriod?.label ?: spec.label,
         start = range.start,
         end = range.end,
         type = TimePeriodType.LIFE,
-        sortOrder = sortOrder,
+        sortOrder = existingPeriod?.sortOrder ?: spec.sortOrder,
     )
 }
 
@@ -90,15 +110,7 @@ fun existingOnboardingRange(
     step: OnboardingStep,
     periods: List<TimePeriod>,
 ): OnboardingTimeRange {
-    val existing = periods.firstOrNull {
-        it.id == when (step) {
-            OnboardingStep.Sleep -> ONBOARDING_SLEEP_PERIOD_ID
-            OnboardingStep.Breakfast -> ONBOARDING_BREAKFAST_PERIOD_ID
-            OnboardingStep.Lunch -> ONBOARDING_LUNCH_PERIOD_ID
-            OnboardingStep.Dinner -> ONBOARDING_DINNER_PERIOD_ID
-            OnboardingStep.DailyFlow -> ""
-        }
-    }
+    val existing = existingOnboardingPeriod(step, periods)
     return existing?.let { OnboardingTimeRange(it.start, it.end) } ?: defaultOnboardingRange(step)
 }
 
@@ -149,39 +161,12 @@ fun OnboardingSetupScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
+        bottomBar = {
             Column(
                 modifier = Modifier
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Text(progress, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TimeOfDaySliderCard(
-                    title = "Start",
-                    minutes = startMinutes,
-                    onMinutesChanged = { startMinutes = it },
-                )
-                TimeOfDaySliderCard(
-                    title = "End",
-                    minutes = endMinutes,
-                    onMinutesChanged = { endMinutes = it },
-                )
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            Column(
-                modifier = Modifier.navigationBarsPadding(),
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
@@ -207,10 +192,32 @@ fun OnboardingSetupScreen(
                     ) {
                         Text("Skip")
                     }
-                } else {
-                    Spacer(Modifier.height(56.dp))
                 }
             }
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Text(progress, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TimeOfDaySliderCard(
+                title = "Start",
+                minutes = startMinutes,
+                onMinutesChanged = { startMinutes = it },
+            )
+            TimeOfDaySliderCard(
+                title = "End",
+                minutes = endMinutes,
+                onMinutesChanged = { endMinutes = it },
+            )
+            Spacer(Modifier.height(if (onSkip != null) 180.dp else 112.dp))
         }
     }
 }

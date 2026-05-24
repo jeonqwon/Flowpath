@@ -184,7 +184,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             errorMessage = onboardingErrorMessage,
             onNext = { range ->
                 scope.launch {
-                    val period = onboardingPeriodForStep(step, range)
+                    val existingPeriod = existingOnboardingPeriod(step, state.snapshot.timePeriods)
+                    val period = onboardingPeriodForStep(step, range, existingPeriod)
                     val overlap = findOverlappingTimePeriod(period, state.snapshot.timePeriods)
                     if (overlap != null) {
                         onboardingErrorMessage = timePeriodOverlapMessage(period.label, overlap)
@@ -212,8 +213,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 {
                     scope.launch {
                         onboardingErrorMessage = null
-                        val periodId = onboardingPeriodForStep(step, initialRange).id
-                        viewModel.deleteTimePeriod(periodId)
+                        existingOnboardingPeriod(step, state.snapshot.timePeriods)?.id?.let { periodId ->
+                            viewModel.deleteTimePeriod(periodId)
+                        }
                         onboardingStep = step.nextStep()
                     }
                 }
