@@ -89,6 +89,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -161,6 +162,17 @@ fun TasksScreen(
         state.snapshot.timePeriods.filter { it.type == TimePeriodType.LIFE }
     }
     val hourHeight = 144.dp
+    val darkThemeHeader = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val todayHeaderColor = if (darkThemeHeader) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+    }
+    val todayHeaderTextColor = if (darkThemeHeader) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
     LaunchedEffect(autoPositionNonce) {
         val offsetMinutes = if (selectedDate == today) {
@@ -204,7 +216,7 @@ fun TasksScreen(
                         .clip(RoundedCornerShape(14.dp))
                         .background(
                             if (selectedDate == today) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+                                todayHeaderColor
                             } else {
                                 Color.Transparent
                             },
@@ -212,6 +224,7 @@ fun TasksScreen(
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
+                    color = if (selectedDate == today) todayHeaderTextColor else MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

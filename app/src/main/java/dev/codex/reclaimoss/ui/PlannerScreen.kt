@@ -86,6 +86,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -178,89 +179,104 @@ fun PlannerScreen(
             .filter { historyCutoff == null || !it.updatedAt.isBefore(historyCutoff) }
             .groupBy { it.updatedAt.atZone(zoneId).toLocalDate() }
     }
+    val darkThemeHeader = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val todayHeaderColor = if (darkThemeHeader) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+    }
+    val todayHeaderTextColor = if (darkThemeHeader) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(padding)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = 120.dp),
     ) {
-        item {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    IconButton(onClick = {
-                        val newDate = selectedDate.minusDays(1)
-                        onSelectedDateChange(newDate)
-                        visibleMonth = YearMonth.from(newDate)
-                    }) {
-                        Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
-                    }
-                    Text(
-                        headerDateLabel(selectedDate, settings.dateFormatPreference),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                if (selectedDate == today) {
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
-                                } else {
-                                    Color.Transparent
-                                },
-                            )
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    IconButton(onClick = {
-                        val newDate = selectedDate.plusDays(1)
-                        onSelectedDateChange(newDate)
-                        visibleMonth = YearMonth.from(newDate)
-                    }) {
-                        Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
-                    }
+                IconButton(onClick = {
+                    val newDate = selectedDate.minusDays(1)
+                    onSelectedDateChange(newDate)
+                    visibleMonth = YearMonth.from(newDate)
+                }) {
+                    Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
                 }
-                HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+                Text(
+                    headerDateLabel(selectedDate, settings.dateFormatPreference),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (selectedDate == today) {
+                                todayHeaderColor
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (selectedDate == today) todayHeaderTextColor else MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = {
+                    val newDate = selectedDate.plusDays(1)
+                    onSelectedDateChange(newDate)
+                    visibleMonth = YearMonth.from(newDate)
+                }) {
+                    Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
+                }
             }
+            HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
         }
-        item {
-            CalendarCard(
-                month = visibleMonth,
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 120.dp),
+        ) {
+            item {
+                CalendarCard(
+                    month = visibleMonth,
+                    selectedDate = selectedDate,
+                    weekStart = settings.weekStart,
+                    blocksByDate = blocksByDate,
+                    remindersByDate = remindersByDate,
+                    tasksById = tasksById,
+                    onPreviousMonth = { visibleMonth = visibleMonth.minusMonths(1) },
+                    onNextMonth = { visibleMonth = visibleMonth.plusMonths(1) },
+                    onDateSelected = { onSelectedDateChange(it) },
+                )
+            }
+            selectedDayOverview(
                 selectedDate = selectedDate,
-                weekStart = settings.weekStart,
-                blocksByDate = blocksByDate,
-                remindersByDate = remindersByDate,
+                settings = settings,
+                blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
+                reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
+                completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
                 tasksById = tasksById,
-                onPreviousMonth = { visibleMonth = visibleMonth.minusMonths(1) },
-                onNextMonth = { visibleMonth = visibleMonth.plusMonths(1) },
-                onDateSelected = { onSelectedDateChange(it) },
+                zoneId = zoneId,
+                onToggleLock = onToggleLock,
+                onMarkDone = onMarkDone,
+                onReschedule = onReschedule,
+                onOpenTask = onOpenTask,
             )
         }
-        selectedDayOverview(
-            selectedDate = selectedDate,
-            settings = settings,
-            blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
-            reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
-            completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
-            tasksById = tasksById,
-            zoneId = zoneId,
-            onToggleLock = onToggleLock,
-            onMarkDone = onMarkDone,
-            onReschedule = onReschedule,
-            onOpenTask = onOpenTask,
-        )
     }
 }
 
