@@ -18,6 +18,7 @@ class AppGraph(context: Context) {
     ).addMigrations(
         OpenReclaimDatabase.MIGRATION_5_6,
         OpenReclaimDatabase.MIGRATION_6_7,
+        OpenReclaimDatabase.MIGRATION_7_8,
     ).build()
 
     private val calendarGateway = NoOpGoogleCalendarGateway()

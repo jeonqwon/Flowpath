@@ -157,12 +157,21 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var followUpSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var rescheduleSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
+    var createReminderDraftOverride by remember { mutableStateOf<ReminderDraft?>(null) }
+    var createSessionKey by rememberSaveable { mutableStateOf(0) }
     var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var tasksSelectedDateEpochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var tasksScrollOffset by rememberSaveable { mutableStateOf(0) }
     var tasksAutoPositionNonce by rememberSaveable { mutableStateOf(1) }
     val pagerState = rememberPagerState(initialPage = selectedTab.ordinal, pageCount = { AppTab.entries.size })
+    val sharedSelectedDate = LocalDate.ofEpochDay(tasksSelectedDateEpochDay)
+    val onSharedDateChange: (LocalDate) -> Unit = { newDate ->
+        tasksSelectedDateEpochDay = newDate.toEpochDay()
+        tasksScrollOffset = 0
+        tasksAutoPositionNonce += 1
+    }
 
     LaunchedEffect(Unit) {
         viewModel.seedIfNeeded()
@@ -183,22 +192,27 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             if (onboardingStep == null) onboardingStep = OnboardingStep.Sleep
         }
     }
-    LaunchedEffect(selectedTab) {
-        if (pagerState.currentPage != selectedTab.ordinal) {
-            pagerState.animateScrollToPage(selectedTab.ordinal)
-        }
-    }
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collectLatest { page ->
             val tab = AppTab.entries[page]
             if (selectedTab != tab) selectedTab = tab
         }
     }
+    val navigateToTab: (AppTab) -> Unit = { tab ->
+        selectedTab = tab
+        scope.launch {
+            if (pagerState.currentPage != tab.ordinal) {
+                pagerState.scrollToPage(tab.ordinal)
+            }
+        }
+    }
 
     BackHandler(enabled = showingCreate) {
         showingCreate = false
         followUpSourceTaskId = null
+        rescheduleSourceTaskId = null
         createTaskDraftOverride = null
+        createReminderDraftOverride = null
     }
     BackHandler(enabled = selectedReminderId != null) {
         selectedReminderId = null
@@ -273,22 +287,30 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             CreateWorkScreen(
                 padding = padding,
                 periods = state.snapshot.timePeriods,
+                sessionKey = createSessionKey,
                 initialMode = CreateMode.Task,
                 initialTaskDraft = createTaskDraftOverride ?: TaskDraft(
                     preferredTimePeriodId = state.snapshot.timePeriods.firstOrNull { it.type == TimePeriodType.PRODUCTIVE }?.id,
                     addReminder = state.settings.defaultTaskReminder,
                 ),
+                initialReminderDraft = createReminderDraftOverride,
                 followUpMode = followUpSourceTaskId != null,
+                rescheduleMode = rescheduleSourceTaskId != null,
                 onBack = {
                     showingCreate = false
                     followUpSourceTaskId = null
+                    rescheduleSourceTaskId = null
                     createTaskDraftOverride = null
+                    createReminderDraftOverride = null
                 },
                 onSaveTask = { draft ->
                     scope.launch {
                         val sourceTaskId = followUpSourceTaskId
+                        val rescheduleTaskId = rescheduleSourceTaskId
                         val result = if (sourceTaskId != null) {
                             viewModel.addFollowUpTask(sourceTaskId, draft)
+                        } else if (rescheduleTaskId != null) {
+                            viewModel.rescheduleTaskWithUpdate(rescheduleTaskId, draft)
                         } else {
                             viewModel.addTask(draft, state.snapshot.timePeriods)
                         }
@@ -298,7 +320,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         }
                         if (!result.scheduled) {
                             snackbarHostState.showSnackbar(
-                                if (result.partial) {
+                                result.reason ?: if (result.partial) {
                                     "Unable to fully schedule task. Try another time, period, or shorter duration."
                                 } else {
                                     "Unable to schedule task. Try another time, period, or shorter duration."
@@ -308,12 +330,15 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         }
                         showingCreate = false
                         followUpSourceTaskId = null
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
-                        selectedTab = AppTab.Tasks
+                        createReminderDraftOverride = null
+                        navigateToTab(AppTab.Tasks)
                         snackbarHostState.showSnackbar(
                             when {
                                 result.partial -> "Task partially scheduled"
                                 sourceTaskId != null -> "Follow-up task created"
+                                rescheduleTaskId != null -> "Task rescheduled"
                                 else -> "Task scheduled"
                             },
                         )
@@ -324,8 +349,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         viewModel.addReminder(draft)
                         showingCreate = false
                         followUpSourceTaskId = null
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
-                        selectedTab = AppTab.Reminders
+                        createReminderDraftOverride = null
+                        navigateToTab(AppTab.Reminders)
                         snackbarHostState.showSnackbar("Reminder saved")
                     }
                 },
@@ -392,31 +419,21 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     },
                     onFollowUp = {
                         followUpSourceTaskId = task.id
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = task.toFollowUpDraft()
+                        createReminderDraftOverride = null
+                        createSessionKey += 1
                         selectedTaskId = null
                         showingCreate = true
                     },
-                    onRescheduleUrgently = { dueAt ->
-                        scope.launch {
-                            val success = viewModel.rescheduleUrgently(task.id, dueAt)
-                            if (success) {
-                                selectedTaskId = null
-                                snackbarHostState.showSnackbar("Task rescheduled")
-                            } else {
-                                snackbarHostState.showSnackbar("Couldn't reschedule urgently.")
-                            }
-                        }
-                    },
-                    onRescheduleLater = { dueAt ->
-                        scope.launch {
-                            val success = viewModel.rescheduleNextAvailable(task.id, dueAt)
-                            if (success) {
-                                selectedTaskId = null
-                                snackbarHostState.showSnackbar("Task rescheduled")
-                            } else {
-                                snackbarHostState.showSnackbar("No other free slot before the due date. Try Urgent or change the deadline.")
-                            }
-                        }
+                    onReschedule = {
+                        followUpSourceTaskId = null
+                        rescheduleSourceTaskId = task.id
+                        createTaskDraftOverride = task.toRescheduleDraft()
+                        createReminderDraftOverride = null
+                        createSessionKey += 1
+                        selectedTaskId = null
+                        showingCreate = true
                     },
                     onDone = {
                         scope.launch {
@@ -458,7 +475,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 AppTab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
+                        onClick = { navigateToTab(tab) },
                         icon = {
                             val icon = when (tab) {
                                 AppTab.Tasks -> Icons.Outlined.Checklist
@@ -501,18 +518,17 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     padding = padding,
                     state = state,
                     settings = state.settings,
-                    selectedDate = LocalDate.ofEpochDay(tasksSelectedDateEpochDay),
+                    selectedDate = sharedSelectedDate,
                     savedScrollOffset = tasksScrollOffset,
                     autoPositionNonce = tasksAutoPositionNonce,
-                    onSelectedDateChange = { newDate ->
-                        tasksSelectedDateEpochDay = newDate.toEpochDay()
-                        tasksScrollOffset = 0
-                        tasksAutoPositionNonce += 1
-                    },
+                    onSelectedDateChange = onSharedDateChange,
                     onScrollOffsetChange = { tasksScrollOffset = it },
                     onAddTask = {
                         followUpSourceTaskId = null
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
+                        createReminderDraftOverride = null
+                        createSessionKey += 1
                         showingCreate = true
                     },
                     onDeleteTask = { taskId ->
@@ -528,6 +544,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     padding = padding,
                     state = state,
                     settings = state.settings,
+                    selectedDate = sharedSelectedDate,
+                    onSelectedDateChange = onSharedDateChange,
                     onRebuild = {
                         scope.launch {
                             viewModel.rebuildSchedule()
@@ -548,7 +566,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     },
                     onAddTask = {
                         followUpSourceTaskId = null
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
+                        createReminderDraftOverride = null
+                        createSessionKey += 1
                         showingCreate = true
                     },
                     onOpenTask = { selectedTaskId = it },
@@ -559,9 +580,14 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     reminders = state.snapshot.reminders,
                     tasksById = state.snapshot.tasks.associateBy { it.id },
                     settings = state.settings,
+                    selectedDate = sharedSelectedDate,
+                    onSelectedDateChange = onSharedDateChange,
                     onAddTask = {
                         followUpSourceTaskId = null
+                        rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
+                        createReminderDraftOverride = null
+                        createSessionKey += 1
                         showingCreate = true
                     },
                     onOpenReminder = { reminder ->
@@ -591,9 +617,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             if (isFirstProductiveOnboardingPeriod) {
                                 onboardingDismissedThisSession = true
                                 onboardingStep = null
-                                selectedTab = AppTab.Tasks
                                 viewModel.setHasCompletedOnboarding(true)
-                                snackbarHostState.showSnackbar("Productive time added. You can start adding tasks.")
+                                snackbarHostState.showSnackbar("Productive time added. Keep setting up your day or head to Tasks when you're ready.")
                             } else {
                                 snackbarHostState.showSnackbar("Time period saved")
                             }
@@ -611,9 +636,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
                     onAlignmentChanged = { value -> scope.launch { viewModel.setAlignmentMinutes(value) } },
                     onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
+                    onAllowConcurrentTasksChanged = { value -> scope.launch { viewModel.setAllowConcurrentTasks(value) } },
                     onMaxTaskChunkChanged = { value -> scope.launch { viewModel.setMaxTaskChunkMinutes(value) } },
-                    onPreferredFallbackChanged = { value -> scope.launch { viewModel.setPreferredPeriodFallbackMode(value) } },
-                    onUrgentRescheduleChanged = { value -> scope.launch { viewModel.setUrgentRescheduleMode(value) } },
                     onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
                     onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
                     onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
@@ -621,9 +645,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onFinishDailyFlowOnboarding = {
                         onboardingDismissedThisSession = true
                         onboardingStep = null
-                        selectedTab = AppTab.Tasks
+                        navigateToTab(AppTab.Tasks)
                         scope.launch { viewModel.setHasCompletedOnboarding(true) }
                     },
+                    isActive = selectedTab == AppTab.Settings,
                 )
             }
         }

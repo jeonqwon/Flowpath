@@ -57,6 +57,7 @@ data class AppSettings(
     val breakBufferMinutes: Int = 0,
     val alignmentMinutes: Int = 30,
     val allowTaskSplitting: Boolean = true,
+    val allowConcurrentTasks: Boolean = false,
     val maxTaskChunkMinutes: Int = 120,
     val preferredPeriodFallbackMode: PreferredPeriodFallbackMode = PreferredPeriodFallbackMode.USE_OTHER_PRODUCTIVE_PERIODS,
     val urgentRescheduleMode: UrgentRescheduleMode = UrgentRescheduleMode.MOVE_OTHER_FLEXIBLE_IF_NEEDED,
@@ -87,6 +88,7 @@ class AppSettingsRepository(
         },
     )
     suspend fun setAllowTaskSplitting(value: Boolean) = updateBoolean(ALLOW_TASK_SPLITTING, value)
+    suspend fun setAllowConcurrentTasks(value: Boolean) = updateBoolean(ALLOW_CONCURRENT_TASKS, value)
     suspend fun setMaxTaskChunkMinutes(value: Int) = updateInt(MAX_TASK_CHUNK_MINUTES, value.coerceIn(30, 360))
     suspend fun setPreferredPeriodFallbackMode(value: PreferredPeriodFallbackMode) = updateString(PREFERRED_PERIOD_FALLBACK_MODE, value.name)
     suspend fun setUrgentRescheduleMode(value: UrgentRescheduleMode) = updateString(URGENT_RESCHEDULE_MODE, value.name)
@@ -116,6 +118,7 @@ class AppSettingsRepository(
             breakBufferMinutes = prefs[BREAK_BUFFER_MINUTES] ?: AppSettings().breakBufferMinutes,
             alignmentMinutes = prefs[ALIGNMENT_MINUTES] ?: AppSettings().alignmentMinutes,
             allowTaskSplitting = prefs[ALLOW_TASK_SPLITTING] ?: AppSettings().allowTaskSplitting,
+            allowConcurrentTasks = prefs[ALLOW_CONCURRENT_TASKS] ?: AppSettings().allowConcurrentTasks,
             maxTaskChunkMinutes = prefs[MAX_TASK_CHUNK_MINUTES] ?: AppSettings().maxTaskChunkMinutes,
             preferredPeriodFallbackMode = prefs[PREFERRED_PERIOD_FALLBACK_MODE].safeEnumOrDefault(AppSettings().preferredPeriodFallbackMode),
             urgentRescheduleMode = prefs[URGENT_RESCHEDULE_MODE].safeEnumOrDefault(AppSettings().urgentRescheduleMode),
@@ -133,6 +136,7 @@ class AppSettingsRepository(
         val BREAK_BUFFER_MINUTES = intPreferencesKey("break_buffer_minutes")
         val ALIGNMENT_MINUTES = intPreferencesKey("alignment_minutes")
         val ALLOW_TASK_SPLITTING = booleanPreferencesKey("allow_task_splitting")
+        val ALLOW_CONCURRENT_TASKS = booleanPreferencesKey("allow_concurrent_tasks")
         val MAX_TASK_CHUNK_MINUTES = intPreferencesKey("max_task_chunk_minutes")
         val PREFERRED_PERIOD_FALLBACK_MODE = stringPreferencesKey("preferred_period_fallback_mode")
         val URGENT_RESCHEDULE_MODE = stringPreferencesKey("urgent_reschedule_mode")

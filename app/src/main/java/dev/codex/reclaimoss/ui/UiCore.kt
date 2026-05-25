@@ -107,6 +107,7 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
@@ -151,7 +152,7 @@ enum class CreateMode(val label: String) {
 }
 
 val HeaderActionShape = RoundedCornerShape(22.dp)
-val HeaderActionHeight = 56.dp
+val HeaderActionHeight = 44.dp
 val HeaderActionWidth = 176.dp
 val SurfaceTintStrong = Color(0xFFE9EEF9)
 val CreateScreenSnackbarBottomOffset = 108.dp
@@ -173,6 +174,11 @@ data class TaskDraft(
     val priority: TaskPriority = TaskPriority.MEDIUM,
     val preferredTimePeriodId: String? = null,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
+    val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+    val startDate: LocalDate? = null,
+    val fixedDate: LocalDate = LocalDate.now().plusDays(1),
+    val fixedStartAt: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(9).withMinute(0),
+    val fixedEndAt: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(10).withMinute(0),
     val repeatsForever: Boolean = true,
     val estimatedMinutes: Int = 60,
     val addReminder: Boolean = false,
@@ -205,6 +211,11 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         description = description,
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
+        schedulingMode = TaskSchedulingMode.FLEXIBLE,
+        startDate = null,
+        fixedDate = dueAt.atZone(zoneId).toLocalDate().plusDays(1),
+        fixedStartAt = dueAt.atZone(zoneId).toLocalDateTime(),
+        fixedEndAt = dueAt.atZone(zoneId).toLocalDateTime().plusMinutes(estimatedMinutes.toLong()),
         deadline = dueAt.atZone(zoneId).toLocalDateTime().plusDays(1),
         repeatsForever = true,
         estimatedMinutes = estimatedMinutes,
@@ -212,6 +223,31 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         recurrenceType = RecurrenceType.NONE,
         recurrenceDays = emptySet(),
     )
+
+fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskDraft {
+    val localDueAt = dueAt.atZone(zoneId).toLocalDateTime()
+    val localFixedStart = fixedStartAt?.atZone(zoneId)?.toLocalDateTime()
+        ?: localDueAt.minusMinutes(estimatedMinutes.toLong())
+    val localFixedEnd = fixedEndAt?.atZone(zoneId)?.toLocalDateTime()
+        ?: localDueAt
+    return TaskDraft(
+        title = if (title.endsWith(" Rescheduled")) title else "$title Rescheduled",
+        description = description,
+        priority = priority,
+        preferredTimePeriodId = preferredTimePeriodId,
+        deadline = localDueAt,
+        schedulingMode = schedulingMode,
+        startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE) fixedStartAt?.atZone(zoneId)?.toLocalDate() else null,
+        fixedDate = localDueAt.toLocalDate(),
+        fixedStartAt = localFixedStart,
+        fixedEndAt = localFixedEnd,
+        repeatsForever = recurrenceRule.until == null,
+        estimatedMinutes = estimatedMinutes,
+        addReminder = false,
+        recurrenceType = recurrenceRule.type,
+        recurrenceDays = recurrenceRule.daysOfWeek,
+    )
+}
 
 class PlannerViewModel(
     private val coordinator: PlannerCoordinator,
@@ -249,6 +285,9 @@ class PlannerViewModel(
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
+            schedulingMode = draft.schedulingMode,
+            fixedStartAt = draft.schedulingStartInstantOrNull(),
+            fixedEndAt = draft.fixedEndAtInstantOrNull(),
         )
     }
 
@@ -267,6 +306,29 @@ class PlannerViewModel(
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
+            schedulingMode = draft.schedulingMode,
+            fixedStartAt = draft.schedulingStartInstantOrNull(),
+            fixedEndAt = draft.fixedEndAtInstantOrNull(),
+        )
+    }
+
+    suspend fun rescheduleTaskWithUpdate(taskId: String, draft: TaskDraft): TaskCreationResult {
+        return coordinator.rescheduleTaskWithUpdate(
+            taskId = taskId,
+            title = draft.title,
+            description = draft.description,
+            priority = draft.priority,
+            dueAt = draft.taskDueAtInstant(),
+            preferredTimePeriodId = draft.preferredTimePeriodId,
+            recurrenceRule = RecurrenceRule(
+                type = draft.recurrenceType,
+                daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+                until = draft.repeatDeadlineOrNull(),
+            ),
+            estimatedMinutes = draft.estimatedMinutes,
+            schedulingMode = draft.schedulingMode,
+            fixedStartAt = draft.schedulingStartInstantOrNull(),
+            fixedEndAt = draft.fixedEndAtInstantOrNull(),
         )
     }
 
@@ -359,6 +421,7 @@ class PlannerViewModel(
     suspend fun setBreakBufferMinutes(value: Int) = settingsRepository.setBreakBufferMinutes(value)
     suspend fun setAlignmentMinutes(value: Int) = settingsRepository.setAlignmentMinutes(value)
     suspend fun setAllowTaskSplitting(value: Boolean) = settingsRepository.setAllowTaskSplitting(value)
+    suspend fun setAllowConcurrentTasks(value: Boolean) = settingsRepository.setAllowConcurrentTasks(value)
     suspend fun setMaxTaskChunkMinutes(value: Int) = settingsRepository.setMaxTaskChunkMinutes(value)
     suspend fun setPreferredPeriodFallbackMode(value: PreferredPeriodFallbackMode) = settingsRepository.setPreferredPeriodFallbackMode(value)
     suspend fun setUrgentRescheduleMode(value: UrgentRescheduleMode) = settingsRepository.setUrgentRescheduleMode(value)
@@ -374,12 +437,26 @@ private fun TaskDraft.taskDueAtInstant(): Instant =
 
 private fun TaskDraft.repeatDeadlineOrNull(): Instant? {
     if (recurrenceType == RecurrenceType.NONE || repeatsForever) return null
-    val deadlineInstant = deadline.atZone(ZoneId.systemDefault()).toInstant()
+    val deadlineInstant = when (schedulingMode) {
+        TaskSchedulingMode.FLEXIBLE -> deadline.atZone(ZoneId.systemDefault()).toInstant()
+        TaskSchedulingMode.FIXED_DAY -> fixedDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().minusSeconds(1)
+        TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
+    }
     val firstOccurrenceInstant = taskDueAtInstant()
     return if (deadlineInstant.isBefore(firstOccurrenceInstant)) firstOccurrenceInstant else deadlineInstant
 }
 
 private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.now()): LocalDateTime {
+    if (schedulingMode == TaskSchedulingMode.FIXED_DAY) {
+        return fixedDate.atTime(23, 59)
+    }
+    if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
+        return fixedEndAt
+    }
+    if (startDate != null && recurrenceType != RecurrenceType.NONE) {
+        val startCandidate = LocalDateTime.of(startDate, deadline.toLocalTime())
+        return if (startCandidate.isAfter(now)) startCandidate else deadline
+    }
     if (recurrenceType == RecurrenceType.NONE) return deadline
     val targetTime = deadline.toLocalTime()
     return when (recurrenceType) {
@@ -401,4 +478,14 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
         }
     }
 }
+
+private fun TaskDraft.schedulingStartInstantOrNull(): Instant? =
+    when (schedulingMode) {
+        TaskSchedulingMode.FLEXIBLE -> startDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()
+        TaskSchedulingMode.FIXED_DAY -> null
+        TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.atZone(ZoneId.systemDefault()).toInstant()
+    }
+
+private fun TaskDraft.fixedEndAtInstantOrNull(): Instant? =
+    if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) fixedEndAt.atZone(ZoneId.systemDefault()).toInstant() else null
 

@@ -136,18 +136,20 @@ fun RemindersScreen(
     reminders: List<Reminder>,
     tasksById: Map<String, ScheduleTask>,
     settings: AppSettings,
+    selectedDate: LocalDate,
+    onSelectedDateChange: (LocalDate) -> Unit,
     onAddTask: () -> Unit,
     onOpenReminder: (Reminder) -> Unit,
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
-    var anchorDate by rememberSaveable { mutableStateOf(LocalDate.now(zoneId)) }
+    val today = remember(zoneId) { LocalDate.now(zoneId) }
     val formatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
     val active = reminders
         .filter { it.status != ReminderStatus.COMPLETED }
         .sortedBy { it.dueAt }
-    val overdue = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isBefore(anchorDate) }
-    val dueToday = active.filter { it.dueAt.atZone(zoneId).toLocalDate() == anchorDate }
-    val upcoming = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isAfter(anchorDate) }
+    val overdue = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isBefore(selectedDate) }
+    val dueToday = active.filter { it.dueAt.atZone(zoneId).toLocalDate() == selectedDate }
+    val upcoming = active.filter { it.dueAt.atZone(zoneId).toLocalDate().isAfter(selectedDate) }
 
     LazyColumn(
         modifier = Modifier
@@ -168,19 +170,29 @@ fun RemindersScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    IconButton(onClick = { anchorDate = anchorDate.minusDays(1) }) {
+                    IconButton(onClick = { onSelectedDateChange(selectedDate.minusDays(1)) }) {
                         Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
                     }
                     Text(
-                        headerDateLabel(anchorDate, settings.dateFormatPreference),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        headerDateLabel(selectedDate, settings.dateFormatPreference),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (selectedDate == today) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                                } else {
+                                    Color.Transparent
+                                },
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    IconButton(onClick = { anchorDate = anchorDate.plusDays(1) }) {
+                    IconButton(onClick = { onSelectedDateChange(selectedDate.plusDays(1)) }) {
                         Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                     }
                 }

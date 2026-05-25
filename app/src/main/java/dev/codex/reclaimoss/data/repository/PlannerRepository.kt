@@ -24,6 +24,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
 import dev.codex.reclaimoss.domain.model.TimePeriodType
@@ -218,6 +219,9 @@ private fun TaskEntity.toDomain() = ScheduleTask(
     priority = priority,
     preferredTimeOfDay = preferredTimeOfDay,
     preferredTimePeriodId = preferredTimePeriodId,
+    schedulingMode = schedulingMode,
+    fixedStartAt = fixedStartAtEpochMillis?.let(Instant::ofEpochMilli),
+    fixedEndAt = fixedEndAtEpochMillis?.let(Instant::ofEpochMilli),
     dueAt = Instant.ofEpochMilli(dueAtEpochMillis),
     estimatedMinutes = estimatedMinutes,
     remainingMinutes = remainingMinutes,
@@ -244,6 +248,9 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     priority = priority,
     preferredTimeOfDay = preferredTimeOfDay,
     preferredTimePeriodId = preferredTimePeriodId,
+    schedulingMode = schedulingMode,
+    fixedStartAtEpochMillis = fixedStartAt?.toEpochMilli(),
+    fixedEndAtEpochMillis = fixedEndAt?.toEpochMilli(),
     dueAtEpochMillis = dueAt.toEpochMilli(),
     estimatedMinutes = estimatedMinutes,
     remainingMinutes = remainingMinutes,

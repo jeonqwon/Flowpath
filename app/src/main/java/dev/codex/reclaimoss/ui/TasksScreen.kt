@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,7 +62,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
@@ -73,6 +73,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -118,6 +119,7 @@ import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -160,7 +162,7 @@ fun TasksScreen(
     }
     val hourHeight = 144.dp
 
-    LaunchedEffect(autoPositionNonce, selectedDate) {
+    LaunchedEffect(autoPositionNonce) {
         val offsetMinutes = if (selectedDate == today) {
             (minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0)
         } else {
@@ -197,9 +199,19 @@ fun TasksScreen(
                 }
                 Text(
                     headerDateLabel(selectedDate, settings.dateFormatPreference),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (selectedDate == today) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
+                            } else {
+                                Color.Transparent
+                            },
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -223,6 +235,7 @@ fun TasksScreen(
                     zoneId = zoneId,
                     day = selectedDate,
                     hourHeight = hourHeight,
+                    allowConcurrentTasks = settings.allowConcurrentTasks,
                     onOpenTask = onOpenTask,
                     onDeleteTask = onDeleteTask,
                 )
@@ -238,7 +251,7 @@ fun HeaderActionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     width: Dp = HeaderActionWidth,
 ) {
-    Button(
+    TextButton(
         onClick = onClick,
         modifier = Modifier
             .width(width)
@@ -246,6 +259,10 @@ fun HeaderActionButton(
             .wrapContentWidth(Alignment.End),
         shape = HeaderActionShape,
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
+        colors = ButtonDefaults.textButtonColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
     ) {
         if (icon != null) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp))
@@ -263,6 +280,7 @@ fun FullDayTimeline(
     zoneId: ZoneId,
     day: LocalDate,
     hourHeight: Dp,
+    allowConcurrentTasks: Boolean = false,
     onOpenTask: (String) -> Unit,
     onDeleteTask: (String) -> Unit,
 ) {
@@ -271,11 +289,21 @@ fun FullDayTimeline(
     val now = remember { LocalTime.now(zoneId) }
     val showNowIndicator = day == LocalDate.now(zoneId)
 
-    Box(
+    val positionedBlocks = remember(blocks, allowConcurrentTasks) {
+        if (allowConcurrentTasks) {
+            computeTaskBlockLayout(blocks)
+        } else {
+            blocks.sortedBy { it.startAt }.map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
+        }
+    }
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .height(timelineHeight),
     ) {
+        val contentStart = labelWidth + 8.dp
+        val contentWidth = maxWidth - contentStart
         for (hour in 0..24) {
             val top = timelineOffset(minutes = hour * 60, hourHeight = hourHeight)
             Text(
@@ -309,14 +337,15 @@ fun FullDayTimeline(
                 hourHeight = hourHeight,
             )
         }
-        blocks.sortedBy { it.startAt }.forEach { block ->
+        positionedBlocks.forEach { positioned ->
             FullDayTaskBlock(
-                block = block,
-                task = tasksById[block.taskId],
+                positionedBlock = positioned,
+                task = tasksById[positioned.block.taskId],
                 zoneId = zoneId,
-                labelWidth = labelWidth,
+                contentStart = contentStart,
+                contentWidth = contentWidth,
                 hourHeight = hourHeight,
-                onOpen = { onOpenTask(block.taskId) },
+                onOpen = { onOpenTask(positioned.block.taskId) },
             )
         }
         if (showNowIndicator) {
@@ -340,6 +369,37 @@ fun FullDayTimeline(
             )
         }
     }
+}
+
+data class PositionedTaskBlock(
+    val block: ScheduleBlock,
+    val laneIndex: Int,
+    val totalLanes: Int,
+)
+
+private fun computeTaskBlockLayout(blocks: List<ScheduleBlock>): List<PositionedTaskBlock> {
+    data class ActiveLane(val endAt: Instant, val laneIndex: Int)
+    data class AssignedBlock(val block: ScheduleBlock, val laneIndex: Int, val groupId: Int)
+
+    val sorted = blocks.sortedBy { it.startAt }
+    val active = mutableListOf<ActiveLane>()
+    val assigned = mutableListOf<AssignedBlock>()
+    var groupId = -1
+
+    for (block in sorted) {
+        active.removeAll { !it.endAt.isAfter(block.startAt) }
+        if (active.isEmpty()) groupId += 1
+        val usedLanes = active.map { it.laneIndex }.toSet()
+        var laneIndex = 0
+        while (laneIndex in usedLanes) laneIndex += 1
+        active += ActiveLane(block.endAt, laneIndex)
+        assigned += AssignedBlock(block, laneIndex, groupId)
+    }
+
+    val groupLaneCounts = assigned.groupBy { it.groupId }.mapValues { (_, group) ->
+        group.maxOf { it.laneIndex } + 1
+    }
+    return assigned.map { PositionedTaskBlock(it.block, it.laneIndex, groupLaneCounts.getValue(it.groupId)) }
 }
 
 @Composable
@@ -376,28 +436,33 @@ fun CompletedTaskHistoryCard(task: ScheduleTask, zoneId: ZoneId) {
 
 @Composable
 fun FullDayTaskBlock(
-    block: ScheduleBlock,
+    positionedBlock: PositionedTaskBlock,
     task: ScheduleTask?,
     zoneId: ZoneId,
-    labelWidth: Dp,
+    contentStart: Dp,
+    contentWidth: Dp,
     hourHeight: Dp,
     onOpen: () -> Unit,
 ) {
+    val block = positionedBlock.block
     val start = block.startAt.atZone(zoneId).toLocalTime()
     val top = timelineOffset(minutes = minutesFromStart(start), hourHeight = hourHeight)
     val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
     val height = timelineBlockHeight(minutes = durationMinutes, hourHeight = hourHeight, minHeight = 64.dp)
+    val laneGap = 8.dp
+    val laneCount = positionedBlock.totalLanes.coerceAtLeast(1)
+    val laneWidth = (contentWidth - laneGap * (laneCount - 1)) / laneCount
+    val xOffset = contentStart + (laneWidth + laneGap) * positionedBlock.laneIndex
     Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = labelWidth + 8.dp)
+            .width(laneWidth)
             .height(height)
-            .offset(y = top)
+            .offset(x = xOffset, y = top)
             .clickable(onClick = onOpen),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
@@ -433,11 +498,16 @@ fun FullDayLifeBlock(
             .height(height)
             .offset(y = top),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(period.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                period.label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

@@ -19,6 +19,7 @@ import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriodType
@@ -45,6 +46,9 @@ data class TaskEntity(
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay,
     val preferredTimePeriodId: String?,
+    val schedulingMode: TaskSchedulingMode,
+    val fixedStartAtEpochMillis: Long?,
+    val fixedEndAtEpochMillis: Long?,
     val dueAtEpochMillis: Long,
     val estimatedMinutes: Int,
     val remainingMinutes: Int,
@@ -218,6 +222,12 @@ class RoomConverters {
     fun toTaskStatus(value: String): TaskStatus = TaskStatus.valueOf(value)
 
     @TypeConverter
+    fun fromTaskSchedulingMode(value: TaskSchedulingMode): String = value.name
+
+    @TypeConverter
+    fun toTaskSchedulingMode(value: String): TaskSchedulingMode = TaskSchedulingMode.valueOf(value)
+
+    @TypeConverter
     fun fromReminderStatus(value: ReminderStatus): String = value.name
 
     @TypeConverter
@@ -289,7 +299,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -310,6 +320,14 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceUntilEpochMillis INTEGER")
                 database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceUntilEpochMillis INTEGER")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN schedulingMode TEXT NOT NULL DEFAULT 'FLEXIBLE'")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN fixedStartAtEpochMillis INTEGER")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN fixedEndAtEpochMillis INTEGER")
             }
         }
     }

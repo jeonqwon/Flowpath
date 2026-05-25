@@ -120,10 +120,8 @@ import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import dev.codex.reclaimoss.settings.HistoryRetention
 import dev.codex.reclaimoss.settings.DateFormatPreference
-import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
 import dev.codex.reclaimoss.settings.ReminderTimingMode
 import dev.codex.reclaimoss.settings.ThemeMode
-import dev.codex.reclaimoss.settings.UrgentRescheduleMode
 import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
 import java.time.Instant
@@ -164,6 +162,7 @@ fun SettingsScreen(
     padding: PaddingValues,
     periods: List<TimePeriod>,
     settings: AppSettings,
+    isActive: Boolean = true,
     startInDailyFlow: Boolean = false,
     startInEditFlow: Boolean = false,
     showDailyFlowOnboardingPrompt: Boolean = false,
@@ -175,9 +174,8 @@ fun SettingsScreen(
     onBreakBufferChanged: (Int) -> Unit,
     onAlignmentChanged: (Int) -> Unit,
     onAllowTaskSplittingChanged: (Boolean) -> Unit,
+    onAllowConcurrentTasksChanged: (Boolean) -> Unit,
     onMaxTaskChunkChanged: (Int) -> Unit,
-    onPreferredFallbackChanged: (PreferredPeriodFallbackMode) -> Unit,
-    onUrgentRescheduleChanged: (UrgentRescheduleMode) -> Unit,
     onDefaultTaskReminderChanged: (Boolean) -> Unit,
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
     onReminderLeadMinutesChanged: (Int) -> Unit,
@@ -198,6 +196,12 @@ fun SettingsScreen(
     LaunchedEffect(startInEditFlow, section) {
         if (startInEditFlow && section == SettingsSection.DailyFlow) {
             editFlow = true
+        }
+    }
+    LaunchedEffect(isActive, startInDailyFlow) {
+        if (!isActive) {
+            section = if (startInDailyFlow) SettingsSection.DailyFlow else null
+            editFlow = false
         }
     }
     BackHandler(enabled = section != null) {
@@ -385,6 +389,12 @@ fun SettingsScreen(
                                 subtitle = "Break long tasks across open slots",
                                 checked = settings.allowTaskSplitting,
                                 onCheckedChange = onAllowTaskSplittingChanged,
+                            )
+                            SettingsInlineSwitchRow(
+                                title = "Allow concurrent tasks",
+                                subtitle = "Let tasks overlap side by side when needed",
+                                checked = settings.allowConcurrentTasks,
+                                onCheckedChange = onAllowConcurrentTasksChanged,
                             )
                             SettingsControlRow(
                                 title = "Max task chunk",
@@ -800,19 +810,12 @@ fun SettingsControlRow(
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = settingsPrimaryTextColor(isDarkSettings),
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = settingsSecondaryTextColor(isDarkSettings),
-            )
-        }
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = settingsPrimaryTextColor(isDarkSettings),
+        )
         content()
     }
 }
@@ -841,11 +844,6 @@ fun SettingsInlineSwitchRow(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = settingsPrimaryTextColor(isDarkSettings),
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = settingsSecondaryTextColor(isDarkSettings),
             )
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
@@ -884,10 +882,10 @@ fun <T> SegmentedEnumRow(
                     .height(56.dp)
                     .clickable { onSelected(option) },
                 shape = RoundedCornerShape(18.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.outlineVariant,
+                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                 ),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -895,7 +893,7 @@ fun <T> SegmentedEnumRow(
                         labelFor(option),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -1301,7 +1299,7 @@ fun headerDateLabel(date: LocalDate, formatPreference: DateFormatPreference): St
         DateFormatPreference.MONTH_DAY_YEAR -> "${date.monthValue}/${date.dayOfMonth}"
         DateFormatPreference.DAY_MONTH_YEAR -> "${date.dayOfMonth}/${date.monthValue}"
     }
-    return "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())}, $order"
+    return "${date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())} $order"
 }
 
 fun reminderDateTimeFormatter(formatPreference: DateFormatPreference): DateTimeFormatter =

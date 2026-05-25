@@ -63,6 +63,12 @@ enum class SchedulingIssueType {
     UNSCHEDULED,
 }
 
+enum class TaskSchedulingMode {
+    FLEXIBLE,
+    FIXED_DAY,
+    FIXED_EXACT,
+}
+
 data class TimeWindow(
     val start: LocalTime,
     val end: LocalTime,
@@ -96,6 +102,7 @@ data class SchedulingPolicy(
     val alignmentMinutes: Int = 30,
     val allowTaskSplitting: Boolean = true,
     val strictPreferredPeriod: Boolean = false,
+    val allowConcurrentTasks: Boolean = false,
 )
 
 data class Project(
@@ -127,6 +134,9 @@ data class ScheduleTask(
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
     val preferredTimePeriodId: String? = null,
+    val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+    val fixedStartAt: Instant? = null,
+    val fixedEndAt: Instant? = null,
     val dueAt: Instant,
     val estimatedMinutes: Int,
     val remainingMinutes: Int,

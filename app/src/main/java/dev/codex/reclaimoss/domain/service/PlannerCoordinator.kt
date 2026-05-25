@@ -11,8 +11,11 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderPolicy
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
+import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
 import dev.codex.reclaimoss.domain.model.TimePeriodType
@@ -41,6 +44,13 @@ data class TaskCreationResult(
     val taskId: String,
     val scheduled: Boolean,
     val partial: Boolean,
+    val reason: String? = null,
+)
+
+private data class TaskOccurrence(
+    val dueAt: Instant,
+    val fixedStartAt: Instant?,
+    val fixedEndAt: Instant?,
 )
 
 class PlannerCoordinator(
@@ -76,12 +86,21 @@ class PlannerCoordinator(
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
+        schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+        fixedStartAt: Instant? = null,
+        fixedEndAt: Instant? = null,
     ): TaskCreationResult {
         val isRecurringSeries = recurrenceRule.type != RecurrenceType.NONE
         val seriesId = if (isRecurringSeries) newId("series") else null
-        val dueDates = materializedDueDates(dueAt, recurrenceRule)
+        val occurrences = materializedOccurrences(
+            initialDueAt = dueAt,
+            recurrenceRule = recurrenceRule,
+            schedulingMode = schedulingMode,
+            fixedStartAt = fixedStartAt,
+            fixedEndAt = fixedEndAt,
+        )
         val taskIdsNeedingReminder = mutableListOf<String>()
-        val createdTaskIds = dueDates.mapIndexed { index, occurrenceDueAt ->
+        val createdTaskIds = occurrences.mapIndexed { index, occurrence ->
             val taskId = "${newId("task")}-$index"
             repository.upsertTask(
                 ScheduleTask(
@@ -93,7 +112,10 @@ class PlannerCoordinator(
                     priority = priority,
                     preferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
                     preferredTimePeriodId = preferredTimePeriodId,
-                    dueAt = occurrenceDueAt,
+                    schedulingMode = schedulingMode,
+                    fixedStartAt = occurrence.fixedStartAt,
+                    fixedEndAt = occurrence.fixedEndAt,
+                    dueAt = occurrence.dueAt,
                     estimatedMinutes = estimatedMinutes,
                     remainingMinutes = estimatedMinutes,
                     recurrenceRule = recurrenceRule,
@@ -104,28 +126,26 @@ class PlannerCoordinator(
             if (addReminder) taskIdsNeedingReminder += taskId
             taskId
         }
-        if (createdTaskIds.size == 1) {
+        if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
+            createdTaskIds.forEach { taskId ->
+                placeExactTask(taskId)
+            }
+        } else if (createdTaskIds.size == 1) {
             scheduleTask(createdTaskIds.first())
         } else {
             rebuildSchedule()
         }
         taskIdsNeedingReminder.forEach { createReminderForTask(it) }
         val primaryTaskId = createdTaskIds.first()
-        val hasScheduledBlock = repository.getBlocks().any { it.taskId == primaryTaskId }
-        val issue = repository.getSchedulingIssues().firstOrNull { it.taskId == primaryTaskId }
-        val failedToFullySchedule =
-            !hasScheduledBlock || issue != null
+        val result = taskResultFor(primaryTaskId)
+        val failedToFullySchedule = !result.scheduled
         if (failedToFullySchedule && recurrenceRule.type == RecurrenceType.NONE) {
             repository.getReminders()
                 .filter { it.linkedTaskId == primaryTaskId }
                 .forEach { repository.deleteReminder(it.id) }
             deleteTask(primaryTaskId)
         }
-        return TaskCreationResult(
-            taskId = primaryTaskId,
-            scheduled = !failedToFullySchedule,
-            partial = issue?.type == dev.codex.reclaimoss.domain.model.SchedulingIssueType.PARTIAL,
-        )
+        return result
     }
 
     suspend fun createFollowUpTask(
@@ -138,6 +158,9 @@ class PlannerCoordinator(
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
+        schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+        fixedStartAt: Instant? = null,
+        fixedEndAt: Instant? = null,
     ): TaskCreationResult? {
         val sourceTask = repository.getTasks().firstOrNull { it.id == sourceTaskId } ?: return null
         val result = createTask(
@@ -149,6 +172,9 @@ class PlannerCoordinator(
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             addReminder = addReminder,
+            schedulingMode = schedulingMode,
+            fixedStartAt = fixedStartAt,
+            fixedEndAt = fixedEndAt,
         )
         if (!result.scheduled) return result
         repository.clearAllPendingBlocks(sourceTaskId)
@@ -267,6 +293,61 @@ class PlannerCoordinator(
         rebuildSchedule(ScheduleRebuildReason.ManualRebuild, taskId)
     }
 
+    suspend fun rescheduleTaskWithUpdate(
+        taskId: String,
+        title: String,
+        description: String,
+        priority: TaskPriority,
+        dueAt: Instant,
+        preferredTimePeriodId: String?,
+        recurrenceRule: RecurrenceRule,
+        estimatedMinutes: Int,
+        schedulingMode: TaskSchedulingMode,
+        fixedStartAt: Instant? = null,
+        fixedEndAt: Instant? = null,
+    ): TaskCreationResult {
+        val existingTask = repository.getTasks().firstOrNull { it.id == taskId } ?: return TaskCreationResult(
+                taskId = taskId,
+                scheduled = false,
+                partial = false,
+                reason = "Task no longer exists.",
+            )
+        val originalPendingBlocks = repository.getBlocks()
+            .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
+        val originalIssues = repository.getSchedulingIssues().filter { it.taskId == taskId }
+        val updatedTask = existingTask.copy(
+            title = title,
+            description = description,
+            priority = priority,
+            preferredTimePeriodId = preferredTimePeriodId,
+            schedulingMode = schedulingMode,
+            fixedStartAt = fixedStartAt,
+            fixedEndAt = fixedEndAt,
+            dueAt = dueAt,
+            estimatedMinutes = estimatedMinutes,
+            remainingMinutes = estimatedMinutes,
+            recurrenceRule = recurrenceRule,
+            updatedAt = now(),
+        )
+        repository.clearAllPendingBlocks(taskId)
+        repository.upsertTask(updatedTask)
+        if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
+            placeExactTask(taskId)
+        } else {
+            rebuildSchedule(ScheduleRebuildReason.ManualRebuild, taskId)
+        }
+        val result = taskResultFor(taskId)
+        if (!result.scheduled) {
+            repository.upsertTask(existingTask)
+            repository.replaceFlexibleBlocks(taskId, originalPendingBlocks)
+            repository.replaceSchedulingIssuesForTask(taskId, originalIssues)
+            syncLinkedReminderForTask(taskId)
+            return result
+        }
+        syncLinkedReminderForTask(taskId)
+        return result
+    }
+
     suspend fun rebuildSchedule(
         reason: ScheduleRebuildReason = ScheduleRebuildReason.ManualRebuild,
         onlyTaskId: String? = null,
@@ -274,6 +355,9 @@ class PlannerCoordinator(
         val tasks = repository.getTasks()
         val filteredTasks = onlyTaskId?.let { id -> tasks.filter { it.id == id } } ?: tasks
         if (filteredTasks.isEmpty()) return
+
+        val exactTasks = filteredTasks.filter { it.schedulingMode == TaskSchedulingMode.FIXED_EXACT }
+        val schedulableTasks = filteredTasks.filter { it.schedulingMode != TaskSchedulingMode.FIXED_EXACT }
 
         val existingBlocks = repository.getBlocks()
         val timePeriods = repository.getTimePeriods()
@@ -285,22 +369,27 @@ class PlannerCoordinator(
             rangeStart = rangeStart,
             rangeEnd = rangeEnd,
         )
-        val plan = scheduler.rebuildSchedule(
-            tasks = filteredTasks,
-            existingBlocks = existingBlocks,
-            busyWindows = busyEvents,
-            workHours = workHoursFromProductivePeriods(timePeriods),
-            timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
-            policy = policy,
-            rangeStart = rangeStart,
-            reason = reason,
-        )
-        filteredTasks.forEach { task ->
-            repository.replaceFlexibleBlocks(task.id, plan.blocks.filter { it.taskId == task.id })
-            repository.replaceSchedulingIssuesForTask(task.id, plan.issues.filter { it.taskId == task.id })
-            syncLinkedReminderForTask(task.id)
+        if (schedulableTasks.isNotEmpty()) {
+            val plan = scheduler.rebuildSchedule(
+                tasks = schedulableTasks,
+                existingBlocks = existingBlocks,
+                busyWindows = busyEvents,
+                workHours = workHoursFromProductivePeriods(timePeriods),
+                timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
+                policy = policy,
+                rangeStart = rangeStart,
+                reason = reason,
+            )
+            schedulableTasks.forEach { task ->
+                repository.replaceFlexibleBlocks(task.id, plan.blocks.filter { it.taskId == task.id })
+                repository.replaceSchedulingIssuesForTask(task.id, plan.issues.filter { it.taskId == task.id })
+                syncLinkedReminderForTask(task.id)
+            }
+            calendarGateway.syncPlannedBlocks(repository.getBlocks())
         }
-        calendarGateway.syncPlannedBlocks(plan.blocks)
+        exactTasks.forEach { task ->
+            placeExactTask(task.id)
+        }
     }
 
     suspend fun lockBlock(blockId: String) {
@@ -514,6 +603,77 @@ class PlannerCoordinator(
         )
     }
 
+    private suspend fun placeExactTask(taskId: String) {
+        val task = repository.getTasks().firstOrNull { it.id == taskId } ?: return
+        if (task.schedulingMode != TaskSchedulingMode.FIXED_EXACT) return
+        repository.clearAllPendingBlocks(taskId)
+        val startAt = task.fixedStartAt
+        val endAt = task.fixedEndAt
+        if (startAt == null || endAt == null || !endAt.isAfter(startAt)) {
+            repository.replaceSchedulingIssuesForTask(
+                taskId,
+                listOf(
+                    dev.codex.reclaimoss.domain.model.SchedulingIssue(
+                        taskId = taskId,
+                        type = SchedulingIssueType.UNSCHEDULED,
+                        unscheduledMinutes = task.remainingMinutes,
+                        reason = "Exact-time task is missing a valid start and end time.",
+                    ),
+                ),
+            )
+            return
+        }
+        val rangeStart = startAt.minus(1, ChronoUnit.DAYS)
+        val rangeEnd = endAt.plus(1, ChronoUnit.DAYS)
+        val timePeriods = repository.getTimePeriods()
+        val hardBusyWindows = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) +
+            lifePeriodBusyWindows(timePeriods, rangeStart, rangeEnd) +
+            repository.getBlocks()
+                .filter { it.taskId != taskId }
+                .filter { it.lockState == BlockLockState.LOCKED || it.completionState == BlockCompletionState.COMPLETED }
+                .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
+        val otherTaskBusyWindows = repository.getBlocks()
+            .filter { it.taskId != taskId }
+            .filter { it.lockState != BlockLockState.LOCKED && it.completionState != BlockCompletionState.COMPLETED }
+            .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
+        val allowConcurrent = getSettings().allowConcurrentTasks
+        val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
+        val overlapsOtherTask = otherTaskBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
+        if (overlapsHardBlock || (!allowConcurrent && overlapsOtherTask)) {
+            repository.replaceSchedulingIssuesForTask(
+                taskId,
+                listOf(
+                    SchedulingIssue(
+                        taskId = taskId,
+                        type = SchedulingIssueType.UNSCHEDULED,
+                        unscheduledMinutes = task.remainingMinutes,
+                        reason = when {
+                            overlapsHardBlock -> "This fixed time overlaps a break, sleep, or other blocked time."
+                            else -> "This fixed time overlaps another task."
+                        },
+                    ),
+                ),
+            )
+            return
+        }
+        repository.replaceFlexibleBlocks(
+            taskId,
+            listOf(
+                dev.codex.reclaimoss.domain.model.ScheduleBlock(
+                    id = "exact-$taskId",
+                    taskId = taskId,
+                    startAt = startAt,
+                    endAt = endAt,
+                    source = dev.codex.reclaimoss.domain.model.BlockSource.MANUAL,
+                    lockState = BlockLockState.LOCKED,
+                    completionState = BlockCompletionState.PENDING,
+                    externalCalendarEventId = null,
+                ),
+            ),
+        )
+        repository.replaceSchedulingIssuesForTask(taskId, emptyList())
+    }
+
     private fun planSchedulesTaskCleanly(
         plan: dev.codex.reclaimoss.domain.model.SchedulePlan,
         taskId: String,
@@ -535,22 +695,45 @@ class PlannerCoordinator(
         rebuildSchedule()
     }
 
-    private fun materializedDueDates(
+    private fun materializedOccurrences(
         initialDueAt: Instant,
         recurrenceRule: RecurrenceRule,
-    ): List<Instant> {
-        if (recurrenceRule.type == RecurrenceType.NONE) return listOf(initialDueAt)
+        schedulingMode: TaskSchedulingMode,
+        fixedStartAt: Instant?,
+        fixedEndAt: Instant?,
+    ): List<TaskOccurrence> {
+        if (recurrenceRule.type == RecurrenceType.NONE) {
+            return listOf(TaskOccurrence(initialDueAt, fixedStartAt, fixedEndAt))
+        }
 
         val zoneId = zoneId()
         val horizonEnd = recurrenceHorizonEnd(recurrenceRule)
         val initial = initialDueAt.atZone(zoneId)
+        val fixedStartLocal = fixedStartAt?.atZone(zoneId)
+        val fixedEndLocal = fixedEndAt?.atZone(zoneId)
         return when (recurrenceRule.type) {
-            RecurrenceType.NONE -> listOf(initialDueAt)
+            RecurrenceType.NONE -> listOf(TaskOccurrence(initialDueAt, fixedStartAt, fixedEndAt))
             RecurrenceType.DAILY -> {
                 buildList {
                     var candidate = initial
                     while (!candidate.toInstant().isAfter(horizonEnd)) {
-                        if (!candidate.toInstant().isBefore(initialDueAt)) add(candidate.toInstant())
+                        if (!candidate.toInstant().isBefore(initialDueAt)) {
+                            add(
+                                TaskOccurrence(
+                                    dueAt = candidate.toInstant(),
+                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                        ZonedDateTime.of(candidate.toLocalDate(), fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                        ZonedDateTime.of(candidate.toLocalDate(), fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                ),
+                            )
+                        }
                         candidate = candidate.plusDays(1)
                     }
                 }
@@ -562,7 +745,23 @@ class PlannerCoordinator(
                     while (!candidateDate.atTime(initial.toLocalTime()).atZone(zoneId).toInstant().isAfter(horizonEnd)) {
                         if (candidateDate.dayOfWeek in repeatDays) {
                             val candidate = ZonedDateTime.of(candidateDate, initial.toLocalTime(), zoneId).toInstant()
-                            if (!candidate.isBefore(initialDueAt)) add(candidate)
+                            if (!candidate.isBefore(initialDueAt)) {
+                                add(
+                                    TaskOccurrence(
+                                        dueAt = candidate,
+                                        fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                            ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                        } else {
+                                            null
+                                        },
+                                        fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                            ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                        } else {
+                                            null
+                                        },
+                                    ),
+                                )
+                            }
                         }
                         candidateDate = candidateDate.plusDays(1)
                     }
@@ -586,6 +785,14 @@ class PlannerCoordinator(
                     task.copy(
                         id = "${newId("task")}-${existingDueAts.size}",
                         dueAt = nextDueAt,
+                        fixedStartAt = task.fixedStartAt?.let {
+                            val local = it.atZone(zoneId())
+                            ZonedDateTime.of(nextDueAt.atZone(zoneId()).toLocalDate(), local.toLocalTime(), zoneId()).toInstant()
+                        },
+                        fixedEndAt = task.fixedEndAt?.let {
+                            val local = it.atZone(zoneId())
+                            ZonedDateTime.of(nextDueAt.atZone(zoneId()).toLocalDate(), local.toLocalTime(), zoneId()).toInstant()
+                        },
                         remainingMinutes = task.estimatedMinutes,
                         status = TaskStatus.ACTIVE,
                         updatedAt = now(),
@@ -701,6 +908,17 @@ class PlannerCoordinator(
         }
     }
 
+    private suspend fun taskResultFor(taskId: String): TaskCreationResult {
+        val hasScheduledBlock = repository.getBlocks().any { it.taskId == taskId }
+        val issue = repository.getSchedulingIssues().firstOrNull { it.taskId == taskId }
+        return TaskCreationResult(
+            taskId = taskId,
+            scheduled = hasScheduledBlock && issue == null,
+            partial = issue?.type == SchedulingIssueType.PARTIAL,
+            reason = issue?.reason,
+        )
+    }
+
     private fun schedulingPolicy(settings: AppSettings) = SchedulingPolicy(
         minBlockMinutes = 30,
         maxBlockMinutes = settings.maxTaskChunkMinutes,
@@ -711,6 +929,7 @@ class PlannerCoordinator(
         alignmentMinutes = settings.alignmentMinutes,
         allowTaskSplitting = settings.allowTaskSplitting,
         strictPreferredPeriod = settings.preferredPeriodFallbackMode == PreferredPeriodFallbackMode.STRICT,
+        allowConcurrentTasks = settings.allowConcurrentTasks,
     )
 
     private fun newId(prefix: String): String = "$prefix-${UUID.randomUUID()}"

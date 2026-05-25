@@ -15,11 +15,13 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
 import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
+import dev.codex.reclaimoss.settings.AppSettings
 import java.time.Clock
 import java.time.DayOfWeek
 import java.time.Instant
@@ -335,6 +337,124 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `creating fixed exact task creates locked manual block at exact time`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val exactStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(14, 0).atZone(zone).toInstant()
+        val exactEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(15, 30).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Pinned call",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = exactEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 90,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = exactStart,
+            fixedEndAt = exactEnd,
+        )
+
+        assertTrue(result.scheduled)
+        val block = repository.getBlocks().single { it.taskId == result.taskId }
+        assertEquals(exactStart, block.startAt)
+        assertEquals(exactEnd, block.endAt)
+        assertEquals(BlockSource.MANUAL, block.source)
+        assertEquals(BlockLockState.LOCKED, block.lockState)
+    }
+
+    @Test
+    fun `creating fixed exact task reports overlap with life block`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-lunch", "Lunch", LocalTime.of(12, 0), LocalTime.of(13, 0), type = TimePeriodType.LIFE, sortOrder = 1),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 2),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val exactStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(12, 15).atZone(zone).toInstant()
+        val exactEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(13, 0).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Lunch overlap",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = exactEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 45,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = exactStart,
+            fixedEndAt = exactEnd,
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("This fixed time overlaps a break, sleep, or other blocked time.", result.reason)
+        assertTrue(repository.getTasks().none { it.id == result.taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+    }
+
+    @Test
+    fun `creating fixed day task only schedules on the chosen day`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val chosenDate = now().atZone(zone).toLocalDate().plusDays(2)
+        val dueAt = chosenDate.atTime(17, 0).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Same day errand",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_DAY,
+        )
+
+        assertTrue(result.scheduled)
+        assertTrue(
+            repository.getBlocks()
+                .filter { it.taskId == result.taskId }
+                .all { it.startAt.atZone(zone).toLocalDate() == chosenDate },
+        )
+    }
+
+    @Test
+    fun `creating fixed day task reports no productive time on selected date`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-tiny", "Tiny", LocalTime.of(8, 0), LocalTime.of(8, 15), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val chosenDate = now().atZone(zone).toLocalDate().plusDays(1)
+        val dueAt = chosenDate.atTime(17, 0).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "Fixed-day impossible",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = "period-tiny",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_DAY,
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("No productive time is available on the selected date.", result.reason)
+        assertTrue(repository.getTasks().none { it.id == result.taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+    }
+
+    @Test
     fun `creating a second long task does not shrink the original scheduled task`() = runTest {
         val repository = FakePlannerRepository(
             periods = mutableListOf(
@@ -451,6 +571,129 @@ class PlannerCoordinatorTest {
 
         assertTrue(repository.getBlocks().none { it.id == "original-block" })
         assertTrue(repository.getBlocks().any { it.taskId == task.id && it.id != "original-block" })
+    }
+
+    @Test
+    fun `rescheduling with task draft updates same task and linked reminder timing`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val originalStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(9, 0).atZone(zone).toInstant()
+        val originalEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(10, 0).atZone(zone).toInstant()
+        val task = task(
+            id = "reschedule-me",
+            dueAt = originalEnd,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+        ).copy(
+            title = "Review notes",
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = originalStart,
+            fixedEndAt = originalEnd,
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(
+                block(task.id, "original-exact", originalStart, originalEnd).copy(
+                    source = BlockSource.MANUAL,
+                    lockState = BlockLockState.LOCKED,
+                ),
+            ),
+        )
+        coordinator.createReminderForTask(task.id)
+
+        val newStart = now().atZone(zone).toLocalDate().plusDays(2).atTime(13, 0).atZone(zone).toInstant()
+        val newEnd = now().atZone(zone).toLocalDate().plusDays(2).atTime(14, 0).atZone(zone).toInstant()
+
+        val result = coordinator.rescheduleTaskWithUpdate(
+            taskId = task.id,
+            title = "Review notes Rescheduled",
+            description = task.description,
+            priority = task.priority,
+            dueAt = newEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = newStart,
+            fixedEndAt = newEnd,
+        )
+
+        assertTrue(result.scheduled)
+        val updatedTask = repository.getTasks().single { it.id == task.id }
+        val updatedBlock = repository.getBlocks().single { it.taskId == task.id }
+        val updatedReminder = repository.getReminders().single { it.linkedTaskId == task.id }
+        assertEquals("Review notes Rescheduled", updatedTask.title)
+        assertEquals(newEnd, updatedTask.dueAt)
+        assertEquals(newStart, updatedTask.fixedStartAt)
+        assertEquals(newEnd, updatedTask.fixedEndAt)
+        assertEquals(newStart, updatedBlock.startAt)
+        assertEquals(newEnd, updatedBlock.endAt)
+        assertEquals(newEnd, updatedReminder.dueAt)
+    }
+
+    @Test
+    fun `rescheduling with overlapping fixed exact time fails and restores original task state`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-lunch", "Lunch", LocalTime.of(12, 0), LocalTime.of(13, 0), type = TimePeriodType.LIFE, sortOrder = 1),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 2),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val originalStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(9, 0).atZone(zone).toInstant()
+        val originalEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(10, 0).atZone(zone).toInstant()
+        val task = task(
+            id = "reschedule-conflict",
+            dueAt = originalEnd,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+        ).copy(
+            title = "Review notes",
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = originalStart,
+            fixedEndAt = originalEnd,
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(
+                block(task.id, "original-exact", originalStart, originalEnd).copy(
+                    source = BlockSource.MANUAL,
+                    lockState = BlockLockState.LOCKED,
+                ),
+            ),
+        )
+        coordinator.createReminderForTask(task.id)
+        val conflictingStart = now().atZone(zone).toLocalDate().plusDays(2).atTime(12, 15).atZone(zone).toInstant()
+        val conflictingEnd = now().atZone(zone).toLocalDate().plusDays(2).atTime(13, 0).atZone(zone).toInstant()
+
+        val result = coordinator.rescheduleTaskWithUpdate(
+            taskId = task.id,
+            title = "Review notes Rescheduled",
+            description = task.description,
+            priority = task.priority,
+            dueAt = conflictingEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 45,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = conflictingStart,
+            fixedEndAt = conflictingEnd,
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("This fixed time overlaps a break, sleep, or other blocked time.", result.reason)
+        val restoredTask = repository.getTasks().single { it.id == task.id }
+        val restoredBlock = repository.getBlocks().single { it.taskId == task.id }
+        val restoredReminder = repository.getReminders().single { it.linkedTaskId == task.id }
+        assertEquals("Review notes", restoredTask.title)
+        assertEquals(originalStart, restoredTask.fixedStartAt)
+        assertEquals(originalEnd, restoredTask.fixedEndAt)
+        assertEquals(originalStart, restoredBlock.startAt)
+        assertEquals(originalEnd, restoredBlock.endAt)
+        assertEquals(originalEnd, restoredReminder.dueAt)
     }
 
     @Test
@@ -776,11 +1019,11 @@ class PlannerCoordinatorTest {
     fun `create task returns unscheduled when no productive slot is available and task is not kept`() = runTest {
         val repository = FakePlannerRepository(
             periods = mutableListOf(
-                TimePeriod("period-tiny", "Tiny", LocalTime.of(8, 0), LocalTime.of(8, 30), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-tiny", "Tiny", LocalTime.of(8, 0), LocalTime.of(8, 15), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
             ),
         )
         val coordinator = coordinator(repository)
-        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(8, 30).atZone(zone).toInstant()
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(8, 15).atZone(zone).toInstant()
 
         val result = coordinator.createTask(
             title = "Impossible task",
@@ -794,6 +1037,7 @@ class PlannerCoordinatorTest {
         )
 
         assertTrue(!result.scheduled)
+        assertEquals("No valid productive slot is available before the deadline.", result.reason)
         assertTrue(repository.getTasks().none { it.id == result.taskId })
         assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
     }

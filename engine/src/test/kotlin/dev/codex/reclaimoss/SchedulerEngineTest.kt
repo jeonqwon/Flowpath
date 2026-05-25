@@ -9,6 +9,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimeWindow
@@ -585,6 +586,44 @@ class SchedulerEngineTest {
         assertEquals(listOf("unscheduled-task"), plan.unscheduledTaskIds)
         assertEquals(SchedulingIssueType.UNSCHEDULED, plan.issues.single().type)
         assertEquals(60, plan.issues.single().unscheduledMinutes)
+    }
+
+    @Test
+    fun `allow concurrent tasks schedules overlapping work blocks`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+        val first = task(
+            id = "first-overlap",
+            deadline = dueAt,
+            estimatedMinutes = 180,
+            remainingMinutes = 180,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+        )
+        val second = task(
+            id = "second-overlap",
+            deadline = dueAt,
+            estimatedMinutes = 180,
+            remainingMinutes = 180,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(first, second),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val firstBlock = plan.blocks.first { it.taskId == first.id }
+        val secondBlock = plan.blocks.first { it.taskId == second.id }
+        assertTrue(firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt)
     }
 
     private fun task(

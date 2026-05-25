@@ -138,23 +138,16 @@ fun TaskDetailScreen(
     onBack: () -> Unit,
     onAddReminder: () -> Unit,
     onFollowUp: () -> Unit,
-    onRescheduleUrgently: (Instant?) -> Unit,
-    onRescheduleLater: (Instant?) -> Unit,
+    onReschedule: () -> Unit,
     onDone: () -> Unit,
     onDoneAllRecurring: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val context = LocalContext.current
     val zoneId = remember { ZoneId.systemDefault() }
     val formatter = remember { DateTimeFormatter.ofPattern("MMM d, h:mm a") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
     val firstBlock = blocks.firstOrNull()
-    var showReschedule by rememberSaveable { mutableStateOf(false) }
     var showActionsMenu by rememberSaveable { mutableStateOf(false) }
-    var showDeadlineEditor by rememberSaveable { mutableStateOf(false) }
-    var deadlineChanged by rememberSaveable { mutableStateOf(false) }
-    var customDeadline by remember { mutableStateOf(task.dueAt.atZone(zoneId).toLocalDateTime()) }
-    val selectedDeadline = if (deadlineChanged) customDeadline.atZone(zoneId).toInstant() else null
     val isRecurringTask = task.recurrenceSeriesId != null || task.recurrenceRule.type != RecurrenceType.NONE
 
     LazyColumn(
@@ -234,60 +227,6 @@ fun TaskDetailScreen(
             }
         }
         item {
-            if (showReschedule) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Reschedule", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        RescheduleOption("Urgent", { onRescheduleUrgently(selectedDeadline) })
-                        RescheduleOption("Next available", { onRescheduleLater(selectedDeadline) })
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                        ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { showDeadlineEditor = !showDeadlineEditor },
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("Deadline", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            formatter.format(customDeadline.atZone(zoneId)),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Text(
-                                        if (showDeadlineEditor) "Hide" else "Change",
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                }
-                                if (showDeadlineEditor) {
-                                    DateTimePickerRows(
-                                        dateTime = customDeadline,
-                                        onDateTimeChanged = {
-                                            customDeadline = it
-                                            deadlineChanged = true
-                                        },
-                                        context = context,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
@@ -349,7 +288,7 @@ fun TaskDetailScreen(
                                 icon = Icons.Outlined.CalendarMonth,
                                 onClick = {
                                     showActionsMenu = false
-                                    showReschedule = !showReschedule
+                                    onReschedule()
                                 },
                             )
                         }
@@ -478,20 +417,4 @@ fun DetailRow(label: String, value: String) {
     }
 }
 
-@Composable
-fun RescheduleOption(label: String, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-    ) {
-        Text(
-            label,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}
 

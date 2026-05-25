@@ -137,6 +137,8 @@ fun PlannerScreen(
     padding: PaddingValues,
     state: PlannerUiState,
     settings: AppSettings,
+    selectedDate: LocalDate,
+    onSelectedDateChange: (LocalDate) -> Unit,
     onRebuild: () -> Unit,
     onAddTask: () -> Unit,
     onToggleLock: (ScheduleBlock) -> Unit,
@@ -144,9 +146,12 @@ fun PlannerScreen(
     onReschedule: (String) -> Unit,
     onOpenTask: (String) -> Unit,
 ) {
-    var visibleMonth by rememberSaveable { mutableStateOf(YearMonth.now()) }
+    var visibleMonth by rememberSaveable { mutableStateOf(YearMonth.from(selectedDate)) }
     val zoneId = remember { ZoneId.systemDefault() }
-    var selectedDate by rememberSaveable { mutableStateOf(LocalDate.now(zoneId)) }
+    val today = remember(zoneId) { LocalDate.now(zoneId) }
+    LaunchedEffect(selectedDate) {
+        visibleMonth = YearMonth.from(selectedDate)
+    }
     val activeBlocks = remember(state.snapshot.blocks) {
         state.snapshot.blocks.filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
     }
@@ -195,23 +200,33 @@ fun PlannerScreen(
                 ) {
                     IconButton(onClick = {
                         val newDate = selectedDate.minusDays(1)
-                        selectedDate = newDate
+                        onSelectedDateChange(newDate)
                         visibleMonth = YearMonth.from(newDate)
                     }) {
                         Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
                     }
                     Text(
                         headerDateLabel(selectedDate, settings.dateFormatPreference),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(
+                                if (selectedDate == today) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+                                } else {
+                                    Color.Transparent
+                                },
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     IconButton(onClick = {
                         val newDate = selectedDate.plusDays(1)
-                        selectedDate = newDate
+                        onSelectedDateChange(newDate)
                         visibleMonth = YearMonth.from(newDate)
                     }) {
                         Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
@@ -230,7 +245,7 @@ fun PlannerScreen(
                 tasksById = tasksById,
                 onPreviousMonth = { visibleMonth = visibleMonth.minusMonths(1) },
                 onNextMonth = { visibleMonth = visibleMonth.plusMonths(1) },
-                onDateSelected = { selectedDate = it },
+                onDateSelected = { onSelectedDateChange(it) },
             )
         }
         selectedDayOverview(
@@ -535,7 +550,7 @@ fun CalendarCard(
             }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(7),
-                modifier = Modifier.height(310.dp),
+                modifier = Modifier.height(360.dp),
                 userScrollEnabled = false,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -577,11 +592,11 @@ fun CalendarDayCell(
     val background = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
     Box(
         modifier = Modifier
-            .height(48.dp)
+            .height(52.dp)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .background(background, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 3.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
         if (isToday) {
             Box(
@@ -592,8 +607,10 @@ fun CalendarDayCell(
             )
         }
         Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 1.dp, bottom = 2.dp),
+            verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -602,6 +619,7 @@ fun CalendarDayCell(
                 fontWeight = FontWeight.Bold,
                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             )
+            Spacer(modifier = Modifier.height(4.dp))
             if (tasks.isNotEmpty() || hasReminders) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
