@@ -1,0 +1,157 @@
+package dev.codex.reclaimoss.ui.theme
+
+import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import dev.codex.reclaimoss.settings.ThemeMode
+
+private val FlowpathLightColors = lightColorScheme(
+    primary = Color(0xFF3F5FBF),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDDE6FF),
+    onPrimaryContainer = Color(0xFF13265B),
+    secondary = Color(0xFF6A8F82),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE4EFEA),
+    onSecondaryContainer = Color(0xFF1B362E),
+    background = Color(0xFFF3F6FB),
+    onBackground = Color(0xFF16202D),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF16202D),
+    surfaceVariant = Color(0xFFE9EEF6),
+    onSurfaceVariant = Color(0xFF607082),
+    outline = Color(0xFFC7D2E0),
+    outlineVariant = Color(0xFFDCE4EF),
+)
+
+private val FlowpathDarkColors = darkColorScheme(
+    primary = Color(0xFFB8C7FF),
+    onPrimary = Color(0xFF132762),
+    primaryContainer = Color(0xFF2A448F),
+    onPrimaryContainer = Color(0xFFE3E9FF),
+    secondary = Color(0xFFA6CCBE),
+    onSecondary = Color(0xFF17342C),
+    secondaryContainer = Color(0xFF334C44),
+    onSecondaryContainer = Color(0xFFE5F4EE),
+    background = Color(0xFF1A1C1E),
+    onBackground = Color(0xFFE2E2E6),
+    surface = Color(0xFF1E2024),
+    onSurface = Color(0xFFE2E2E6),
+    surfaceVariant = Color(0xFF292D33),
+    onSurfaceVariant = Color(0xFFC3C6CF),
+    outline = Color(0xFF8E9199),
+    outlineVariant = Color(0xFF43474E),
+)
+
+private val FlowpathTypography = Typography(
+    headlineMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 28.sp,
+        lineHeight = 34.sp,
+        letterSpacing = (-0.2).sp,
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 22.sp,
+        lineHeight = 28.sp,
+    ),
+    titleMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 24.sp,
+    ),
+    titleSmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 15.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp,
+    ),
+    bodyLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 17.sp,
+        lineHeight = 24.sp,
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 15.sp,
+        lineHeight = 21.sp,
+    ),
+    bodySmall = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Normal,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+    ),
+    labelLarge = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+    ),
+)
+
+private val FlowpathShapes = Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(32.dp),
+)
+
+@Composable
+fun FlowpathTheme(
+    themeMode: ThemeMode,
+    content: @Composable () -> Unit,
+) {
+    val useDarkTheme = when (themeMode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+    val colorScheme = if (useDarkTheme) FlowpathDarkColors else FlowpathLightColors
+    val view = LocalView.current
+
+    SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        window.statusBarColor = colorScheme.background.toArgb()
+        window.navigationBarColor = colorScheme.surface.toArgb()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+        WindowInsetsControllerCompat(window, view).apply {
+            isAppearanceLightStatusBars = !useDarkTheme
+            isAppearanceLightNavigationBars = !useDarkTheme
+        }
+    }
+
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = FlowpathTypography,
+        shapes = FlowpathShapes,
+        content = content,
+    )
+}
