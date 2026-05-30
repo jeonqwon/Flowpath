@@ -225,6 +225,7 @@ fun CreateWorkScreen(
                     it.description,
                     it.priority.name,
                     it.preferredTimePeriodId ?: "",
+                    it.hasDeadline,
                     it.deadline.toString(),
                     it.schedulingMode.name,
                     it.startDate?.toString() ?: "",
@@ -245,18 +246,19 @@ fun CreateWorkScreen(
                     description = saved[1] as String,
                     priority = TaskPriority.valueOf(saved[2] as String),
                     preferredTimePeriodId = (saved[3] as String).ifBlank { null },
-                    deadline = LocalDateTime.parse(saved[4] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[5] as String),
-                    startDate = (saved[6] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[7] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[8] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[9] as String),
-                    repeatsForever = saved[10] as Boolean,
-                    estimatedMinutes = saved[11] as Int,
-                    addReminder = saved[12] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[13] as String),
-                    recurrenceInterval = saved[14] as Int,
-                    recurrenceDays = (saved[15] as String)
+                    hasDeadline = saved[4] as Boolean,
+                    deadline = LocalDateTime.parse(saved[5] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[6] as String),
+                    startDate = (saved[7] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[8] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[9] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[10] as String),
+                    repeatsForever = saved[11] as Boolean,
+                    estimatedMinutes = saved[12] as Int,
+                    addReminder = saved[13] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[14] as String),
+                    recurrenceInterval = saved[15] as Int,
+                    recurrenceDays = (saved[16] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -299,6 +301,7 @@ fun CreateWorkScreen(
         ),
     ) { mutableStateOf(initialReminderDraft ?: ReminderDraft()) }
     var showAdvancedTiming by rememberSaveable(sessionKey) { mutableStateOf(false) }
+    val noDeadlineEligible = taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE && taskDraft.recurrenceType == RecurrenceType.NONE
     LaunchedEffect(followUpMode, rescheduleMode) {
         if (followUpMode || rescheduleMode) {
             mode = CreateMode.Task
@@ -386,14 +389,31 @@ fun CreateWorkScreen(
                             },
                         )
                         if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE) {
-                            DateTimeSection(
-                                title = "Deadline",
-                                dateTime = taskDraft.deadline,
-                                onDateTimeChanged = { selected ->
-                                    taskDraft = taskDraft.copy(deadline = selected)
-                                },
-                                context = context,
-                            )
+                            if (noDeadlineEligible) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TaskSectionTitle("No deadline")
+                                    Switch(
+                                        checked = !taskDraft.hasDeadline,
+                                        onCheckedChange = { enabled ->
+                                            taskDraft = taskDraft.copy(hasDeadline = !enabled)
+                                        },
+                                    )
+                                }
+                            }
+                            if (taskDraft.hasDeadline) {
+                                DateTimeSection(
+                                    title = "Deadline",
+                                    dateTime = taskDraft.deadline,
+                                    onDateTimeChanged = { selected ->
+                                        taskDraft = taskDraft.copy(deadline = selected)
+                                    },
+                                    context = context,
+                                )
+                            }
                         }
                         if (taskDraft.schedulingMode != TaskSchedulingMode.FIXED_EXACT) {
                             TaskSectionTitle("Preferred period")
@@ -429,6 +449,7 @@ fun CreateWorkScreen(
                                 onModeChanged = { newMode ->
                                     taskDraft = taskDraft.copy(
                                         schedulingMode = newMode,
+                                        hasDeadline = if (newMode == TaskSchedulingMode.FLEXIBLE) taskDraft.hasDeadline else true,
                                         startDate = null,
                                         recurrenceType = if (newMode == TaskSchedulingMode.FIXED_DAY) RecurrenceType.NONE else taskDraft.recurrenceType,
                                         recurrenceDays = if (newMode == TaskSchedulingMode.FIXED_DAY) emptySet() else taskDraft.recurrenceDays,
@@ -496,7 +517,8 @@ fun CreateWorkScreen(
                                     recurrenceInterval = taskDraft.recurrenceInterval,
                                     onTypeChanged = {
                                         taskDraft = taskDraft.copy(
-                                    recurrenceType = it,
+                                            recurrenceType = it,
+                                            hasDeadline = if (it == RecurrenceType.NONE) taskDraft.hasDeadline else true,
                                             recurrenceDays = if (it == RecurrenceType.WEEKLY) taskDraft.recurrenceDays else emptySet(),
                                         )
                                     },
@@ -514,7 +536,7 @@ fun CreateWorkScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        TaskSectionTitle("No due date")
+                                        TaskSectionTitle("Repeats forever")
                                         Switch(
                                             checked = taskDraft.repeatsForever,
                                             onCheckedChange = { taskDraft = taskDraft.copy(repeatsForever = it) },
@@ -760,7 +782,10 @@ fun StartDateSection(
 
 @Composable
 fun DeadlineSummaryCard(taskDraft: TaskDraft) {
-    val value = remember(taskDraft.deadline, taskDraft.fixedDate, taskDraft.fixedEndAt, taskDraft.schedulingMode) {
+    val value = remember(taskDraft.hasDeadline, taskDraft.deadline, taskDraft.fixedDate, taskDraft.fixedEndAt, taskDraft.schedulingMode) {
+        if (!taskDraft.hasDeadline && taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE) {
+            return@remember "No deadline"
+        }
         when (taskDraft.schedulingMode) {
             TaskSchedulingMode.FLEXIBLE -> DateTimeFormatter.ofPattern("EEE, MMM d • h:mm a").format(taskDraft.deadline)
             TaskSchedulingMode.FIXED_DAY -> DateTimeFormatter.ofPattern("EEE, MMM d").format(taskDraft.fixedDate)

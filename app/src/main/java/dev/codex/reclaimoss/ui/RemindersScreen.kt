@@ -297,7 +297,7 @@ fun TaskListCard(
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                "Deadline ${formatter.format(task.dueAt.atZone(ZoneId.systemDefault()))}  •  $preferredPeriodLabel",
+                "${task.deadlineSummaryText(formatter)}  •  $preferredPeriodLabel",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

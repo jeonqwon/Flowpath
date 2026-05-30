@@ -166,6 +166,7 @@ data class ScheduleTask(
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
     val preferredTimePeriodId: String? = null,
+    val hasDeadline: Boolean = true,
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val fixedStartAt: Instant? = null,
     val fixedEndAt: Instant? = null,

@@ -67,7 +67,8 @@ class SchedulerEngine {
         val tasksToSchedule = tasks
             .filter { it.status == TaskStatus.ACTIVE && it.remainingMinutes > 0 }
             .sortedWith(
-                compareBy<ScheduleTask> { existingAnchorByTaskId[it.id] == null }
+                compareBy<ScheduleTask> { !it.hasDeadline }
+                    .thenBy { existingAnchorByTaskId[it.id] == null }
                     .thenBy { existingAnchorByTaskId[it.id] ?: Instant.MAX }
                     .thenByDescending { taskScore(it, rangeStart, policy) }
                     .thenBy { it.dueAt },
@@ -503,8 +504,12 @@ class SchedulerEngine {
         rangeStart: Instant,
         policy: SchedulingPolicy,
     ): Double {
-        val minutesToDeadline = max(1, Duration.between(rangeStart, task.dueAt).toMinutes().toInt())
-        val urgency = policy.deadlineUrgencyWeight * (1440.0 / minutesToDeadline.toDouble())
+        val urgency = if (task.hasDeadline) {
+            val minutesToDeadline = max(1, Duration.between(rangeStart, task.dueAt).toMinutes().toInt())
+            policy.deadlineUrgencyWeight * (1440.0 / minutesToDeadline.toDouble())
+        } else {
+            0.0
+        }
         val priority = policy.priorityWeight * task.priority.score.toDouble()
         return urgency + priority
     }

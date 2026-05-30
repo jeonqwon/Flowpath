@@ -215,7 +215,7 @@ fun TaskDetailScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    DetailRow("Due", formatter.format(task.dueAt.atZone(zoneId)))
+                    DetailRow("Due", task.dueDisplayText(formatter, zoneId))
                     DetailRow("Duration", task.estimatedMinutes.durationLabel())
                     if (task.recurrenceRule.type != RecurrenceType.NONE) {
                         DetailRow("Repeat", recurrenceSummary(task.recurrenceRule))

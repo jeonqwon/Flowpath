@@ -169,6 +169,40 @@ class SchedulerEngineTest {
     }
 
     @Test
+    fun `tasks with real deadlines schedule before no deadline backlog work even when backlog priority is higher`() {
+        val start = ZonedDateTime.of(LocalDate.of(2026, 5, 18), LocalTime.of(8, 0), zone).toInstant()
+        val deadlineTask = task(
+            id = "deadline-task",
+            deadline = ZonedDateTime.of(LocalDate.of(2026, 5, 25), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.LOW,
+        )
+        val backlogTask = task(
+            id = "backlog-task",
+            deadline = ZonedDateTime.of(LocalDate.of(2027, 5, 18), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.URGENT,
+            hasDeadline = false,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(backlogTask, deadlineTask),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = start,
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertEquals("deadline-task", plan.blocks.first().taskId)
+        assertEquals("backlog-task", plan.blocks.last().taskId)
+    }
+
+    @Test
     fun `busy calendar windows force work into next available slot`() {
         val date = LocalDate.of(2026, 5, 18)
         val task = task(
@@ -634,10 +668,12 @@ class SchedulerEngineTest {
         priority: TaskPriority,
         preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
         preferredTimePeriodId: String? = null,
+        hasDeadline: Boolean = true,
     ) = ScheduleTask(
         id = id,
         title = id,
         priority = priority,
+        hasDeadline = hasDeadline,
         dueAt = deadline,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = remainingMinutes,

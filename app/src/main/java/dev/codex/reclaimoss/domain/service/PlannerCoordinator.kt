@@ -85,6 +85,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        hasDeadline: Boolean = true,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -114,6 +115,7 @@ class PlannerCoordinator(
                     priority = priority,
                     preferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
                     preferredTimePeriodId = preferredTimePeriodId,
+                    hasDeadline = hasDeadline,
                     schedulingMode = schedulingMode,
                     fixedStartAt = occurrence.fixedStartAt,
                     fixedEndAt = occurrence.fixedEndAt,
@@ -157,6 +159,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        hasDeadline: Boolean = true,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -171,6 +174,7 @@ class PlannerCoordinator(
             priority = priority,
             dueAt = dueAt,
             preferredTimePeriodId = preferredTimePeriodId,
+            hasDeadline = hasDeadline,
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             addReminder = addReminder,
@@ -207,7 +211,7 @@ class PlannerCoordinator(
 
     suspend fun createReminderForTask(taskId: String): String? {
         val task = repository.getTasks().firstOrNull { it.id == taskId } ?: return null
-        val reminderDueAt = reminderDueAtForTask(task.id, task.dueAt)
+        val reminderDueAt = reminderDueAtForTask(task)
         repository.getReminders()
             .firstOrNull { it.linkedTaskId == task.id && it.status != ReminderStatus.COMPLETED }
             ?.let { existing ->
@@ -302,6 +306,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        hasDeadline: Boolean = true,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         schedulingMode: TaskSchedulingMode,
@@ -322,6 +327,7 @@ class PlannerCoordinator(
             description = description,
             priority = priority,
             preferredTimePeriodId = preferredTimePeriodId,
+            hasDeadline = hasDeadline,
             schedulingMode = schedulingMode,
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
@@ -598,7 +604,7 @@ class PlannerCoordinator(
             reminder.copy(
                 title = task.title,
                 description = task.description,
-                dueAt = reminderDueAtForTask(taskId, task.dueAt),
+                dueAt = reminderDueAtForTask(task),
                 recurrenceRule = task.recurrenceRule,
                 updatedAt = now(),
             ),
@@ -948,14 +954,21 @@ class PlannerCoordinator(
         return candidate.toInstant()
     }
 
-    private suspend fun reminderDueAtForTask(taskId: String, fallbackDueAt: Instant): Instant {
+    private suspend fun reminderDueAtForTask(task: ScheduleTask): Instant {
         val settings = getSettings()
+        val pendingBlocks = repository.getBlocks()
+            .filter { it.taskId == task.id && it.completionState != BlockCompletionState.COMPLETED }
         return when (settings.reminderTimingMode) {
-            ReminderTimingMode.AT_DUE_DATE -> fallbackDueAt
-            ReminderTimingMode.AT_TASK_TIME -> repository.getBlocks()
-                .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
-                .maxOfOrNull { it.endAt }
-                ?: fallbackDueAt
+            ReminderTimingMode.AT_DUE_DATE -> if (task.hasDeadline) {
+                task.dueAt
+            } else {
+                pendingBlocks.minOfOrNull { it.startAt } ?: task.dueAt
+            }
+            ReminderTimingMode.AT_TASK_TIME -> if (task.hasDeadline) {
+                pendingBlocks.maxOfOrNull { it.endAt } ?: task.dueAt
+            } else {
+                pendingBlocks.minOfOrNull { it.startAt } ?: task.dueAt
+            }
         }
     }
 

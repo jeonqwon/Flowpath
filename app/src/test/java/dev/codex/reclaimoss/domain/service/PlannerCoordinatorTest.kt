@@ -203,6 +203,31 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `create no deadline task with reminder uses scheduled block start for reminder`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val syntheticDueAt = now().plus(365, java.time.temporal.ChronoUnit.DAYS)
+
+        val result = coordinator.createTask(
+            title = "Backlog reminder",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = syntheticDueAt,
+            preferredTimePeriodId = "period-morning",
+            hasDeadline = false,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = true,
+        )
+
+        val block = repository.getBlocks().single { it.taskId == result.taskId }
+        val reminder = repository.getReminders().single { it.linkedTaskId == result.taskId }
+        val task = repository.getTasks().single { it.id == result.taskId }
+        assertFalse(task.hasDeadline)
+        assertEquals(block.startAt, reminder.dueAt)
+    }
+
+    @Test
     fun `can create a new linked reminder after completing the previous one`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)
@@ -1169,6 +1194,7 @@ class PlannerCoordinatorTest {
         recurrenceRule: RecurrenceRule,
         preferredTimePeriodId: String? = null,
         estimatedMinutes: Int = 60,
+        hasDeadline: Boolean = true,
     ) = ScheduleTask(
         id = id,
         title = id,
@@ -1176,6 +1202,7 @@ class PlannerCoordinatorTest {
         priority = TaskPriority.MEDIUM,
         preferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
         preferredTimePeriodId = preferredTimePeriodId,
+        hasDeadline = hasDeadline,
         dueAt = dueAt,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = estimatedMinutes,

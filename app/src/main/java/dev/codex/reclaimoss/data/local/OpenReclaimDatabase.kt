@@ -47,6 +47,7 @@ data class TaskEntity(
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay,
     val preferredTimePeriodId: String?,
+    val hasDeadline: Boolean,
     val schedulingMode: TaskSchedulingMode,
     val fixedStartAtEpochMillis: Long?,
     val fixedEndAtEpochMillis: Long?,
@@ -312,7 +313,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -352,6 +353,12 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceInterval INTEGER NOT NULL DEFAULT 1")
                 database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceEndMode TEXT NOT NULL DEFAULT 'NEVER'")
                 database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceOccurrenceLimit INTEGER")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN hasDeadline INTEGER NOT NULL DEFAULT 1")
             }
         }
     }

@@ -174,6 +174,7 @@ data class TaskDraft(
     val description: String = "",
     val priority: TaskPriority = TaskPriority.MEDIUM,
     val preferredTimePeriodId: String? = null,
+    val hasDeadline: Boolean = true,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val startDate: LocalDate? = null,
@@ -216,6 +217,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         description = description,
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
+        hasDeadline = true,
         schedulingMode = TaskSchedulingMode.FLEXIBLE,
         startDate = null,
         fixedDate = dueAt.atZone(zoneId).toLocalDate().plusDays(1),
@@ -242,6 +244,7 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         description = description,
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
+        hasDeadline = hasDeadline,
         deadline = localDueAt,
         schedulingMode = schedulingMode,
         startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE) fixedStartAt?.atZone(zoneId)?.toLocalDate() else null,
@@ -286,6 +289,7 @@ class PlannerViewModel(
             description = draft.description,
             priority = draft.priority,
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            hasDeadline = draft.hasDeadline,
             dueAt = draft.taskDueAtInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
@@ -311,6 +315,7 @@ class PlannerViewModel(
             priority = draft.priority,
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            hasDeadline = draft.hasDeadline,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -335,6 +340,7 @@ class PlannerViewModel(
             priority = draft.priority,
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            hasDeadline = draft.hasDeadline,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -478,7 +484,9 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
         val startCandidate = LocalDateTime.of(startDate, deadline.toLocalTime())
         return if (startCandidate.isAfter(now)) startCandidate else deadline
     }
-    if (recurrenceType == RecurrenceType.NONE) return deadline
+    if (recurrenceType == RecurrenceType.NONE) {
+        return if (hasDeadline) deadline else deadline.plusYears(1)
+    }
     val targetTime = deadline.toLocalTime()
     return when (recurrenceType) {
         RecurrenceType.NONE -> deadline
@@ -513,6 +521,24 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
             candidate
         }
     }
+}
+
+fun ScheduleTask.dueDisplayText(
+    formatter: java.time.format.DateTimeFormatter,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String = if (hasDeadline) {
+    formatter.format(dueAt.atZone(zoneId))
+} else {
+    "No deadline"
+}
+
+fun ScheduleTask.deadlineSummaryText(
+    formatter: java.time.format.DateTimeFormatter,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String = if (hasDeadline) {
+    "Deadline ${formatter.format(dueAt.atZone(zoneId))}"
+} else {
+    "No deadline"
 }
 
 private fun TaskDraft.schedulingStartInstantOrNull(): Instant? =
