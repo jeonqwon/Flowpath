@@ -450,16 +450,21 @@ fun CreateWorkScreen(
                                     taskDraft = taskDraft.copy(
                                         schedulingMode = newMode,
                                         hasDeadline = if (newMode == TaskSchedulingMode.FLEXIBLE) taskDraft.hasDeadline else true,
-                                        startDate = null,
+                                        startDate = when (newMode) {
+                                            TaskSchedulingMode.FLEXIBLE_WINDOW -> taskDraft.fixedStartAt.toLocalDate()
+                                            else -> null
+                                        },
                                         recurrenceType = if (newMode == TaskSchedulingMode.FIXED_DAY) RecurrenceType.NONE else taskDraft.recurrenceType,
                                         recurrenceDays = if (newMode == TaskSchedulingMode.FIXED_DAY) emptySet() else taskDraft.recurrenceDays,
                                         fixedDate = taskDraft.deadline.toLocalDate(),
                                         fixedStartAt = when (newMode) {
                                             TaskSchedulingMode.FIXED_EXACT -> taskDraft.deadline.minusMinutes(taskDraft.estimatedMinutes.toLong()).withSecond(0).withNano(0)
+                                            TaskSchedulingMode.FLEXIBLE_WINDOW -> taskDraft.fixedStartAt.withSecond(0).withNano(0)
                                             else -> taskDraft.fixedStartAt.withSecond(0).withNano(0)
                                         },
                                         fixedEndAt = when (newMode) {
                                             TaskSchedulingMode.FIXED_EXACT -> taskDraft.deadline.withSecond(0).withNano(0)
+                                            TaskSchedulingMode.FLEXIBLE_WINDOW -> taskDraft.fixedEndAt.withSecond(0).withNano(0)
                                             else -> taskDraft.fixedEndAt.withSecond(0).withNano(0)
                                         },
                                     )
@@ -467,6 +472,24 @@ fun CreateWorkScreen(
                             )
                             when (taskDraft.schedulingMode) {
                                 TaskSchedulingMode.FLEXIBLE -> Unit
+                                TaskSchedulingMode.FLEXIBLE_WINDOW -> {
+                                    FlexibleWindowSection(
+                                        recurrenceType = taskDraft.recurrenceType,
+                                        startDate = taskDraft.startDate ?: taskDraft.fixedStartAt.toLocalDate(),
+                                        windowStart = taskDraft.fixedStartAt,
+                                        windowEnd = taskDraft.fixedEndAt,
+                                        onStartDateChanged = {
+                                            taskDraft = taskDraft.copy(startDate = it)
+                                        },
+                                        onWindowStartChanged = {
+                                            taskDraft = taskDraft.copy(fixedStartAt = it)
+                                        },
+                                        onWindowEndChanged = {
+                                            taskDraft = taskDraft.copy(fixedEndAt = it)
+                                        },
+                                        context = context,
+                                    )
+                                }
                                 TaskSchedulingMode.FIXED_DAY -> {
                                     FixedDaySection(
                                         date = taskDraft.fixedDate,
@@ -618,7 +641,8 @@ fun CreateWorkScreen(
             shape = RoundedCornerShape(999.dp),
             enabled = if (mode == CreateMode.Task) {
                 taskDraft.title.isNotBlank() &&
-                    (taskDraft.schedulingMode != TaskSchedulingMode.FIXED_EXACT || taskDraft.fixedEndAt.isAfter(taskDraft.fixedStartAt)) &&
+                    ((taskDraft.schedulingMode != TaskSchedulingMode.FIXED_EXACT && taskDraft.schedulingMode != TaskSchedulingMode.FLEXIBLE_WINDOW) || taskDraft.fixedEndAt.isAfter(taskDraft.fixedStartAt)) &&
+                    (taskDraft.schedulingMode != TaskSchedulingMode.FLEXIBLE_WINDOW || taskDraft.recurrenceType != RecurrenceType.NONE || taskDraft.fixedStartAt.toLocalDate() == taskDraft.fixedEndAt.toLocalDate()) &&
                     (taskDraft.recurrenceType != RecurrenceType.WEEKLY || taskDraft.recurrenceDays.isNotEmpty())
             } else {
                 reminderDraft.title.isNotBlank() &&
@@ -649,6 +673,7 @@ fun SchedulingModeSection(
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
             TaskSchedulingMode.FLEXIBLE to "Flexible",
+            TaskSchedulingMode.FLEXIBLE_WINDOW to "Window",
             TaskSchedulingMode.FIXED_DAY to "Fixed date",
             TaskSchedulingMode.FIXED_EXACT to "Fixed time",
         ).forEach { (mode, label) ->
@@ -707,6 +732,67 @@ fun FixedTimeSection(
             title = "Time",
             time = dateTime.toLocalTime(),
             onTimeChanged = onTimeChanged,
+            context = context,
+        )
+    }
+}
+
+@Composable
+fun FlexibleWindowSection(
+    recurrenceType: RecurrenceType,
+    startDate: LocalDate,
+    windowStart: LocalDateTime,
+    windowEnd: LocalDateTime,
+    onStartDateChanged: (LocalDate) -> Unit,
+    onWindowStartChanged: (LocalDateTime) -> Unit,
+    onWindowEndChanged: (LocalDateTime) -> Unit,
+    context: android.content.Context,
+) {
+    if (recurrenceType == RecurrenceType.NONE) {
+        DateTimeSection(
+            title = "Window start",
+            dateTime = windowStart,
+            onDateTimeChanged = onWindowStartChanged,
+            context = context,
+        )
+        DateTimeSection(
+            title = "Window end",
+            dateTime = windowEnd,
+            onDateTimeChanged = onWindowEndChanged,
+            context = context,
+        )
+    } else {
+        FixedDaySection(
+            date = startDate,
+            onDateChanged = onStartDateChanged,
+            context = context,
+        )
+        TimeOnlySection(
+            title = "Window start",
+            time = windowStart.toLocalTime(),
+            onTimeChanged = { selectedTime ->
+                onWindowStartChanged(
+                    windowStart
+                        .withHour(selectedTime.hour)
+                        .withMinute(selectedTime.minute)
+                        .withSecond(0)
+                        .withNano(0),
+                )
+            },
+            context = context,
+        )
+        TimeOnlySection(
+            title = "Window end",
+            time = windowEnd.toLocalTime(),
+            onTimeChanged = { selectedTime ->
+                onWindowEndChanged(
+                    windowEnd
+                        .withHour(selectedTime.hour)
+                        .withMinute(selectedTime.minute)
+                        .withSecond(0)
+                        .withNano(0),
+                )
+            },
             context = context,
         )
     }
@@ -782,12 +868,17 @@ fun StartDateSection(
 
 @Composable
 fun DeadlineSummaryCard(taskDraft: TaskDraft) {
-    val value = remember(taskDraft.hasDeadline, taskDraft.deadline, taskDraft.fixedDate, taskDraft.fixedEndAt, taskDraft.schedulingMode) {
+    val value = remember(taskDraft.hasDeadline, taskDraft.deadline, taskDraft.fixedDate, taskDraft.fixedStartAt, taskDraft.fixedEndAt, taskDraft.schedulingMode) {
         if (!taskDraft.hasDeadline && taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE) {
             return@remember "No deadline"
         }
         when (taskDraft.schedulingMode) {
             TaskSchedulingMode.FLEXIBLE -> DateTimeFormatter.ofPattern("EEE, MMM d • h:mm a").format(taskDraft.deadline)
+            TaskSchedulingMode.FLEXIBLE_WINDOW -> {
+                val dayFormatter = DateTimeFormatter.ofPattern("EEE, MMM d")
+                val timeFormatter = DateTimeFormatter.ofPattern("h:mm a")
+                "${dayFormatter.format(taskDraft.fixedStartAt)} • ${timeFormatter.format(taskDraft.fixedStartAt)}-${timeFormatter.format(taskDraft.fixedEndAt)}"
+            }
             TaskSchedulingMode.FIXED_DAY -> DateTimeFormatter.ofPattern("EEE, MMM d").format(taskDraft.fixedDate)
             TaskSchedulingMode.FIXED_EXACT -> DateTimeFormatter.ofPattern("EEE, MMM d • h:mm a").format(taskDraft.fixedEndAt)
         }

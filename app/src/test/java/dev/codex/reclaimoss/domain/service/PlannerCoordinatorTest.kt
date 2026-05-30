@@ -30,6 +30,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -1045,6 +1046,42 @@ class PlannerCoordinatorTest {
         assertTrue(repository.getBlocks().none { it.id == "pending-block" })
         assertTrue(seriesTasks.any { it.id != createdTaskId && it.status == TaskStatus.ACTIVE })
         assertTrue(seriesTasks.size >= 2)
+    }
+
+    @Test
+    fun `weekly flexible window tasks shift their window with each occurrence date`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val initialDate = LocalDate.of(2026, 5, 18)
+        val firstWindowStart = ZonedDateTime.of(initialDate, LocalTime.of(18, 0), zone).toInstant()
+        val firstWindowEnd = ZonedDateTime.of(initialDate, LocalTime.of(21, 0), zone).toInstant()
+
+        coordinator.createTask(
+            title = "Dinner",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstWindowEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY)),
+            estimatedMinutes = 30,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FLEXIBLE_WINDOW,
+            fixedStartAt = firstWindowStart,
+            fixedEndAt = firstWindowEnd,
+        )
+
+        val createdTasks = repository.getTasks()
+            .filter { it.title == "Dinner" }
+            .sortedBy { it.dueAt }
+
+        assertTrue(createdTasks.size >= 2)
+        val mondayTask = createdTasks.first()
+        val wednesdayTask = createdTasks.first { it.dueAt.atZone(zone).toLocalDate() == initialDate.plusDays(2) }
+        assertEquals(LocalTime.of(18, 0), mondayTask.fixedStartAt?.atZone(zone)?.toLocalTime())
+        assertEquals(LocalTime.of(21, 0), mondayTask.fixedEndAt?.atZone(zone)?.toLocalTime())
+        assertEquals(initialDate.plusDays(2), wednesdayTask.fixedStartAt?.atZone(zone)?.toLocalDate())
+        assertEquals(LocalTime.of(18, 0), wednesdayTask.fixedStartAt?.atZone(zone)?.toLocalTime())
+        assertEquals(LocalTime.of(21, 0), wednesdayTask.fixedEndAt?.atZone(zone)?.toLocalTime())
     }
 
     @Test

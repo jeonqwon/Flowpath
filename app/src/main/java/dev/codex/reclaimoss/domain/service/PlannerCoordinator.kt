@@ -730,12 +730,12 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate.toInstant(),
-                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
                                         ZonedDateTime.of(candidate.toLocalDate(), fixedStartLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
                                         ZonedDateTime.of(candidate.toLocalDate(), fixedEndLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null
@@ -763,12 +763,12 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate,
-                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
                                         ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
                                         ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null
@@ -790,12 +790,12 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate,
-                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
                                         ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
                                         ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
                                     } else {
                                         null

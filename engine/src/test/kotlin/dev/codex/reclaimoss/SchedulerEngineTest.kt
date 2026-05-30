@@ -660,6 +660,48 @@ class SchedulerEngineTest {
         assertTrue(firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt)
     }
 
+    @Test
+    fun `flexible window tasks stay inside the allowed window and prefer the middle`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val eveningHours = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(
+                    windows = listOf(
+                        TimeWindow(LocalTime.of(18, 0), LocalTime.of(21, 0)),
+                    ),
+                )
+            },
+        )
+        val windowStart = ZonedDateTime.of(date, LocalTime.of(18, 0), zone).toInstant()
+        val windowEnd = ZonedDateTime.of(date, LocalTime.of(21, 0), zone).toInstant()
+        val task = task(
+            id = "dinner-window",
+            deadline = windowEnd,
+            estimatedMinutes = 30,
+            remainingMinutes = 30,
+            priority = TaskPriority.MEDIUM,
+            schedulingMode = TaskSchedulingMode.FLEXIBLE_WINDOW,
+            fixedStartAt = windowStart,
+            fixedEndAt = windowEnd,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = eveningHours,
+            timePeriods = emptyList(),
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val scheduled = plan.blocks.single()
+        assertEquals(LocalTime.of(19, 0), scheduled.startAt.atZone(zone).toLocalTime())
+        assertEquals(LocalTime.of(19, 30), scheduled.endAt.atZone(zone).toLocalTime())
+    }
+
     private fun task(
         id: String,
         deadline: Instant,
@@ -669,11 +711,17 @@ class SchedulerEngineTest {
         preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
         preferredTimePeriodId: String? = null,
         hasDeadline: Boolean = true,
+        schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+        fixedStartAt: Instant? = null,
+        fixedEndAt: Instant? = null,
     ) = ScheduleTask(
         id = id,
         title = id,
         priority = priority,
         hasDeadline = hasDeadline,
+        schedulingMode = schedulingMode,
+        fixedStartAt = fixedStartAt,
+        fixedEndAt = fixedEndAt,
         dueAt = deadline,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = remainingMinutes,
