@@ -1116,15 +1116,26 @@ fun recurrenceSummary(rule: RecurrenceRule): String =
     when (rule.type) {
         RecurrenceType.NONE -> "One-time"
         RecurrenceType.DAILY -> buildString {
-            append("Repeats daily")
+            append("Every ${rule.interval} day")
+            if (rule.interval != 1) append("s")
             rule.until?.let {
                 append(" until ")
                 append(it.atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ofPattern("MMM d")))
             }
         }
         RecurrenceType.WEEKLY -> buildString {
-            append("Weekly: ")
+            append("Every ${rule.interval} week")
+            if (rule.interval != 1) append("s")
+            append(": ")
             append(rule.daysOfWeek.sortedBy { it.value }.joinToString(", ") { it.shortLabel() })
+            rule.until?.let {
+                append(" until ")
+                append(it.atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ofPattern("MMM d")))
+            }
+        }
+        RecurrenceType.MONTHLY -> buildString {
+            append("Every ${rule.interval} month")
+            if (rule.interval != 1) append("s")
             rule.until?.let {
                 append(" until ")
                 append(it.atZone(ZoneId.systemDefault()).toLocalDate().format(DateTimeFormatter.ofPattern("MMM d")))
@@ -1140,6 +1151,7 @@ fun RecurrenceType.displayName(): String =
         RecurrenceType.NONE -> "Once"
         RecurrenceType.DAILY -> "Daily"
         RecurrenceType.WEEKLY -> "Weekly"
+        RecurrenceType.MONTHLY -> "Monthly"
     }
 
 fun DayOfWeek.shortLabel(): String = getDisplayName(TextStyle.SHORT, Locale.getDefault())

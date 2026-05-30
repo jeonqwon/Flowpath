@@ -35,6 +35,13 @@ enum class RecurrenceType {
     NONE,
     DAILY,
     WEEKLY,
+    MONTHLY,
+}
+
+enum class RecurrenceEndMode {
+    NEVER,
+    ON_DATE,
+    AFTER_OCCURRENCES,
 }
 
 enum class BlockSource {
@@ -121,9 +128,34 @@ data class ReminderPolicy(
 
 data class RecurrenceRule(
     val type: RecurrenceType = RecurrenceType.NONE,
+    val interval: Int = 1,
     val daysOfWeek: Set<DayOfWeek> = emptySet(),
     val until: Instant? = null,
-)
+    val endMode: RecurrenceEndMode = RecurrenceEndMode.NEVER,
+    val occurrenceCount: Int? = null,
+) {
+    constructor(type: RecurrenceType) : this(
+        type = type,
+        interval = 1,
+        daysOfWeek = emptySet(),
+        until = null,
+        endMode = RecurrenceEndMode.NEVER,
+        occurrenceCount = null,
+    )
+
+    constructor(
+        type: RecurrenceType,
+        daysOfWeek: Set<DayOfWeek>,
+        until: Instant? = null,
+    ) : this(
+        type = type,
+        interval = 1,
+        daysOfWeek = daysOfWeek,
+        until = until,
+        endMode = if (until != null) RecurrenceEndMode.ON_DATE else RecurrenceEndMode.NEVER,
+        occurrenceCount = null,
+    )
+}
 
 data class ScheduleTask(
     val id: String,

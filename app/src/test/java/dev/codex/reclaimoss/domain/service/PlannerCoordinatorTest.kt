@@ -8,6 +8,7 @@ import dev.codex.reclaimoss.domain.model.BlockLockState
 import dev.codex.reclaimoss.domain.model.BlockSource
 import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
 import dev.codex.reclaimoss.domain.model.Project
+import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceRule
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.Reminder
@@ -334,6 +335,117 @@ class PlannerCoordinatorTest {
         assertEquals(firstDueAt, createdTasks.first().dueAt)
         assertEquals(until, createdTasks.last().dueAt)
         assertTrue(createdTasks.none { it.dueAt.isAfter(until) })
+    }
+
+    @Test
+    fun `creating daily recurring task with interval skips intervening days`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+
+        coordinator.createTask(
+            title = "Every other day",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(
+                type = RecurrenceType.DAILY,
+                interval = 2,
+            ),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertTrue(createdTasks.size > 2)
+        assertEquals(
+            createdTasks.first().dueAt.atZone(zone).toLocalDate().plusDays(2),
+            createdTasks[1].dueAt.atZone(zone).toLocalDate(),
+        )
+    }
+
+    @Test
+    fun `creating monthly recurring task with occurrence limit materializes capped series`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = LocalDate.of(2026, 5, 31).atTime(17, 0).atZone(zone).toInstant()
+
+        coordinator.createTask(
+            title = "Monthly close",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(
+                type = RecurrenceType.MONTHLY,
+                interval = 1,
+                endMode = RecurrenceEndMode.AFTER_OCCURRENCES,
+                occurrenceCount = 3,
+            ),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertEquals(3, createdTasks.size)
+        assertEquals(LocalDate.of(2026, 5, 31), createdTasks[0].dueAt.atZone(zone).toLocalDate())
+        assertEquals(LocalDate.of(2026, 6, 30), createdTasks[1].dueAt.atZone(zone).toLocalDate())
+        assertEquals(LocalDate.of(2026, 7, 31), createdTasks[2].dueAt.atZone(zone).toLocalDate())
+    }
+
+    @Test
+    fun `creating weekly recurring task with interval skips off weeks`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val firstDueAt = LocalDate.of(2026, 6, 1).atTime(17, 0).atZone(zone).toInstant()
+
+        coordinator.createTask(
+            title = "Biweekly sync",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = firstDueAt,
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(
+                type = RecurrenceType.WEEKLY,
+                interval = 2,
+                daysOfWeek = setOf(DayOfWeek.MONDAY),
+            ),
+            estimatedMinutes = 60,
+            addReminder = false,
+        )
+
+        val createdTasks = repository.getTasks().sortedBy { it.dueAt }
+        assertTrue(createdTasks.size > 2)
+        assertEquals(LocalDate.of(2026, 6, 1), createdTasks[0].dueAt.atZone(zone).toLocalDate())
+        assertEquals(LocalDate.of(2026, 6, 15), createdTasks[1].dueAt.atZone(zone).toLocalDate())
+        assertEquals(LocalDate.of(2026, 6, 29), createdTasks[2].dueAt.atZone(zone).toLocalDate())
+    }
+
+    @Test
+    fun `weekly recurring task with interval advances by selected number of weeks when completed`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val dueAt = LocalDate.of(2026, 6, 1).atTime(17, 0).atZone(zone).toInstant()
+        val task = task(
+            id = "biweekly",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(
+                type = RecurrenceType.WEEKLY,
+                interval = 2,
+                daysOfWeek = setOf(DayOfWeek.MONDAY),
+            ),
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(block(task.id, "block-biweekly", dueAt.minusSeconds(3600), dueAt)),
+        )
+
+        coordinator.markBlockDone("block-biweekly", task.id, 60)
+
+        val updated = repository.getTasks().single()
+        assertEquals(LocalDate.of(2026, 6, 15), updated.dueAt.atZone(zone).toLocalDate())
     }
 
     @Test

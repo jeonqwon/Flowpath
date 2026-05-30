@@ -16,6 +16,7 @@ import dev.codex.reclaimoss.domain.model.BlockCompletionState
 import dev.codex.reclaimoss.domain.model.BlockLockState
 import dev.codex.reclaimoss.domain.model.BlockSource
 import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
@@ -53,8 +54,11 @@ data class TaskEntity(
     val estimatedMinutes: Int,
     val remainingMinutes: Int,
     val recurrenceType: RecurrenceType,
+    val recurrenceInterval: Int,
     val recurrenceDaysCsv: String,
     val recurrenceUntilEpochMillis: Long?,
+    val recurrenceEndMode: RecurrenceEndMode,
+    val recurrenceOccurrenceLimit: Int?,
     val status: TaskStatus,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
@@ -77,8 +81,11 @@ data class ReminderEntity(
     val description: String,
     val dueAtEpochMillis: Long,
     val recurrenceType: RecurrenceType,
+    val recurrenceInterval: Int,
     val recurrenceDaysCsv: String,
     val recurrenceUntilEpochMillis: Long?,
+    val recurrenceEndMode: RecurrenceEndMode,
+    val recurrenceOccurrenceLimit: Int?,
     val linkedTaskId: String?,
     val status: ReminderStatus,
     val createdAtEpochMillis: Long,
@@ -246,6 +253,12 @@ class RoomConverters {
     fun toRecurrenceType(value: String): RecurrenceType = RecurrenceType.valueOf(value)
 
     @TypeConverter
+    fun fromRecurrenceEndMode(value: RecurrenceEndMode): String = value.name
+
+    @TypeConverter
+    fun toRecurrenceEndMode(value: String): RecurrenceEndMode = RecurrenceEndMode.valueOf(value)
+
+    @TypeConverter
     fun fromTimePeriodType(value: TimePeriodType): String = value.name
 
     @TypeConverter
@@ -299,7 +312,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -328,6 +341,17 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE tasks ADD COLUMN schedulingMode TEXT NOT NULL DEFAULT 'FLEXIBLE'")
                 database.execSQL("ALTER TABLE tasks ADD COLUMN fixedStartAtEpochMillis INTEGER")
                 database.execSQL("ALTER TABLE tasks ADD COLUMN fixedEndAtEpochMillis INTEGER")
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceInterval INTEGER NOT NULL DEFAULT 1")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceEndMode TEXT NOT NULL DEFAULT 'NEVER'")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceOccurrenceLimit INTEGER")
+                database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceInterval INTEGER NOT NULL DEFAULT 1")
+                database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceEndMode TEXT NOT NULL DEFAULT 'NEVER'")
+                database.execSQL("ALTER TABLE reminders ADD COLUMN recurrenceOccurrenceLimit INTEGER")
             }
         }
     }

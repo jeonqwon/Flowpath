@@ -16,6 +16,7 @@ import dev.codex.reclaimoss.domain.model.BlockCompletionState
 import dev.codex.reclaimoss.domain.model.BlockLockState
 import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
 import dev.codex.reclaimoss.domain.model.Project
+import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceRule
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.Reminder
@@ -227,12 +228,15 @@ private fun TaskEntity.toDomain() = ScheduleTask(
     remainingMinutes = remainingMinutes,
     recurrenceRule = RecurrenceRule(
         type = recurrenceType,
+        interval = recurrenceInterval,
         daysOfWeek = recurrenceDaysCsv
             .split(',')
             .filter { it.isNotBlank() }
             .map { DayOfWeek.valueOf(it) }
             .toSet(),
         until = recurrenceUntilEpochMillis?.let(Instant::ofEpochMilli),
+        endMode = recurrenceEndMode,
+        occurrenceCount = recurrenceOccurrenceLimit,
     ),
     status = status,
     createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
@@ -255,8 +259,11 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     estimatedMinutes = estimatedMinutes,
     remainingMinutes = remainingMinutes,
     recurrenceType = recurrenceRule.type,
+    recurrenceInterval = recurrenceRule.interval,
     recurrenceDaysCsv = recurrenceRule.daysOfWeek.joinToString(",") { it.name },
     recurrenceUntilEpochMillis = recurrenceRule.until?.toEpochMilli(),
+    recurrenceEndMode = recurrenceRule.endMode,
+    recurrenceOccurrenceLimit = recurrenceRule.occurrenceCount,
     status = status,
     createdAtEpochMillis = createdAt.toEpochMilli(),
     updatedAtEpochMillis = updatedAt.toEpochMilli(),
@@ -287,12 +294,15 @@ private fun ReminderEntity.toDomain() = Reminder(
     dueAt = Instant.ofEpochMilli(dueAtEpochMillis),
     recurrenceRule = RecurrenceRule(
         type = recurrenceType,
+        interval = recurrenceInterval,
         daysOfWeek = recurrenceDaysCsv
             .split(',')
             .filter { it.isNotBlank() }
             .map { DayOfWeek.valueOf(it) }
             .toSet(),
         until = recurrenceUntilEpochMillis?.let(Instant::ofEpochMilli),
+        endMode = recurrenceEndMode,
+        occurrenceCount = recurrenceOccurrenceLimit,
     ),
     linkedTaskId = linkedTaskId,
     status = status,
@@ -306,8 +316,11 @@ private fun Reminder.toEntity() = ReminderEntity(
     description = description,
     dueAtEpochMillis = dueAt.toEpochMilli(),
     recurrenceType = recurrenceRule.type,
+    recurrenceInterval = recurrenceRule.interval,
     recurrenceDaysCsv = recurrenceRule.daysOfWeek.joinToString(",") { it.name },
     recurrenceUntilEpochMillis = recurrenceRule.until?.toEpochMilli(),
+    recurrenceEndMode = recurrenceRule.endMode,
+    recurrenceOccurrenceLimit = recurrenceRule.occurrenceCount,
     linkedTaskId = linkedTaskId,
     status = status,
     createdAtEpochMillis = createdAt.toEpochMilli(),

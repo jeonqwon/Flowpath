@@ -235,6 +235,7 @@ fun CreateWorkScreen(
                     it.estimatedMinutes,
                     it.addReminder,
                     it.recurrenceType.name,
+                    it.recurrenceInterval,
                     it.recurrenceDays.joinToString(",") { day -> day.name },
                 )
             },
@@ -254,7 +255,8 @@ fun CreateWorkScreen(
                     estimatedMinutes = saved[11] as Int,
                     addReminder = saved[12] as Boolean,
                     recurrenceType = RecurrenceType.valueOf(saved[13] as String),
-                    recurrenceDays = (saved[14] as String)
+                    recurrenceInterval = saved[14] as Int,
+                    recurrenceDays = (saved[15] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -275,6 +277,7 @@ fun CreateWorkScreen(
                     it.description,
                     it.dueAt.toString(),
                     it.recurrenceType.name,
+                    it.recurrenceInterval,
                     it.recurrenceDays.joinToString(",") { day -> day.name },
                 )
             },
@@ -284,7 +287,8 @@ fun CreateWorkScreen(
                     description = saved[1] as String,
                     dueAt = LocalDateTime.parse(saved[2] as String),
                     recurrenceType = RecurrenceType.valueOf(saved[3] as String),
-                    recurrenceDays = (saved[4] as String)
+                    recurrenceInterval = saved[4] as Int,
+                    recurrenceDays = (saved[5] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -301,6 +305,7 @@ fun CreateWorkScreen(
             taskDraft = taskDraft.copy(
                 addReminder = false,
                 recurrenceType = if (followUpMode) RecurrenceType.NONE else taskDraft.recurrenceType,
+                recurrenceInterval = if (followUpMode) 1 else taskDraft.recurrenceInterval,
                 recurrenceDays = if (followUpMode) emptySet() else taskDraft.recurrenceDays,
             )
         }
@@ -488,12 +493,14 @@ fun CreateWorkScreen(
                                 RecurrenceSection(
                                     recurrenceType = taskDraft.recurrenceType,
                                     recurrenceDays = taskDraft.recurrenceDays,
+                                    recurrenceInterval = taskDraft.recurrenceInterval,
                                     onTypeChanged = {
                                         taskDraft = taskDraft.copy(
                                     recurrenceType = it,
                                             recurrenceDays = if (it == RecurrenceType.WEEKLY) taskDraft.recurrenceDays else emptySet(),
                                         )
                                     },
+                                    onIntervalChanged = { taskDraft = taskDraft.copy(recurrenceInterval = it) },
                                     disabledTypes = if (taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
                                         setOf(RecurrenceType.DAILY, RecurrenceType.WEEKLY)
                                     } else {
@@ -569,12 +576,14 @@ fun CreateWorkScreen(
                         RecurrenceSection(
                             recurrenceType = reminderDraft.recurrenceType,
                             recurrenceDays = reminderDraft.recurrenceDays,
+                            recurrenceInterval = reminderDraft.recurrenceInterval,
                             onTypeChanged = {
                                 reminderDraft = reminderDraft.copy(
                                     recurrenceType = it,
                                     recurrenceDays = if (it == RecurrenceType.WEEKLY) reminderDraft.recurrenceDays else emptySet(),
                                 )
                             },
+                            onIntervalChanged = { reminderDraft = reminderDraft.copy(recurrenceInterval = it) },
                             onDayToggle = { reminderDraft = reminderDraft.copy(recurrenceDays = reminderDraft.recurrenceDays.toggleForCreate(it)) },
                         )
                     }
@@ -984,6 +993,8 @@ fun RecurrenceSection(
     recurrenceType: RecurrenceType,
     recurrenceDays: Set<DayOfWeek>,
     onTypeChanged: (RecurrenceType) -> Unit,
+    recurrenceInterval: Int,
+    onIntervalChanged: (Int) -> Unit,
     disabledTypes: Set<RecurrenceType> = emptySet(),
     onDayToggle: (DayOfWeek) -> Unit,
 ) {
@@ -995,6 +1006,27 @@ fun RecurrenceSection(
                 onClick = { onTypeChanged(type) },
                 enabled = type !in disabledTypes,
                 label = { Text(type.displayNameForCreate()) },
+            )
+        }
+    }
+    if (recurrenceType != RecurrenceType.NONE) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Every", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = { if (recurrenceInterval > 1) onIntervalChanged(recurrenceInterval - 1) }) { Text("-") }
+            Text(recurrenceInterval.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            OutlinedButton(onClick = { onIntervalChanged((recurrenceInterval + 1).coerceAtMost(30)) }) { Text("+") }
+            Text(
+                when (recurrenceType) {
+                    RecurrenceType.DAILY -> "day(s)"
+                    RecurrenceType.WEEKLY -> "week(s)"
+                    RecurrenceType.MONTHLY -> "month(s)"
+                    RecurrenceType.NONE -> ""
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -1055,6 +1087,7 @@ private fun RecurrenceType.displayNameForCreate(): String =
         RecurrenceType.NONE -> "Once"
         RecurrenceType.DAILY -> "Daily"
         RecurrenceType.WEEKLY -> "Weekly"
+        RecurrenceType.MONTHLY -> "Monthly"
     }
 
 private fun DayOfWeek.shortLabelForCreate(): String =

@@ -19,7 +19,8 @@ class AppGraph(context: Context) {
         OpenReclaimDatabase.MIGRATION_5_6,
         OpenReclaimDatabase.MIGRATION_6_7,
         OpenReclaimDatabase.MIGRATION_7_8,
-    ).build()
+        OpenReclaimDatabase.MIGRATION_8_9,
+    ).fallbackToDestructiveMigrationOnDowngrade().build()
 
     private val calendarGateway = NoOpGoogleCalendarGateway()
     private val schedulerEngine = SchedulerEngine()

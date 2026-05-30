@@ -101,6 +101,7 @@ import dev.codex.reclaimoss.AppGraph
 import dev.codex.reclaimoss.data.repository.PlannerSnapshot
 import dev.codex.reclaimoss.domain.model.BlockLockState
 import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceRule
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.Reminder
@@ -183,7 +184,9 @@ data class TaskDraft(
     val estimatedMinutes: Int = 60,
     val addReminder: Boolean = false,
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
+    val recurrenceInterval: Int = 1,
     val recurrenceDays: Set<DayOfWeek> = emptySet(),
+    val recurrenceOccurrenceLimit: Int? = null,
 )
 
 data class ReminderDraft(
@@ -191,7 +194,9 @@ data class ReminderDraft(
     val description: String = "",
     val dueAt: LocalDateTime = LocalDateTime.now().plusHours(1).withMinute(0),
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
+    val recurrenceInterval: Int = 1,
     val recurrenceDays: Set<DayOfWeek> = emptySet(),
+    val recurrenceOccurrenceLimit: Int? = null,
 )
 
 data class TimePeriodDraft(
@@ -221,7 +226,9 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         estimatedMinutes = estimatedMinutes,
         addReminder = false,
         recurrenceType = RecurrenceType.NONE,
+        recurrenceInterval = 1,
         recurrenceDays = emptySet(),
+        recurrenceOccurrenceLimit = null,
     )
 
 fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskDraft {
@@ -245,7 +252,9 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         estimatedMinutes = estimatedMinutes,
         addReminder = false,
         recurrenceType = recurrenceRule.type,
+        recurrenceInterval = recurrenceRule.interval,
         recurrenceDays = recurrenceRule.daysOfWeek,
+        recurrenceOccurrenceLimit = recurrenceRule.occurrenceCount,
     )
 }
 
@@ -280,8 +289,11 @@ class PlannerViewModel(
             dueAt = draft.taskDueAtInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
+                interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
+                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
@@ -301,8 +313,11 @@ class PlannerViewModel(
             preferredTimePeriodId = draft.preferredTimePeriodId,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
+                interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
+                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
             addReminder = draft.addReminder,
@@ -322,8 +337,11 @@ class PlannerViewModel(
             preferredTimePeriodId = draft.preferredTimePeriodId,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
+                interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
+                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
             schedulingMode = draft.schedulingMode,
@@ -339,7 +357,10 @@ class PlannerViewModel(
             dueAt = draft.dueAt.atZone(ZoneId.systemDefault()).toInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
+                interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+                endMode = RecurrenceEndMode.NEVER,
+                occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
         )
     }
@@ -463,7 +484,12 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
         RecurrenceType.NONE -> deadline
         RecurrenceType.DAILY -> {
             var candidate = LocalDateTime.of(now.toLocalDate(), targetTime)
-            if (!candidate.isAfter(now)) candidate = candidate.plusDays(1)
+            val interval = recurrenceInterval.coerceAtLeast(1).toLong()
+            if (!candidate.isAfter(now)) {
+                do {
+                    candidate = candidate.plusDays(interval)
+                } while (!candidate.isAfter(now))
+            }
             candidate
         }
         RecurrenceType.WEEKLY -> {
@@ -473,6 +499,16 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
             while (candidate.dayOfWeek !in repeatDays || !candidate.isAfter(now)) {
                 candidateDate = candidateDate.plusDays(1)
                 candidate = LocalDateTime.of(candidateDate, targetTime)
+            }
+            candidate
+        }
+        RecurrenceType.MONTHLY -> {
+            val interval = recurrenceInterval.coerceAtLeast(1).toLong()
+            var candidate = LocalDateTime.of(now.toLocalDate().withDayOfMonth(minOf(now.toLocalDate().lengthOfMonth(), deadline.dayOfMonth)), targetTime)
+            while (!candidate.isAfter(now)) {
+                val nextMonth = candidate.toLocalDate().plusMonths(interval)
+                val nextDay = minOf(deadline.dayOfMonth, nextMonth.lengthOfMonth())
+                candidate = LocalDateTime.of(nextMonth.withDayOfMonth(nextDay), targetTime)
             }
             candidate
         }

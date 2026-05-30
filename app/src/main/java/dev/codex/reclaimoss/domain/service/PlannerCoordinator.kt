@@ -5,6 +5,7 @@ import dev.codex.reclaimoss.data.repository.PlannerRepository
 import dev.codex.reclaimoss.domain.model.BlockCompletionState
 import dev.codex.reclaimoss.domain.model.BlockLockState
 import dev.codex.reclaimoss.domain.model.PreferredTimeOfDay
+import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceRule
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.Reminder
@@ -36,6 +37,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -711,12 +713,13 @@ class PlannerCoordinator(
         val initial = initialDueAt.atZone(zoneId)
         val fixedStartLocal = fixedStartAt?.atZone(zoneId)
         val fixedEndLocal = fixedEndAt?.atZone(zoneId)
+        var emitted = 0
         return when (recurrenceRule.type) {
             RecurrenceType.NONE -> listOf(TaskOccurrence(initialDueAt, fixedStartAt, fixedEndAt))
             RecurrenceType.DAILY -> {
                 buildList {
                     var candidate = initial
-                    while (!candidate.toInstant().isAfter(horizonEnd)) {
+                    while (!candidate.toInstant().isAfter(horizonEnd) && withinOccurrenceLimit(recurrenceRule, emitted)) {
                         if (!candidate.toInstant().isBefore(initialDueAt)) {
                             add(
                                 TaskOccurrence(
@@ -733,37 +736,70 @@ class PlannerCoordinator(
                                     },
                                 ),
                             )
+                            emitted += 1
                         }
-                        candidate = candidate.plusDays(1)
+                        candidate = candidate.plusDays(recurrenceRule.interval.coerceAtLeast(1).toLong())
                     }
                 }
             }
             RecurrenceType.WEEKLY -> {
                 val repeatDays = recurrenceRule.daysOfWeek.ifEmpty { setOf(initial.dayOfWeek) }
                 buildList {
-                    var candidateDate = initial.toLocalDate()
-                    while (!candidateDate.atTime(initial.toLocalTime()).atZone(zoneId).toInstant().isAfter(horizonEnd)) {
-                        if (candidateDate.dayOfWeek in repeatDays) {
+                    val intervalWeeks = recurrenceRule.interval.coerceAtLeast(1).toLong()
+                    val sortedDays = repeatDays.sortedBy { it.value }
+                    var weekStart = initial.toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                    while (!weekStart.atTime(initial.toLocalTime()).atZone(zoneId).toInstant().isAfter(horizonEnd) && withinOccurrenceLimit(recurrenceRule, emitted)) {
+                        for (day in sortedDays) {
+                            if (!withinOccurrenceLimit(recurrenceRule, emitted)) break
+                            val candidateDate = weekStart.plusDays((day.value - DayOfWeek.MONDAY.value).toLong())
                             val candidate = ZonedDateTime.of(candidateDate, initial.toLocalTime(), zoneId).toInstant()
-                            if (!candidate.isBefore(initialDueAt)) {
-                                add(
-                                    TaskOccurrence(
-                                        dueAt = candidate,
-                                        fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
-                                            ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
-                                        } else {
-                                            null
-                                        },
-                                        fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
-                                            ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
-                                        } else {
-                                            null
-                                        },
-                                    ),
-                                )
-                            }
+                            if (candidate.isBefore(initialDueAt) || candidate.isAfter(horizonEnd)) continue
+                            add(
+                                TaskOccurrence(
+                                    dueAt = candidate,
+                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                        ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                        ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                ),
+                            )
+                            emitted += 1
                         }
-                        candidateDate = candidateDate.plusDays(1)
+                        weekStart = weekStart.plusWeeks(intervalWeeks)
+                    }
+                }
+            }
+            RecurrenceType.MONTHLY -> {
+                buildList {
+                    var candidateDate = initial.toLocalDate()
+                    while (!candidateDate.atTime(initial.toLocalTime()).atZone(zoneId).toInstant().isAfter(horizonEnd) && withinOccurrenceLimit(recurrenceRule, emitted)) {
+                        val candidate = ZonedDateTime.of(candidateDate, initial.toLocalTime(), zoneId).toInstant()
+                        if (!candidate.isBefore(initialDueAt)) {
+                            add(
+                                TaskOccurrence(
+                                    dueAt = candidate,
+                                    fixedStartAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedStartLocal != null) {
+                                        ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                    fixedEndAt = if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && fixedEndLocal != null) {
+                                        ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                    } else {
+                                        null
+                                    },
+                                ),
+                            )
+                            emitted += 1
+                        }
+                        val nextMonth = candidateDate.plusMonths(recurrenceRule.interval.coerceAtLeast(1).toLong())
+                        candidateDate = nextMonth.withDayOfMonth(minOf(initial.dayOfMonth, nextMonth.lengthOfMonth()))
                     }
                 }
             }
@@ -858,17 +894,32 @@ class PlannerCoordinator(
         val current = task.dueAt.atZone(zoneId)
         return when (task.recurrenceRule.type) {
             RecurrenceType.NONE -> task.dueAt
-            RecurrenceType.DAILY -> current.plusDays(1).toInstant()
+            RecurrenceType.DAILY -> current.plusDays(task.recurrenceRule.interval.coerceAtLeast(1).toLong()).toInstant()
             RecurrenceType.WEEKLY -> {
                 val repeatDays = task.recurrenceRule.daysOfWeek.ifEmpty { setOf(current.dayOfWeek) }
-                var candidate = current.plusDays(1)
-                while (candidate.dayOfWeek !in repeatDays) {
-                    candidate = candidate.plusDays(1)
+                val sortedDays = repeatDays.sortedBy { it.value }
+                val currentWeekStart = current.toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                val currentDayOrder = current.dayOfWeek.value
+                sortedDays.firstOrNull { it.value > currentDayOrder }?.let { nextDay ->
+                    val candidateDate = currentWeekStart.plusDays((nextDay.value - DayOfWeek.MONDAY.value).toLong())
+                    return ZonedDateTime.of(candidateDate, current.toLocalTime(), zoneId).toInstant()
                 }
-                candidate.toInstant()
+                val nextWeekStart = currentWeekStart.plusWeeks(task.recurrenceRule.interval.coerceAtLeast(1).toLong())
+                val firstDay = sortedDays.first()
+                val candidateDate = nextWeekStart.plusDays((firstDay.value - DayOfWeek.MONDAY.value).toLong())
+                ZonedDateTime.of(candidateDate, current.toLocalTime(), zoneId).toInstant()
+            }
+            RecurrenceType.MONTHLY -> {
+                val nextMonth = current.toLocalDate().plusMonths(task.recurrenceRule.interval.coerceAtLeast(1).toLong())
+                val nextDay = minOf(current.dayOfMonth, nextMonth.lengthOfMonth())
+                ZonedDateTime.of(nextMonth.withDayOfMonth(nextDay), current.toLocalTime(), zoneId).toInstant()
             }
         }
     }
+
+    private fun withinOccurrenceLimit(recurrenceRule: RecurrenceRule, emitted: Int): Boolean =
+        recurrenceRule.endMode != RecurrenceEndMode.AFTER_OCCURRENCES ||
+            emitted < (recurrenceRule.occurrenceCount ?: Int.MAX_VALUE)
 
     private fun nextFutureOccurrence(task: ScheduleTask): Instant {
         var candidateTask = task
