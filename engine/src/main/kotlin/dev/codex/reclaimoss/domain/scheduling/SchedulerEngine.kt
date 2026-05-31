@@ -10,6 +10,7 @@ import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
@@ -86,16 +87,12 @@ class SchedulerEngine {
         } else {
             emptyList()
         }
-        val occupied = (
+        val hardBusyWindows = (
             busyWindows +
-                lockedOrCompleted.map { BusyWindow(it.startAt, it.endAt) } +
-                if (policy.allowConcurrentTasks) emptyList() else pendingBlocks.map { BusyWindow(it.startAt, it.endAt) }
+                lockedOrCompleted.map { BusyWindow(it.startAt, it.endAt) }
             )
             .sortedBy { it.startAt }
-            .toMutableList()
-        val softOccupied = pendingBlocks
-            .map { BusyWindow(it.startAt, it.endAt) }
-            .toMutableList()
+        val pendingBlocksPool = pendingBlocks.toMutableList()
         val results = lockedOrCompleted.sortedBy { it.startAt }.toMutableList()
         val unscheduled = mutableListOf<String>()
         val issues = mutableListOf<SchedulingIssue>()
@@ -130,9 +127,13 @@ class SchedulerEngine {
             var cursor = firstBlockStart
 
             if (existingTaskBlocks.isNotEmpty()) {
-                val occupiedWithoutSelf = occupied.filterNot { busy ->
-                    existingTaskBlocks.any { existing -> existing.startAt == busy.startAt && existing.endAt == busy.endAt }
-                }
+                val occupiedWithoutSelf = partitionBusyWindowsForTask(
+                    task = task,
+                    taskBlocks = pendingBlocksPool.filter { it.taskId != task.id },
+                    hardBusyWindows = hardBusyWindows,
+                    tasksById = allTasksById,
+                    allowConcurrentTasks = policy.allowConcurrentTasks,
+                ).first
                 val canKeepExisting = existingTaskBlocks.all { existingBlock ->
                     blockCanStayScheduled(
                         block = existingBlock,
@@ -156,8 +157,7 @@ class SchedulerEngine {
                         .plus(policy.breakBetweenBlocksMinutes.toLong(), ChronoUnit.MINUTES)
                 } else {
                     existingTaskBlocks.forEach { existingBlock ->
-                        occupied.removeAll { it.startAt == existingBlock.startAt && it.endAt == existingBlock.endAt }
-                        softOccupied.removeAll { it.startAt == existingBlock.startAt && it.endAt == existingBlock.endAt }
+                        pendingBlocksPool.removeAll { it.id == existingBlock.id }
                     }
                 }
             }
@@ -167,6 +167,13 @@ class SchedulerEngine {
             }
 
             while (remaining > 0 && cursor <= task.dueAt) {
+                val (occupied, softOccupied) = partitionBusyWindowsForTask(
+                    task = task,
+                    taskBlocks = pendingBlocksPool.filter { it.taskId != task.id },
+                    hardBusyWindows = hardBusyWindows,
+                    tasksById = allTasksById,
+                    allowConcurrentTasks = policy.allowConcurrentTasks,
+                )
                 val candidate = nextCandidate(
                     task = task,
                     cursor = cursor,
@@ -177,6 +184,7 @@ class SchedulerEngine {
                     softOccupied = softOccupied,
                     timePeriods = timePeriods,
                     policy = policy,
+                    allowConcurrentForTask = taskAllowsOverlap(task, policy.allowConcurrentTasks),
                     remainingMinutes = remaining,
                     preferredTimePeriodId = task.preferredTimePeriodId,
                 ) ?: break
@@ -193,12 +201,7 @@ class SchedulerEngine {
                     externalCalendarEventId = null,
                 )
                 results += block
-                val busyWindow = BusyWindow(block.startAt, block.endAt)
-                if (!policy.allowConcurrentTasks) {
-                    occupied += busyWindow
-                    occupied.sortBy { it.startAt }
-                }
-                softOccupied += busyWindow
+                pendingBlocksPool += block
                 remaining -= minutes
                 cursor = block.endAt.plus(policy.breakBetweenBlocksMinutes.toLong(), ChronoUnit.MINUTES)
             }
@@ -287,6 +290,7 @@ class SchedulerEngine {
         softOccupied: List<BusyWindow>,
         timePeriods: List<TimePeriod>,
         policy: SchedulingPolicy,
+        allowConcurrentForTask: Boolean,
         remainingMinutes: Int,
         preferredTimePeriodId: String?,
     ): BusyWindow? {
@@ -332,7 +336,7 @@ class SchedulerEngine {
                     }
                 }
             }
-            if (policy.allowConcurrentTasks) {
+            if (allowConcurrentForTask) {
                 val preferredCandidate = preferredSegments.bestConcurrentBlock(
                     remainingMinutes = remainingMinutes,
                     maxBlockMinutes = policy.maxBlockMinutes,
@@ -405,8 +409,32 @@ class SchedulerEngine {
 
             date = date.plusDays(1)
         }
-        if (policy.allowConcurrentTasks) return bestConcurrentCandidate?.window
+        if (allowConcurrentForTask) return bestConcurrentCandidate?.window
         return earliestFallback
+    }
+
+    private fun partitionBusyWindowsForTask(
+        task: ScheduleTask,
+        taskBlocks: List<ScheduleBlock>,
+        hardBusyWindows: List<BusyWindow>,
+        tasksById: Map<String, ScheduleTask>,
+        allowConcurrentTasks: Boolean,
+    ): Pair<List<BusyWindow>, List<BusyWindow>> {
+        val blockingTaskWindows = mutableListOf<BusyWindow>()
+        val softTaskWindows = mutableListOf<BusyWindow>()
+        taskBlocks.forEach { block ->
+            val window = BusyWindow(block.startAt, block.endAt)
+            val otherTask = tasksById[block.taskId]
+            if (otherTask != null && tasksCanOverlap(task, otherTask, allowConcurrentTasks)) {
+                softTaskWindows += window
+            } else {
+                blockingTaskWindows += window
+            }
+        }
+        return Pair(
+            (hardBusyWindows + blockingTaskWindows).sortedBy { it.startAt },
+            softTaskWindows.sortedBy { it.startAt },
+        )
     }
 
     private fun List<BusyWindow>.firstBlock(
@@ -637,6 +665,21 @@ class SchedulerEngine {
             TaskContinuationMode.AFTER_PARENT_DUE_AT -> parentTask?.dueAt
         }
     }
+
+    private fun taskAllowsOverlap(
+        task: ScheduleTask,
+        allowConcurrentTasks: Boolean,
+    ): Boolean = when (task.overlapPolicy) {
+        TaskOverlapPolicy.INHERIT -> allowConcurrentTasks
+        TaskOverlapPolicy.ALLOW -> true
+        TaskOverlapPolicy.DISALLOW -> false
+    }
+
+    private fun tasksCanOverlap(
+        first: ScheduleTask,
+        second: ScheduleTask,
+        allowConcurrentTasks: Boolean,
+    ): Boolean = taskAllowsOverlap(first, allowConcurrentTasks) && taskAllowsOverlap(second, allowConcurrentTasks)
 
     private fun taskScore(
         task: ScheduleTask,

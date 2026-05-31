@@ -82,6 +82,12 @@ enum class TaskContinuationMode {
     AFTER_PARENT_DUE_AT,
 }
 
+enum class TaskOverlapPolicy {
+    INHERIT,
+    ALLOW,
+    DISALLOW,
+}
+
 data class TimeWindow(
     val start: LocalTime,
     val end: LocalTime,
@@ -175,6 +181,7 @@ data class ScheduleTask(
     val hasDeadline: Boolean = true,
     val continuationParentTaskId: String? = null,
     val continuationMode: TaskContinuationMode? = null,
+    val overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val fixedStartAt: Instant? = null,
     val fixedEndAt: Instant? = null,

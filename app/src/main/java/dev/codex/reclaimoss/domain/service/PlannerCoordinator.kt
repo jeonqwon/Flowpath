@@ -16,6 +16,7 @@ import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -89,6 +90,7 @@ class PlannerCoordinator(
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
+        overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -122,6 +124,7 @@ class PlannerCoordinator(
                     hasDeadline = hasDeadline,
                     continuationParentTaskId = continuationParentTaskId,
                     continuationMode = continuationMode,
+                    overlapPolicy = overlapPolicy,
                     schedulingMode = schedulingMode,
                     fixedStartAt = occurrence.fixedStartAt,
                     fixedEndAt = occurrence.fixedEndAt,
@@ -168,6 +171,7 @@ class PlannerCoordinator(
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
+        overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -185,6 +189,7 @@ class PlannerCoordinator(
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
+            overlapPolicy = overlapPolicy,
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             addReminder = addReminder,
@@ -319,6 +324,7 @@ class PlannerCoordinator(
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
+        overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         schedulingMode: TaskSchedulingMode,
@@ -346,6 +352,7 @@ class PlannerCoordinator(
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
+            overlapPolicy = overlapPolicy,
             schedulingMode = schedulingMode,
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
@@ -658,14 +665,21 @@ class PlannerCoordinator(
                 .filter { it.taskId != taskId }
                 .filter { it.lockState == BlockLockState.LOCKED || it.completionState == BlockCompletionState.COMPLETED }
                 .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
+        val allowConcurrent = getSettings().allowConcurrentTasks
+        val otherTasksById = repository.getTasks()
+            .filter { it.id != taskId }
+            .associateBy { it.id }
         val otherTaskBusyWindows = repository.getBlocks()
             .filter { it.taskId != taskId }
             .filter { it.lockState != BlockLockState.LOCKED && it.completionState != BlockCompletionState.COMPLETED }
+            .filter { block ->
+                val otherTask = otherTasksById[block.taskId]
+                otherTask == null || !tasksCanOverlap(task, otherTask, allowConcurrent)
+            }
             .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
-        val allowConcurrent = getSettings().allowConcurrentTasks
         val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
         val overlapsOtherTask = otherTaskBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
-        if (overlapsHardBlock || (!allowConcurrent && overlapsOtherTask)) {
+        if (overlapsHardBlock || overlapsOtherTask) {
             repository.replaceSchedulingIssuesForTask(
                 taskId,
                 listOf(
@@ -1019,6 +1033,21 @@ class PlannerCoordinator(
     private fun now(): Instant = clock.instant()
 
     private fun zoneId(): ZoneId = clock.zone
+
+    private fun taskAllowsOverlap(
+        task: ScheduleTask,
+        allowConcurrentTasks: Boolean,
+    ): Boolean = when (task.overlapPolicy) {
+        TaskOverlapPolicy.INHERIT -> allowConcurrentTasks
+        TaskOverlapPolicy.ALLOW -> true
+        TaskOverlapPolicy.DISALLOW -> false
+    }
+
+    private fun tasksCanOverlap(
+        first: ScheduleTask,
+        second: ScheduleTask,
+        allowConcurrentTasks: Boolean,
+    ): Boolean = taskAllowsOverlap(first, allowConcurrentTasks) && taskAllowsOverlap(second, allowConcurrentTasks)
 
     private suspend fun requireValidContinuationParent(
         continuationParentTaskId: String?,

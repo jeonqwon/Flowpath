@@ -111,6 +111,7 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -231,6 +232,7 @@ fun CreateWorkScreen(
                     it.hasDeadline,
                     it.continuationParentTaskId ?: "",
                     it.continuationMode?.name ?: "",
+                    it.overlapPolicy.name,
                     it.deadline.toString(),
                     it.schedulingMode.name,
                     it.startDate?.toString() ?: "",
@@ -254,18 +256,19 @@ fun CreateWorkScreen(
                     hasDeadline = saved[4] as Boolean,
                     continuationParentTaskId = (saved[5] as String).ifBlank { null },
                     continuationMode = (saved[6] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
-                    deadline = LocalDateTime.parse(saved[7] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[8] as String),
-                    startDate = (saved[9] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[10] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[11] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[12] as String),
-                    repeatsForever = saved[13] as Boolean,
-                    estimatedMinutes = saved[14] as Int,
-                    addReminder = saved[15] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[16] as String),
-                    recurrenceInterval = saved[17] as Int,
-                    recurrenceDays = (saved[18] as String)
+                    overlapPolicy = TaskOverlapPolicy.valueOf(saved[7] as String),
+                    deadline = LocalDateTime.parse(saved[8] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[9] as String),
+                    startDate = (saved[10] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[11] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[12] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[13] as String),
+                    repeatsForever = saved[14] as Boolean,
+                    estimatedMinutes = saved[15] as Int,
+                    addReminder = saved[16] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[17] as String),
+                    recurrenceInterval = saved[18] as Int,
+                    recurrenceDays = (saved[19] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -463,6 +466,23 @@ fun CreateWorkScreen(
                                     FilterChip(
                                         selected = taskDraft.priority == priority,
                                         onClick = { taskDraft = taskDraft.copy(priority = priority) },
+                                        label = { Text(label) },
+                                    )
+                                }
+                            }
+                            TaskSectionTitle("Overlap")
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                listOf(
+                                    TaskOverlapPolicy.INHERIT to "Inherit",
+                                    TaskOverlapPolicy.ALLOW to "Allow",
+                                    TaskOverlapPolicy.DISALLOW to "No overlap",
+                                ).forEach { (policy, label) ->
+                                    FilterChip(
+                                        selected = taskDraft.overlapPolicy == policy,
+                                        onClick = { taskDraft = taskDraft.copy(overlapPolicy = policy) },
                                         label = { Text(label) },
                                     )
                                 }

@@ -17,6 +17,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -256,6 +257,27 @@ class PlannerCoordinatorTest {
         val createdTask = repository.getTasks().single { it.id == result.taskId }
         assertEquals(parent.id, createdTask.continuationParentTaskId)
         assertEquals(TaskContinuationMode.AFTER_PARENT_SCHEDULED_END, createdTask.continuationMode)
+    }
+
+    @Test
+    fun `create task stores task overlap policy`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+
+        val result = coordinator.createTask(
+            title = "Overlap-friendly task",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = now().plusSeconds(60L * 60L * 48L),
+            preferredTimePeriodId = "period-afternoon",
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val createdTask = repository.getTasks().single { it.id == result.taskId }
+        assertEquals(TaskOverlapPolicy.ALLOW, createdTask.overlapPolicy)
     }
 
     @Test

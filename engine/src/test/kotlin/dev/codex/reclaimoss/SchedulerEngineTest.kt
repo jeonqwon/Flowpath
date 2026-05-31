@@ -10,6 +10,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -662,6 +663,85 @@ class SchedulerEngineTest {
     }
 
     @Test
+    fun `task disallow overlap prevents concurrency even when global setting allows it`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+        val first = task(
+            id = "strict-first",
+            deadline = dueAt,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+        )
+        val second = task(
+            id = "strict-second",
+            deadline = dueAt,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+            overlapPolicy = TaskOverlapPolicy.INHERIT,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(first, second),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val firstBlock = plan.blocks.first { it.taskId == first.id }
+        val secondBlock = plan.blocks.first { it.taskId == second.id }
+        assertTrue(firstBlock.endAt <= secondBlock.startAt || secondBlock.endAt <= firstBlock.startAt)
+    }
+
+    @Test
+    fun `task allow overlap can opt into concurrency when global setting is off`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+        val first = task(
+            id = "opt-in-first",
+            deadline = dueAt,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+        val second = task(
+            id = "opt-in-second",
+            deadline = dueAt,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
+            priority = TaskPriority.MEDIUM,
+            preferredTimePeriodId = "period-afternoon",
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(first, second),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy.copy(allowConcurrentTasks = false),
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val firstBlock = plan.blocks.first { it.taskId == first.id }
+        val secondBlock = plan.blocks.first { it.taskId == second.id }
+        assertTrue(firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt)
+    }
+
+    @Test
     fun `flexible window tasks stay inside the allowed window and prefer the middle`() {
         val date = LocalDate.of(2026, 5, 19)
         val eveningHours = WorkHoursProfile(
@@ -788,6 +868,7 @@ class SchedulerEngineTest {
         fixedEndAt: Instant? = null,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
+        overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
     ) = ScheduleTask(
         id = id,
         title = id,
@@ -798,6 +879,7 @@ class SchedulerEngineTest {
         fixedEndAt = fixedEndAt,
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
+        overlapPolicy = overlapPolicy,
         dueAt = deadline,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = remainingMinutes,

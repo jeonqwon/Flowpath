@@ -21,6 +21,7 @@ import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -51,6 +52,7 @@ data class TaskEntity(
     val hasDeadline: Boolean,
     val continuationParentTaskId: String?,
     val continuationMode: TaskContinuationMode?,
+    val overlapPolicy: TaskOverlapPolicy,
     val schedulingMode: TaskSchedulingMode,
     val fixedStartAtEpochMillis: Long?,
     val fixedEndAtEpochMillis: Long?,
@@ -239,6 +241,12 @@ class RoomConverters {
     fun toTaskSchedulingMode(value: String): TaskSchedulingMode = TaskSchedulingMode.valueOf(value)
 
     @TypeConverter
+    fun fromTaskOverlapPolicy(value: TaskOverlapPolicy): String = value.name
+
+    @TypeConverter
+    fun toTaskOverlapPolicy(value: String): TaskOverlapPolicy = TaskOverlapPolicy.valueOf(value)
+
+    @TypeConverter
     fun fromReminderStatus(value: ReminderStatus): String = value.name
 
     @TypeConverter
@@ -316,7 +324,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -369,6 +377,12 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE tasks ADD COLUMN continuationParentTaskId TEXT")
                 database.execSQL("ALTER TABLE tasks ADD COLUMN continuationMode TEXT")
+            }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN overlapPolicy TEXT NOT NULL DEFAULT 'INHERIT'")
             }
         }
     }
