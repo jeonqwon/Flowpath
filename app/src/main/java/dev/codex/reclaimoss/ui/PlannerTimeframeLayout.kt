@@ -40,6 +40,16 @@ internal fun buildTimeframeRowDrawSpecs(
 
     return buildList {
         weeks.forEachIndexed { rowIndex, row ->
+            val visibleColumns = row.withIndex()
+                .filter { it.value != null }
+                .map { it.index }
+            if (visibleColumns.isEmpty()) return@forEachIndexed
+            val visibleFirstColumn = visibleColumns.first()
+            val visibleLastColumn = visibleColumns.last()
+            val baseCornerRadiusPx = (
+                (rowHeightPx - (baseInsetPx * 2f)) / 4f
+            ).coerceAtLeast(strokeWidthPx * 3f)
+
             val intervals = timeframes.mapNotNull { timeframe ->
                 val matchingColumns = row.withIndex()
                     .filter { (_, date) -> date != null && !date.isBefore(timeframe.startDate) && !date.isAfter(timeframe.endDate) }
@@ -62,10 +72,12 @@ internal fun buildTimeframeRowDrawSpecs(
                 cluster.forEach { interval ->
                     val lane = laneAssignments.getValue(interval.timeframe.id)
                     val laneOffset = strokeWidthPx * lane
+                    val startOverhang = if (interval.startColumn == visibleFirstColumn) edgeOverhangPx else 0f
+                    val endOverhang = if (interval.endColumn == visibleLastColumn) edgeOverhangPx else 0f
                     val left = interval.startColumn * cellWidthPx + baseInsetPx - laneOffset -
-                        if (interval.startColumn == 0) edgeOverhangPx else 0f
+                        startOverhang
                     val right = (interval.endColumn + 1) * cellWidthPx - baseInsetPx + laneOffset +
-                        if (interval.endColumn == row.lastIndex) edgeOverhangPx else 0f
+                        endOverhang
                     val top = baseInsetPx - laneOffset
                     val bottom = rowHeightPx - baseInsetPx + laneOffset
                     add(
@@ -79,7 +91,7 @@ internal fun buildTimeframeRowDrawSpecs(
                             top = top,
                             right = right,
                             bottom = bottom,
-                            radius = (bottom - top) / 2f,
+                            radius = baseCornerRadiusPx + laneOffset,
                             colorHex = interval.timeframe.colorHex,
                         ),
                     )

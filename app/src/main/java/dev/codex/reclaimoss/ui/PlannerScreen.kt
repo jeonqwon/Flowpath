@@ -549,8 +549,8 @@ fun CalendarCard(
     val rowHeight = 64.dp
     val pillSize = 40.dp
     val timeframeStroke = 2.dp
-    val timeframeInset = 8.dp
-    val edgeOverhang = 6.dp
+    val timeframeInset = 6.dp
+    val edgeOverhang = 8.dp
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -669,11 +669,11 @@ fun CalendarDayCell(
         Column(
             modifier = Modifier
                 .size(pillSize)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(pillColor)
                 .then(
                     if (pillBorderColor != Color.Transparent) {
-                        Modifier.border(1.dp, pillBorderColor, RoundedCornerShape(16.dp))
+                        Modifier.border(1.dp, pillBorderColor, RoundedCornerShape(12.dp))
                     } else {
                         Modifier
                     },

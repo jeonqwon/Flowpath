@@ -74,6 +74,7 @@ class PlannerTimeframeLayoutTest {
         assertEquals(0, innerSpec.lane)
         assertEquals(strokeWidthPx, innerSpec.top - outerSpec.top, 0.001f)
         assertEquals(strokeWidthPx, outerSpec.bottom - innerSpec.bottom, 0.001f)
+        assertEquals(strokeWidthPx, outerSpec.radius - innerSpec.radius, 0.001f)
         assertTrue(outerSpec.left < innerSpec.left)
         assertTrue(outerSpec.right > innerSpec.right)
     }
@@ -118,6 +119,8 @@ class PlannerTimeframeLayoutTest {
         assertEquals(1, specs[1].rowIndex)
         assertEquals(0, specs[1].startColumn)
         assertEquals(0, specs[1].endColumn)
+        assertEquals(4f, specs[1].left, 0.001f)
+        assertEquals(96f, specs[1].right, 0.001f)
     }
 
     private fun timeframe(
