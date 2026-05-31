@@ -115,6 +115,7 @@ import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TimePeriod
 import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
@@ -206,6 +207,7 @@ fun CreateModeSwitch(
 fun CreateWorkScreen(
     padding: PaddingValues,
     periods: List<TimePeriod>,
+    timeframes: List<Timeframe>,
     availableTasks: List<ScheduleTask>,
     currentTaskId: String? = null,
     sessionKey: Int,
@@ -229,6 +231,7 @@ fun CreateWorkScreen(
                     it.description,
                     it.priority.name,
                     it.preferredTimePeriodId ?: "",
+                    it.timeframeId ?: "",
                     it.hasDeadline,
                     it.continuationParentTaskId ?: "",
                     it.continuationMode?.name ?: "",
@@ -253,22 +256,23 @@ fun CreateWorkScreen(
                     description = saved[1] as String,
                     priority = TaskPriority.valueOf(saved[2] as String),
                     preferredTimePeriodId = (saved[3] as String).ifBlank { null },
-                    hasDeadline = saved[4] as Boolean,
-                    continuationParentTaskId = (saved[5] as String).ifBlank { null },
-                    continuationMode = (saved[6] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
-                    overlapPolicy = TaskOverlapPolicy.valueOf(saved[7] as String),
-                    deadline = LocalDateTime.parse(saved[8] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[9] as String),
-                    startDate = (saved[10] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[11] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[12] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[13] as String),
-                    repeatsForever = saved[14] as Boolean,
-                    estimatedMinutes = saved[15] as Int,
-                    addReminder = saved[16] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[17] as String),
-                    recurrenceInterval = saved[18] as Int,
-                    recurrenceDays = (saved[19] as String)
+                    timeframeId = (saved[4] as String).ifBlank { null },
+                    hasDeadline = saved[5] as Boolean,
+                    continuationParentTaskId = (saved[6] as String).ifBlank { null },
+                    continuationMode = (saved[7] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
+                    overlapPolicy = TaskOverlapPolicy.valueOf(saved[8] as String),
+                    deadline = LocalDateTime.parse(saved[9] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[10] as String),
+                    startDate = (saved[11] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[12] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[13] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[14] as String),
+                    repeatsForever = saved[15] as Boolean,
+                    estimatedMinutes = saved[16] as Int,
+                    addReminder = saved[17] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[18] as String),
+                    recurrenceInterval = saved[19] as Int,
+                    recurrenceDays = (saved[20] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -337,6 +341,17 @@ fun CreateWorkScreen(
                 recurrenceInterval = if (followUpMode) 1 else taskDraft.recurrenceInterval,
                 recurrenceDays = if (followUpMode) emptySet() else taskDraft.recurrenceDays,
             )
+        }
+    }
+    val availableTimeframes = remember(timeframes, taskDraft) {
+        val cutoffDate = taskDraft.timeframeCutoffDate()
+        timeframes
+            .filter { cutoffDate == null || !it.startDate.isAfter(cutoffDate) }
+            .sortedWith(compareBy<Timeframe> { it.startDate }.thenBy { it.endDate }.thenBy { it.name })
+    }
+    LaunchedEffect(availableTimeframes, taskDraft.timeframeId) {
+        if (taskDraft.timeframeId != null && availableTimeframes.none { it.id == taskDraft.timeframeId }) {
+            taskDraft = taskDraft.copy(timeframeId = null)
         }
     }
 
@@ -451,6 +466,14 @@ fun CreateWorkScreen(
                                 },
                             )
                         }
+                        TaskSectionTitle("Timeframe")
+                        TimeframeDropdown(
+                            timeframes = availableTimeframes,
+                            selectedTimeframeId = taskDraft.timeframeId,
+                            onSelected = { timeframeId ->
+                                taskDraft = taskDraft.copy(timeframeId = timeframeId)
+                            },
+                        )
                     }
                 }
                 item {
@@ -1162,6 +1185,91 @@ fun PreferredPeriodDropdown(
     }
 }
 
+@Composable
+fun TimeframeDropdown(
+    timeframes: List<Timeframe>,
+    selectedTimeframeId: String?,
+    onSelected: (String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedTimeframe = timeframes.firstOrNull { it.id == selectedTimeframeId }
+    val formatter = remember { DateTimeFormatter.ofPattern("MMM d") }
+    val selectedLabel = selectedTimeframe?.let {
+        "${it.name} · ${formatter.format(it.startDate)} - ${formatter.format(it.endDate)}"
+    } ?: "None"
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    selectedLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("v", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        "None",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = if (selectedTimeframeId == null) FontWeight.Bold else FontWeight.Normal,
+                    )
+                },
+                onClick = {
+                    onSelected(null)
+                    expanded = false
+                },
+            )
+            timeframes.forEach { timeframe ->
+                DropdownMenuItem(
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                timeframe.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = if (selectedTimeframeId == timeframe.id) FontWeight.Bold else FontWeight.Normal,
+                            )
+                            Text(
+                                "${formatter.format(timeframe.startDate)} - ${formatter.format(timeframe.endDate)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    onClick = {
+                        onSelected(timeframe.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ContinuationSection(
@@ -1247,6 +1355,14 @@ fun ContinuationSection(
             }
         }
     }
+}
+
+private fun TaskDraft.timeframeCutoffDate(): LocalDate? = when {
+    !hasDeadline -> null
+    schedulingMode == TaskSchedulingMode.FIXED_DAY -> fixedDate
+    schedulingMode == TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.toLocalDate()
+    schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW -> fixedEndAt.toLocalDate()
+    else -> deadline.toLocalDate()
 }
 
 @OptIn(ExperimentalLayoutApi::class)

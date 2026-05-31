@@ -113,6 +113,7 @@ import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TimePeriod
 import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
@@ -163,6 +164,7 @@ val CreateScreenSnackbarBottomOffset = 108.dp
 data class PlannerUiState(
     val snapshot: PlannerSnapshot = PlannerSnapshot(
         projects = emptyList(),
+        timeframes = emptyList(),
         tasks = emptyList(),
         blocks = emptyList(),
         timePeriods = emptyList(),
@@ -176,6 +178,7 @@ data class TaskDraft(
     val description: String = "",
     val priority: TaskPriority = TaskPriority.MEDIUM,
     val preferredTimePeriodId: String? = null,
+    val timeframeId: String? = null,
     val hasDeadline: Boolean = true,
     val continuationParentTaskId: String? = null,
     val continuationMode: TaskContinuationMode? = null,
@@ -205,6 +208,14 @@ data class ReminderDraft(
     val recurrenceOccurrenceLimit: Int? = null,
 )
 
+data class TimeframeDraft(
+    val id: String = "",
+    val name: String = "",
+    val startDate: LocalDate = LocalDate.now(),
+    val endDate: LocalDate = LocalDate.now().plusDays(4),
+    val colorHex: String = "#F4B6D2",
+)
+
 data class TimePeriodDraft(
     val id: String = "",
     val label: String = "",
@@ -222,6 +233,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         description = description,
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
+        timeframeId = null,
         hasDeadline = true,
         continuationParentTaskId = null,
         continuationMode = null,
@@ -252,6 +264,7 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         description = description,
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
+        timeframeId = timeframeId,
         hasDeadline = hasDeadline,
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
@@ -304,6 +317,7 @@ class PlannerViewModel(
             description = draft.description,
             priority = draft.priority,
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            timeframeId = draft.timeframeId,
             hasDeadline = draft.hasDeadline,
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
@@ -333,6 +347,7 @@ class PlannerViewModel(
             priority = draft.priority,
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            timeframeId = draft.timeframeId,
             hasDeadline = draft.hasDeadline,
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
@@ -361,6 +376,7 @@ class PlannerViewModel(
             priority = draft.priority,
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
+            timeframeId = draft.timeframeId,
             hasDeadline = draft.hasDeadline,
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
@@ -464,6 +480,19 @@ class PlannerViewModel(
 
     suspend fun deleteTimePeriod(periodId: String) {
         coordinator.deleteTimePeriod(periodId)
+    }
+
+    suspend fun saveTimeframe(draft: TimeframeDraft) =
+        coordinator.saveTimeframe(
+            name = draft.name,
+            startDate = draft.startDate,
+            endDate = draft.endDate,
+            colorHex = draft.colorHex,
+            timeframeId = draft.id.ifBlank { null },
+        )
+
+    suspend fun deleteTimeframe(timeframeId: String) {
+        coordinator.deleteTimeframe(timeframeId)
     }
 
     suspend fun setThemeMode(value: ThemeMode) = settingsRepository.setThemeMode(value)
@@ -590,4 +619,12 @@ private fun TaskDraft.fixedEndAtInstantOrNull(): Instant? =
         TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
         else -> null
     }
+
+fun Timeframe.toDraft(): TimeframeDraft = TimeframeDraft(
+    id = id,
+    name = name,
+    startDate = startDate,
+    endDate = endDate,
+    colorHex = colorHex,
+)
 

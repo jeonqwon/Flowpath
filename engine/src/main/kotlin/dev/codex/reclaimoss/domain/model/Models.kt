@@ -2,6 +2,7 @@ package dev.codex.reclaimoss.domain.model
 
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 
 enum class TaskPriority(val score: Int) {
@@ -132,6 +133,16 @@ data class Project(
     val archived: Boolean = false,
 )
 
+data class Timeframe(
+    val id: String,
+    val name: String,
+    val startDate: LocalDate,
+    val endDate: LocalDate,
+    val colorHex: String,
+    val createdAt: Instant = Instant.now(),
+    val updatedAt: Instant = Instant.now(),
+)
+
 data class ReminderPolicy(
     val remindBeforeMinutes: Int,
     val remindOverdueMinutes: Int,
@@ -175,6 +186,7 @@ data class ScheduleTask(
     val title: String,
     val description: String = "",
     val projectId: String? = null,
+    val timeframeId: String? = null,
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
     val preferredTimePeriodId: String? = null,

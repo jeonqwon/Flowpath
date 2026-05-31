@@ -23,6 +23,7 @@ class AppGraph(context: Context) {
         OpenReclaimDatabase.MIGRATION_9_10,
         OpenReclaimDatabase.MIGRATION_10_11,
         OpenReclaimDatabase.MIGRATION_11_12,
+        OpenReclaimDatabase.MIGRATION_12_13,
     ).fallbackToDestructiveMigrationOnDowngrade().build()
 
     private val calendarGateway = NoOpGoogleCalendarGateway()
@@ -31,6 +32,7 @@ class AppGraph(context: Context) {
 
     val plannerRepository: PlannerRepository = PlannerRepositoryImpl(
         projectDao = database.projectDao(),
+        timeframeDao = database.timeframeDao(),
         taskDao = database.taskDao(),
         scheduleBlockDao = database.scheduleBlockDao(),
         timePeriodDao = database.timePeriodDao(),

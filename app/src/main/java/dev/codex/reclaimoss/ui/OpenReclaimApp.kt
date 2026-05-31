@@ -160,7 +160,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var rescheduleSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
     var createReminderDraftOverride by remember { mutableStateOf<ReminderDraft?>(null) }
+    var timeframeDraftOverride by remember { mutableStateOf<TimeframeDraft?>(null) }
+    var timeframeErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var createSessionKey by rememberSaveable { mutableStateOf(0) }
+    var showingTimeframeEditor by rememberSaveable { mutableStateOf(false) }
     var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var tasksSelectedDateEpochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var tasksScrollOffset by rememberSaveable { mutableStateOf(0) }
@@ -213,6 +216,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         rescheduleSourceTaskId = null
         createTaskDraftOverride = null
         createReminderDraftOverride = null
+    }
+    BackHandler(enabled = showingTimeframeEditor) {
+        showingTimeframeEditor = false
+        timeframeDraftOverride = null
+        timeframeErrorMessage = null
     }
     BackHandler(enabled = selectedReminderId != null) {
         selectedReminderId = null
@@ -287,6 +295,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             CreateWorkScreen(
                 padding = padding,
                 periods = state.snapshot.timePeriods,
+                timeframes = state.snapshot.timeframes,
                 availableTasks = state.snapshot.tasks,
                 currentTaskId = rescheduleSourceTaskId,
                 sessionKey = createSessionKey,
@@ -357,6 +366,52 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         navigateToTab(AppTab.Reminders)
                         snackbarHostState.showSnackbar("Reminder saved")
                     }
+                },
+            )
+        }
+        return
+    }
+
+    if (showingTimeframeEditor) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            containerColor = MaterialTheme.colorScheme.background,
+        ) { padding ->
+            TimeframeEditorScreen(
+                padding = padding,
+                initialDraft = timeframeDraftOverride ?: TimeframeDraft(),
+                errorMessage = timeframeErrorMessage,
+                onBack = {
+                    showingTimeframeEditor = false
+                    timeframeDraftOverride = null
+                    timeframeErrorMessage = null
+                },
+                onSave = { draft ->
+                    scope.launch {
+                        val result = viewModel.saveTimeframe(draft)
+                        if (!result.saved) {
+                            timeframeErrorMessage = result.errorMessage
+                            return@launch
+                        }
+                        timeframeErrorMessage = null
+                        showingTimeframeEditor = false
+                        timeframeDraftOverride = null
+                        snackbarHostState.showSnackbar("Timeframe saved")
+                    }
+                },
+                onDelete = if ((timeframeDraftOverride ?: TimeframeDraft()).id.isNotBlank()) {
+                    { timeframeId ->
+                        scope.launch {
+                            viewModel.deleteTimeframe(timeframeId)
+                            timeframeErrorMessage = null
+                            showingTimeframeEditor = false
+                            timeframeDraftOverride = null
+                            snackbarHostState.showSnackbar("Timeframe deleted")
+                        }
+                    }
+                } else {
+                    null
                 },
             )
         }
@@ -554,6 +609,23 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             snackbarHostState.showSnackbar("Schedule rebuilt")
                         }
                     },
+                    onAddTimeframe = {
+                        timeframeDraftOverride = TimeframeDraft(startDate = sharedSelectedDate, endDate = sharedSelectedDate.plusDays(4))
+                        timeframeErrorMessage = null
+                        showingTimeframeEditor = true
+                    },
+                    onEditTimeframe = { timeframeId ->
+                        val timeframe = state.snapshot.timeframes.firstOrNull { it.id == timeframeId } ?: return@PlannerScreen
+                        timeframeDraftOverride = timeframe.toDraft()
+                        timeframeErrorMessage = null
+                        showingTimeframeEditor = true
+                    },
+                    onDeleteTimeframe = { timeframeId ->
+                        scope.launch {
+                            viewModel.deleteTimeframe(timeframeId)
+                            snackbarHostState.showSnackbar("Timeframe deleted")
+                        }
+                    },
                     onToggleLock = { block ->
                         scope.launch { viewModel.toggleLock(block) }
                     },
@@ -565,14 +637,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     },
                     onReschedule = { taskId ->
                         scope.launch { viewModel.rescheduleMissed(taskId) }
-                    },
-                    onAddTask = {
-                        followUpSourceTaskId = null
-                        rescheduleSourceTaskId = null
-                        createTaskDraftOverride = null
-                        createReminderDraftOverride = null
-                        createSessionKey += 1
-                        showingCreate = true
                     },
                     onOpenTask = { selectedTaskId = it },
                 )

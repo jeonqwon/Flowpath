@@ -27,6 +27,7 @@ import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriodType
 import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 
@@ -44,6 +45,7 @@ data class TaskEntity(
     @PrimaryKey val id: String,
     val recurrenceSeriesId: String?,
     val projectId: String?,
+    val timeframeId: String?,
     val title: String,
     val description: String,
     val priority: TaskPriority,
@@ -66,6 +68,17 @@ data class TaskEntity(
     val recurrenceEndMode: RecurrenceEndMode,
     val recurrenceOccurrenceLimit: Int?,
     val status: TaskStatus,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(tableName = "timeframes")
+data class TimeframeEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val startDate: LocalDate,
+    val endDate: LocalDate,
+    val colorHex: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )
@@ -145,8 +158,26 @@ interface TaskDao {
     @Query("UPDATE tasks SET preferredTimePeriodId = NULL WHERE preferredTimePeriodId = :periodId")
     suspend fun clearPreferredTimePeriod(periodId: String)
 
+    @Query("UPDATE tasks SET timeframeId = NULL WHERE timeframeId = :timeframeId")
+    suspend fun clearTimeframe(timeframeId: String)
+
     @Query("DELETE FROM tasks WHERE id = :taskId")
     suspend fun deleteTask(taskId: String)
+}
+
+@Dao
+interface TimeframeDao {
+    @Query("SELECT * FROM timeframes ORDER BY startDate ASC, endDate ASC, createdAtEpochMillis ASC")
+    fun observeTimeframes(): Flow<List<TimeframeEntity>>
+
+    @Query("SELECT * FROM timeframes ORDER BY startDate ASC, endDate ASC, createdAtEpochMillis ASC")
+    suspend fun getAll(): List<TimeframeEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(timeframe: TimeframeEntity)
+
+    @Query("DELETE FROM timeframes WHERE id = :timeframeId")
+    suspend fun delete(timeframeId: String)
 }
 
 @Dao
@@ -289,6 +320,12 @@ class RoomConverters {
     fun toLocalTime(value: String): LocalTime = LocalTime.parse(value)
 
     @TypeConverter
+    fun fromLocalDate(value: LocalDate): String = value.toString()
+
+    @TypeConverter
+    fun toLocalDate(value: String): LocalDate = LocalDate.parse(value)
+
+    @TypeConverter
     fun fromDayOfWeekSet(value: Set<DayOfWeek>): String =
         value.joinToString(",") { it.name }
 
@@ -318,18 +355,20 @@ class RoomConverters {
 @Database(
     entities = [
         ProjectEntity::class,
+        TimeframeEntity::class,
         TaskEntity::class,
         ScheduleBlockEntity::class,
         TimePeriodEntity::class,
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
 abstract class OpenReclaimDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
+    abstract fun timeframeDao(): TimeframeDao
     abstract fun taskDao(): TaskDao
     abstract fun scheduleBlockDao(): ScheduleBlockDao
     abstract fun timePeriodDao(): TimePeriodDao
@@ -383,6 +422,25 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE tasks ADD COLUMN overlapPolicy TEXT NOT NULL DEFAULT 'INHERIT'")
+            }
+        }
+
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN timeframeId TEXT")
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS timeframes (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        startDate TEXT NOT NULL,
+                        endDate TEXT NOT NULL,
+                        colorHex TEXT NOT NULL,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
             }
         }
     }

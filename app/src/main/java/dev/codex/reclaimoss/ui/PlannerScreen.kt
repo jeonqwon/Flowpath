@@ -5,6 +5,7 @@ import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -87,6 +89,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,6 +111,7 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
@@ -141,7 +145,9 @@ fun PlannerScreen(
     selectedDate: LocalDate,
     onSelectedDateChange: (LocalDate) -> Unit,
     onRebuild: () -> Unit,
-    onAddTask: () -> Unit,
+    onAddTimeframe: () -> Unit,
+    onEditTimeframe: (String) -> Unit,
+    onDeleteTimeframe: (String) -> Unit,
     onToggleLock: (ScheduleBlock) -> Unit,
     onMarkDone: (ScheduleBlock) -> Unit,
     onReschedule: (String) -> Unit,
@@ -243,7 +249,7 @@ fun PlannerScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+            HeaderActionButton(label = "Add timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -253,11 +259,12 @@ fun PlannerScreen(
             item {
                 CalendarCard(
                     month = visibleMonth,
-                    selectedDate = selectedDate,
-                    weekStart = settings.weekStart,
-                    blocksByDate = blocksByDate,
-                    remindersByDate = remindersByDate,
-                    tasksById = tasksById,
+                selectedDate = selectedDate,
+                weekStart = settings.weekStart,
+                timeframes = state.snapshot.timeframes,
+                blocksByDate = blocksByDate,
+                remindersByDate = remindersByDate,
+                tasksById = tasksById,
                     onPreviousMonth = { visibleMonth = visibleMonth.minusMonths(1) },
                     onNextMonth = { visibleMonth = visibleMonth.plusMonths(1) },
                     onDateSelected = { onSelectedDateChange(it) },
@@ -266,11 +273,14 @@ fun PlannerScreen(
             selectedDayOverview(
                 selectedDate = selectedDate,
                 settings = settings,
+                timeframes = state.snapshot.timeframes.filter { !selectedDate.isBefore(it.startDate) && !selectedDate.isAfter(it.endDate) },
                 blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
                 reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
                 completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
                 tasksById = tasksById,
                 zoneId = zoneId,
+                onEditTimeframe = onEditTimeframe,
+                onDeleteTimeframe = onDeleteTimeframe,
                 onToggleLock = onToggleLock,
                 onMarkDone = onMarkDone,
                 onReschedule = onReschedule,
@@ -283,11 +293,14 @@ fun PlannerScreen(
 fun LazyListScope.selectedDayOverview(
     selectedDate: LocalDate,
     settings: AppSettings,
+    timeframes: List<Timeframe>,
     blocks: List<ScheduleBlock>,
     reminders: List<Reminder>,
     completedTasks: List<ScheduleTask>,
     tasksById: Map<String, ScheduleTask>,
     zoneId: ZoneId,
+    onEditTimeframe: (String) -> Unit,
+    onDeleteTimeframe: (String) -> Unit,
     onToggleLock: (ScheduleBlock) -> Unit,
     onMarkDone: (ScheduleBlock) -> Unit,
     onReschedule: (String) -> Unit,
@@ -301,6 +314,19 @@ fun LazyListScope.selectedDayOverview(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+    if (timeframes.isNotEmpty()) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                timeframes.sortedWith(compareBy<Timeframe> { it.startDate }.thenBy { it.endDate }.thenBy { it.name }).forEach { timeframe ->
+                    ExpandableTimeframeRow(
+                        timeframe = timeframe,
+                        onEdit = { onEditTimeframe(timeframe.id) },
+                        onDelete = { onDeleteTimeframe(timeframe.id) },
+                    )
+                }
+            }
+        }
     }
     item {
         OverviewCard(title = "Tasks") {
@@ -505,6 +531,7 @@ fun CalendarCard(
     month: YearMonth,
     selectedDate: LocalDate,
     weekStart: WeekStart,
+    timeframes: List<Timeframe>,
     blocksByDate: Map<LocalDate, List<ScheduleBlock>>,
     remindersByDate: Map<LocalDate, List<Reminder>>,
     tasksById: Map<String, ScheduleTask>,
@@ -520,19 +547,12 @@ fun CalendarCard(
             listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
         }
     }
-    val daysInMonth = remember(month, weekStart) {
-        buildList<LocalDate?> {
-            val first = month.atDay(1)
-            val leadingSlots = when (weekStart) {
-                WeekStart.SUNDAY -> first.dayOfWeek.value % 7
-                WeekStart.MONDAY -> first.dayOfWeek.value - 1
-            }
-            repeat(leadingSlots) { add(null) }
-            for (day in 1..month.lengthOfMonth()) {
-                add(month.atDay(day))
-            }
-        }
-    }
+    val weeks = remember(month, weekStart) { buildCalendarWeeks(month, weekStart) }
+    val rowHeight = 64.dp
+    val pillSize = 40.dp
+    val timeframeStroke = 2.dp
+    val timeframeInset = 8.dp
+    val edgeOverhang = 6.dp
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -564,25 +584,57 @@ fun CalendarCard(
                     Text(dayName, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
                 }
             }
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(7),
-                modifier = Modifier.height(360.dp),
-                userScrollEnabled = false,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                gridItems(daysInMonth) { date ->
-                    if (date == null) {
-                        Spacer(modifier = Modifier.size(40.dp))
-                    } else {
-                        CalendarDayCell(
-                            date = date,
-                            isSelected = date == selectedDate,
-                            isToday = date == today,
-                            tasks = blocksByDate[date].orEmpty().mapNotNull { tasksById[it.taskId] }.distinctBy { it.id },
-                            hasReminders = remindersByDate[date].orEmpty().isNotEmpty(),
-                            onClick = { onDateSelected(date) },
-                        )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                weeks.forEachIndexed { rowIndex, week ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(rowHeight),
+                    ) {
+                        Canvas(modifier = Modifier.matchParentSize()) {
+                            val rowSpecs = buildTimeframeRowDrawSpecs(
+                                weeks = listOf(week),
+                                timeframes = timeframes,
+                                cellWidthPx = size.width / 7f,
+                                rowHeightPx = size.height,
+                                strokeWidthPx = timeframeStroke.toPx(),
+                                baseInsetPx = timeframeInset.toPx(),
+                                edgeOverhangPx = edgeOverhang.toPx(),
+                            ).filter { it.rowIndex == 0 }
+                            rowSpecs.forEach { spec ->
+                                drawRoundRect(
+                                    color = parseTimeframeColor(spec.colorHex),
+                                    topLeft = androidx.compose.ui.geometry.Offset(spec.left, spec.top),
+                                    size = androidx.compose.ui.geometry.Size(spec.right - spec.left, spec.bottom - spec.top),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(spec.radius, spec.radius),
+                                    style = Stroke(width = timeframeStroke.toPx()),
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(0.dp),
+                        ) {
+                            week.forEach { date ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                ) {
+                                    if (date != null) {
+                                        CalendarDayCell(
+                                            date = date,
+                                            isSelected = date == selectedDate,
+                                            isToday = date == today,
+                                            tasks = blocksByDate[date].orEmpty().mapNotNull { tasksById[it.taskId] }.distinctBy { it.id },
+                                            hasReminders = remindersByDate[date].orEmpty().isNotEmpty(),
+                                            pillSize = pillSize,
+                                            onClick = { onDateSelected(date) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -597,35 +649,37 @@ fun CalendarDayCell(
     isToday: Boolean,
     tasks: List<ScheduleTask>,
     hasReminders: Boolean,
+    pillSize: Dp,
     onClick: () -> Unit,
 ) {
-    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-    val todayOutlineColor = if (isToday) {
-        if (isSelected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.92f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
-    } else {
-        Color.Transparent
-    }
-    val background = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
     Box(
         modifier = Modifier
-            .height(52.dp)
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .background(background, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        if (isToday) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .padding(2.dp)
-                    .border(1.dp, todayOutlineColor, RoundedCornerShape(10.dp)),
-            )
+        val pillColor = when {
+            isSelected -> MaterialTheme.colorScheme.primary
+            isToday -> MaterialTheme.colorScheme.primary.copy(alpha = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.42f else 0.18f)
+            else -> Color.Transparent
+        }
+        val pillBorderColor = when {
+            isSelected -> Color.Transparent
+            isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.82f)
+            else -> Color.Transparent
         }
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 1.dp, bottom = 2.dp),
+                .size(pillSize)
+                .clip(RoundedCornerShape(16.dp))
+                .background(pillColor)
+                .then(
+                    if (pillBorderColor != Color.Transparent) {
+                        Modifier.border(1.dp, pillBorderColor, RoundedCornerShape(16.dp))
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -661,6 +715,84 @@ fun CalendarDayCell(
             }
         }
     }
+}
+
+@Composable
+private fun ExpandableTimeframeRow(
+    timeframe: Timeframe,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var expanded by remember(timeframe.id) { mutableStateOf(false) }
+    val formatter = remember { DateTimeFormatter.ofPattern("MMM d") }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { expanded = !expanded },
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(parseTimeframeColor(timeframe.colorHex), RoundedCornerShape(999.dp)),
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(timeframe.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "${formatter.format(timeframe.startDate)} - ${formatter.format(timeframe.endDate)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (expanded) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onEdit, modifier = Modifier.weight(1f)) {
+                        Text("Edit")
+                    }
+                    OutlinedButton(onClick = onDelete, modifier = Modifier.weight(1f)) {
+                        Text("Delete")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun buildCalendarWeeks(
+    month: YearMonth,
+    weekStart: WeekStart,
+): List<List<LocalDate?>> {
+    val cells = buildList<LocalDate?> {
+        val first = month.atDay(1)
+        val leadingSlots = when (weekStart) {
+            WeekStart.SUNDAY -> first.dayOfWeek.value % 7
+            WeekStart.MONDAY -> first.dayOfWeek.value - 1
+        }
+        repeat(leadingSlots) { add(null) }
+        for (day in 1..month.lengthOfMonth()) {
+            add(month.atDay(day))
+        }
+        while (size % 7 != 0) add(null)
+    }
+    return cells.chunked(7)
+}
+
+internal fun parseTimeframeColor(colorHex: String): Color = runCatching {
+    Color(android.graphics.Color.parseColor(colorHex))
+}.getOrElse {
+    Color(0xFFF4B6D2)
 }
 
 @Composable

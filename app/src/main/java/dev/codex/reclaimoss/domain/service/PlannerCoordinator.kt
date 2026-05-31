@@ -15,6 +15,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskPriority
@@ -49,6 +50,12 @@ data class TaskCreationResult(
     val scheduled: Boolean,
     val partial: Boolean,
     val reason: String? = null,
+)
+
+data class TimeframeSaveResult(
+    val saved: Boolean,
+    val timeframeId: String? = null,
+    val errorMessage: String? = null,
 )
 
 private data class TaskOccurrence(
@@ -87,6 +94,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        timeframeId: String? = null,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -116,6 +124,7 @@ class PlannerCoordinator(
                     id = taskId,
                     recurrenceSeriesId = seriesId,
                     projectId = "project-default",
+                    timeframeId = timeframeId,
                     title = title,
                     description = description,
                     priority = priority,
@@ -168,6 +177,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        timeframeId: String? = null,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -186,6 +196,7 @@ class PlannerCoordinator(
             priority = priority,
             dueAt = dueAt,
             preferredTimePeriodId = preferredTimePeriodId,
+            timeframeId = timeframeId,
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
@@ -321,6 +332,7 @@ class PlannerCoordinator(
         priority: TaskPriority,
         dueAt: Instant,
         preferredTimePeriodId: String?,
+        timeframeId: String? = null,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -349,6 +361,7 @@ class PlannerCoordinator(
             description = description,
             priority = priority,
             preferredTimePeriodId = preferredTimePeriodId,
+            timeframeId = timeframeId,
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
@@ -405,6 +418,7 @@ class PlannerCoordinator(
         if (schedulableTasks.isNotEmpty()) {
             val plan = scheduler.rebuildSchedule(
                 tasks = schedulableTasks,
+                timeframes = repository.getTimeframes(),
                 existingBlocks = existingBlocks,
                 busyWindows = busyEvents,
                 workHours = workHoursFromProductivePeriods(timePeriods),
@@ -431,6 +445,43 @@ class PlannerCoordinator(
 
     suspend fun unlockBlock(blockId: String) {
         repository.updateBlockLock(blockId, BlockLockState.FLEXIBLE)
+    }
+
+    suspend fun saveTimeframe(
+        name: String,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        colorHex: String,
+        timeframeId: String? = null,
+    ): TimeframeSaveResult {
+        if (name.isBlank()) {
+            return TimeframeSaveResult(saved = false, errorMessage = "Timeframe name is required.")
+        }
+        if (endDate.isBefore(startDate)) {
+            return TimeframeSaveResult(saved = false, errorMessage = "End date must be on or after start date.")
+        }
+        val existing = repository.getTimeframes()
+        if (wouldExceedTimeframeLayerCap(existing, startDate, endDate, timeframeId)) {
+            return TimeframeSaveResult(saved = false, errorMessage = "You can stack up to 4 overlapping timeframes.")
+        }
+        val now = now()
+        val original = timeframeId?.let { id -> existing.firstOrNull { it.id == id } }
+        val saved = Timeframe(
+            id = timeframeId ?: newId("timeframe"),
+            name = name.trim(),
+            startDate = startDate,
+            endDate = endDate,
+            colorHex = colorHex,
+            createdAt = original?.createdAt ?: now,
+            updatedAt = now,
+        )
+        repository.upsertTimeframe(saved)
+        return TimeframeSaveResult(saved = true, timeframeId = saved.id)
+    }
+
+    suspend fun deleteTimeframe(timeframeId: String) {
+        repository.deleteTimeframe(timeframeId)
+        rebuildSchedule()
     }
 
     suspend fun markBlockDone(blockId: String, taskId: String, blockMinutes: Int) {
@@ -590,6 +641,7 @@ class PlannerCoordinator(
         val policy = schedulingPolicy(getSettings())
         return scheduler.rebuildSchedule(
             tasks = tasks,
+            timeframes = repository.getTimeframes(),
             existingBlocks = existingBlocks,
             busyWindows = calendarGateway.syncBusyEvents(
                 rangeStart,
@@ -640,6 +692,9 @@ class PlannerCoordinator(
         val task = repository.getTasks().firstOrNull { it.id == taskId } ?: return
         if (task.schedulingMode != TaskSchedulingMode.FIXED_EXACT) return
         repository.clearAllPendingBlocks(taskId)
+        val timeframe = task.timeframeId?.let { timeframeId ->
+            repository.getTimeframes().firstOrNull { it.id == timeframeId }
+        }
         val startAt = task.fixedStartAt
         val endAt = task.fixedEndAt
         if (startAt == null || endAt == null || !endAt.isAfter(startAt)) {
@@ -655,6 +710,24 @@ class PlannerCoordinator(
                 ),
             )
             return
+        }
+        if (timeframe != null) {
+            val startDate = startAt.atZone(zoneId()).toLocalDate()
+            val endDate = endAt.atZone(zoneId()).toLocalDate()
+            if (startDate.isBefore(timeframe.startDate) || endDate.isAfter(timeframe.endDate)) {
+                repository.replaceSchedulingIssuesForTask(
+                    taskId,
+                    listOf(
+                        SchedulingIssue(
+                            taskId = taskId,
+                            type = SchedulingIssueType.UNSCHEDULED,
+                            unscheduledMinutes = task.remainingMinutes,
+                            reason = "This fixed time falls outside the selected timeframe.",
+                        ),
+                    ),
+                )
+                return
+            }
         }
         val rangeStart = startAt.minus(1, ChronoUnit.DAYS)
         val rangeEnd = endAt.plus(1, ChronoUnit.DAYS)
@@ -976,6 +1049,25 @@ class PlannerCoordinator(
     private fun withinOccurrenceLimit(recurrenceRule: RecurrenceRule, emitted: Int): Boolean =
         recurrenceRule.endMode != RecurrenceEndMode.AFTER_OCCURRENCES ||
             emitted < (recurrenceRule.occurrenceCount ?: Int.MAX_VALUE)
+
+    private fun wouldExceedTimeframeLayerCap(
+        existing: List<Timeframe>,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        replacingTimeframeId: String?,
+    ): Boolean {
+        var date = startDate
+        while (!date.isAfter(endDate)) {
+            val overlapCount = existing.count { timeframe ->
+                timeframe.id != replacingTimeframeId &&
+                    !date.isBefore(timeframe.startDate) &&
+                    !date.isAfter(timeframe.endDate)
+            }
+            if (overlapCount >= 4) return true
+            date = date.plusDays(1)
+        }
+        return false
+    }
 
     private fun nextFutureOccurrence(task: ScheduleTask): Instant {
         var candidateTask = task

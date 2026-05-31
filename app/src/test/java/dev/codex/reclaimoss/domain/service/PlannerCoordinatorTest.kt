@@ -16,6 +16,7 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
@@ -278,6 +279,89 @@ class PlannerCoordinatorTest {
 
         val createdTask = repository.getTasks().single { it.id == result.taskId }
         assertEquals(TaskOverlapPolicy.ALLOW, createdTask.overlapPolicy)
+    }
+
+    @Test
+    fun `saving timeframe stores it in repository`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+
+        val result = coordinator.saveTimeframe(
+            name = "Exam week",
+            startDate = LocalDate.of(2026, 5, 27),
+            endDate = LocalDate.of(2026, 5, 31),
+            colorHex = "#F4B6D2",
+        )
+
+        assertTrue(result.saved)
+        val stored = repository.getTimeframes().single()
+        assertEquals("Exam week", stored.name)
+        assertEquals(LocalDate.of(2026, 5, 27), stored.startDate)
+        assertEquals(LocalDate.of(2026, 5, 31), stored.endDate)
+    }
+
+    @Test
+    fun `saving fifth overlapping timeframe is rejected`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        repeat(4) { index ->
+            repository.upsertTimeframe(
+                Timeframe(
+                    id = "tf-$index",
+                    name = "Timeframe $index",
+                    startDate = LocalDate.of(2026, 5, 27),
+                    endDate = LocalDate.of(2026, 5, 31),
+                    colorHex = "#F4B6D2",
+                    createdAt = now().plusSeconds(index.toLong()),
+                    updatedAt = now().plusSeconds(index.toLong()),
+                ),
+            )
+        }
+
+        val result = coordinator.saveTimeframe(
+            name = "Too many",
+            startDate = LocalDate.of(2026, 5, 29),
+            endDate = LocalDate.of(2026, 5, 30),
+            colorHex = "#88D1FF",
+        )
+
+        assertFalse(result.saved)
+        assertEquals("You can stack up to 4 overlapping timeframes.", result.errorMessage)
+        assertEquals(4, repository.getTimeframes().size)
+    }
+
+    @Test
+    fun `fixed exact task outside timeframe is rejected`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val timeframe = Timeframe(
+            id = "tf-exam",
+            name = "Exam week",
+            startDate = LocalDate.of(2026, 5, 27),
+            endDate = LocalDate.of(2026, 5, 31),
+            colorHex = "#F4B6D2",
+            createdAt = now(),
+            updatedAt = now(),
+        )
+        repository.upsertTimeframe(timeframe)
+
+        val result = coordinator.createTask(
+            title = "Fixed outside timeframe",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = LocalDate.of(2026, 6, 1).atTime(10, 0).atZone(zone).toInstant(),
+            preferredTimePeriodId = null,
+            timeframeId = timeframe.id,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = LocalDate.of(2026, 6, 1).atTime(9, 0).atZone(zone).toInstant(),
+            fixedEndAt = LocalDate.of(2026, 6, 1).atTime(10, 0).atZone(zone).toInstant(),
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("This fixed time falls outside the selected timeframe.", result.reason)
     }
 
     @Test
@@ -1409,6 +1493,7 @@ private class FakePlannerRepository(
     periods: MutableList<TimePeriod>? = null,
 ) : PlannerRepository {
     private val projects = mutableListOf<Project>()
+    private val timeframes = mutableListOf<Timeframe>()
     private val tasks = mutableListOf<ScheduleTask>()
     private val blocks = mutableListOf<ScheduleBlock>()
     private val reminders = mutableListOf<Reminder>()
@@ -1417,13 +1502,37 @@ private class FakePlannerRepository(
         TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
         TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
     )
-    private val snapshotFlow = MutableStateFlow(PlannerSnapshot(emptyList(), emptyList(), emptyList(), emptyList()))
+    private val snapshotFlow = MutableStateFlow(
+        PlannerSnapshot(
+            projects = emptyList(),
+            timeframes = emptyList(),
+            tasks = emptyList(),
+            blocks = emptyList(),
+            timePeriods = emptyList(),
+        ),
+    )
 
     override fun observeSnapshot(): Flow<PlannerSnapshot> = snapshotFlow
 
     override suspend fun upsertProject(project: Project) {
         projects.removeAll { it.id == project.id }
         projects += project
+        publish()
+    }
+
+    override suspend fun upsertTimeframe(timeframe: Timeframe) {
+        timeframes.removeAll { it.id == timeframe.id }
+        timeframes += timeframe
+        publish()
+    }
+
+    override suspend fun getTimeframes(): List<Timeframe> = timeframes.sortedBy { it.startDate }
+
+    override suspend fun deleteTimeframe(timeframeId: String) {
+        timeframes.removeAll { it.id == timeframeId }
+        tasks.replaceAll { task ->
+            if (task.timeframeId == timeframeId) task.copy(timeframeId = null) else task
+        }
         publish()
     }
 
@@ -1533,6 +1642,7 @@ private class FakePlannerRepository(
     private fun publish() {
         snapshotFlow.value = PlannerSnapshot(
             projects = projects.toList(),
+            timeframes = timeframes.sortedWith(compareBy<Timeframe> { it.startDate }.thenBy { it.createdAt }),
             tasks = tasks.sortedBy { it.dueAt },
             blocks = blocks.sortedBy { it.startAt },
             timePeriods = timePeriods.sortedBy { it.sortOrder },

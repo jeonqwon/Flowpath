@@ -10,6 +10,8 @@ import dev.codex.reclaimoss.data.local.SchedulingIssueDao
 import dev.codex.reclaimoss.data.local.SchedulingIssueEntity
 import dev.codex.reclaimoss.data.local.TaskDao
 import dev.codex.reclaimoss.data.local.TaskEntity
+import dev.codex.reclaimoss.data.local.TimeframeDao
+import dev.codex.reclaimoss.data.local.TimeframeEntity
 import dev.codex.reclaimoss.data.local.TimePeriodDao
 import dev.codex.reclaimoss.data.local.TimePeriodEntity
 import dev.codex.reclaimoss.domain.model.BlockCompletionState
@@ -24,6 +26,7 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -38,6 +41,7 @@ import kotlinx.coroutines.flow.map
 
 data class PlannerSnapshot(
     val projects: List<Project>,
+    val timeframes: List<Timeframe>,
     val tasks: List<ScheduleTask>,
     val blocks: List<ScheduleBlock>,
     val timePeriods: List<TimePeriod>,
@@ -48,6 +52,9 @@ data class PlannerSnapshot(
 interface PlannerRepository {
     fun observeSnapshot(): Flow<PlannerSnapshot>
     suspend fun upsertProject(project: Project)
+    suspend fun upsertTimeframe(timeframe: Timeframe)
+    suspend fun getTimeframes(): List<Timeframe>
+    suspend fun deleteTimeframe(timeframeId: String)
     suspend fun upsertTask(task: ScheduleTask)
     suspend fun getTasks(): List<ScheduleTask>
     suspend fun updateTaskDueDate(taskId: String, dueAt: Instant)
@@ -74,6 +81,7 @@ interface PlannerRepository {
 
 class PlannerRepositoryImpl(
     private val projectDao: ProjectDao,
+    private val timeframeDao: TimeframeDao,
     private val taskDao: TaskDao,
     private val scheduleBlockDao: ScheduleBlockDao,
     private val timePeriodDao: TimePeriodDao,
@@ -83,6 +91,7 @@ class PlannerRepositoryImpl(
     override fun observeSnapshot(): Flow<PlannerSnapshot> =
         combine(
             projectDao.observeProjects().map { items -> items.map { it.toDomain() } },
+            timeframeDao.observeTimeframes().map { items -> items.map { it.toDomain() } },
             taskDao.observeTasks().map { items -> items.map { it.toDomain() } },
             scheduleBlockDao.observeBlocks().map { items -> items.map { it.toDomain() } },
             timePeriodDao.observeTimePeriods().map { items -> items.map { it.toDomain() } },
@@ -92,11 +101,12 @@ class PlannerRepositoryImpl(
             @Suppress("UNCHECKED_CAST")
             PlannerSnapshot(
                 projects = values[0] as List<Project>,
-                tasks = values[1] as List<ScheduleTask>,
-                blocks = values[2] as List<ScheduleBlock>,
-                timePeriods = values[3] as List<TimePeriod>,
-                reminders = values[4] as List<Reminder>,
-                schedulingIssues = values[5] as List<SchedulingIssue>,
+                timeframes = values[1] as List<Timeframe>,
+                tasks = values[2] as List<ScheduleTask>,
+                blocks = values[3] as List<ScheduleBlock>,
+                timePeriods = values[4] as List<TimePeriod>,
+                reminders = values[5] as List<Reminder>,
+                schedulingIssues = values[6] as List<SchedulingIssue>,
             )
         }
 
@@ -110,6 +120,17 @@ class PlannerRepositoryImpl(
                 archived = project.archived,
             ),
         )
+    }
+
+    override suspend fun upsertTimeframe(timeframe: Timeframe) {
+        timeframeDao.upsert(timeframe.toEntity())
+    }
+
+    override suspend fun getTimeframes(): List<Timeframe> = timeframeDao.getAll().map { it.toDomain() }
+
+    override suspend fun deleteTimeframe(timeframeId: String) {
+        taskDao.clearTimeframe(timeframeId)
+        timeframeDao.delete(timeframeId)
     }
 
     override suspend fun upsertTask(task: ScheduleTask) {
@@ -215,6 +236,7 @@ private fun TaskEntity.toDomain() = ScheduleTask(
     id = id,
     recurrenceSeriesId = recurrenceSeriesId,
     projectId = projectId,
+    timeframeId = timeframeId,
     title = title,
     description = description,
     priority = priority,
@@ -251,6 +273,7 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     id = id,
     recurrenceSeriesId = recurrenceSeriesId,
     projectId = projectId,
+    timeframeId = timeframeId,
     title = title,
     description = description,
     priority = priority,
@@ -284,6 +307,26 @@ private fun TimePeriodEntity.toDomain() = TimePeriod(
     end = endTime,
     type = type,
     sortOrder = sortOrder,
+)
+
+private fun TimeframeEntity.toDomain() = Timeframe(
+    id = id,
+    name = name,
+    startDate = startDate,
+    endDate = endDate,
+    colorHex = colorHex,
+    createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
+    updatedAt = Instant.ofEpochMilli(updatedAtEpochMillis),
+)
+
+private fun Timeframe.toEntity() = TimeframeEntity(
+    id = id,
+    name = name,
+    startDate = startDate,
+    endDate = endDate,
+    colorHex = colorHex,
+    createdAtEpochMillis = createdAt.toEpochMilli(),
+    updatedAtEpochMillis = updatedAt.toEpochMilli(),
 )
 
 private fun TimePeriod.toEntity() = TimePeriodEntity(
