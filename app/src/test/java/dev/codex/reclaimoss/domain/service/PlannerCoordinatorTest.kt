@@ -162,6 +162,23 @@ class PlannerCoordinatorTest {
         assertEquals(task.id, reminder.linkedTaskId)
         assertEquals(task.title, reminder.title)
         assertEquals(task.dueAt, reminder.dueAt)
+        assertFalse(reminder.isAllDay)
+    }
+
+    @Test
+    fun `creating whole day reminder persists all day flag`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+
+        coordinator.createReminder(
+            title = "Holiday",
+            description = "",
+            dueAt = now().plusSeconds(3600),
+            isAllDay = true,
+        )
+
+        val reminder = repository.getReminders().single()
+        assertTrue(reminder.isAllDay)
     }
 
     @Test

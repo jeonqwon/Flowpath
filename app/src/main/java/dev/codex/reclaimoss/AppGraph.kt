@@ -8,7 +8,12 @@ import dev.codex.reclaimoss.data.repository.PlannerRepository
 import dev.codex.reclaimoss.data.repository.PlannerRepositoryImpl
 import dev.codex.reclaimoss.domain.scheduling.SchedulerEngine
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
+import dev.codex.reclaimoss.notifications.ReminderNotificationScheduler
 import dev.codex.reclaimoss.settings.AppSettingsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class AppGraph(context: Context) {
     private val database = Room.databaseBuilder(
@@ -24,10 +29,12 @@ class AppGraph(context: Context) {
         OpenReclaimDatabase.MIGRATION_10_11,
         OpenReclaimDatabase.MIGRATION_11_12,
         OpenReclaimDatabase.MIGRATION_12_13,
+        OpenReclaimDatabase.MIGRATION_13_14,
     ).fallbackToDestructiveMigrationOnDowngrade().build()
 
     private val calendarGateway = NoOpGoogleCalendarGateway()
     private val schedulerEngine = SchedulerEngine()
+    private val reminderNotificationScheduler = ReminderNotificationScheduler(context)
     val appSettingsRepository = AppSettingsRepository(context)
 
     val plannerRepository: PlannerRepository = PlannerRepositoryImpl(
@@ -46,4 +53,16 @@ class AppGraph(context: Context) {
         calendarGateway = calendarGateway,
         getSettings = { appSettingsRepository.current() },
     )
+
+    fun startBackgroundObservers(scope: CoroutineScope) {
+        reminderNotificationScheduler.ensureChannel()
+        scope.launch {
+            plannerCoordinator.snapshot
+                .map { it.reminders }
+                .distinctUntilChanged()
+                .collect { reminders ->
+                    reminderNotificationScheduler.sync(reminders)
+                }
+        }
+    }
 }

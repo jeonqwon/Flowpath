@@ -292,6 +292,7 @@ fun CreateWorkScreen(
                     it.title,
                     it.description,
                     it.dueAt.toString(),
+                    it.isAllDay,
                     it.recurrenceType.name,
                     it.recurrenceInterval,
                     it.recurrenceDays.joinToString(",") { day -> day.name },
@@ -302,9 +303,10 @@ fun CreateWorkScreen(
                     title = saved[0] as String,
                     description = saved[1] as String,
                     dueAt = LocalDateTime.parse(saved[2] as String),
-                    recurrenceType = RecurrenceType.valueOf(saved[3] as String),
-                    recurrenceInterval = saved[4] as Int,
-                    recurrenceDays = (saved[5] as String)
+                    isAllDay = saved[3] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[4] as String),
+                    recurrenceInterval = saved[5] as Int,
+                    recurrenceDays = (saved[6] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -694,11 +696,32 @@ fun CreateWorkScreen(
                 }
                 item {
                     CreateFormCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TaskSectionTitle("Whole day")
+                            Switch(
+                                checked = reminderDraft.isAllDay,
+                                onCheckedChange = { enabled ->
+                                    reminderDraft = reminderDraft.copy(
+                                        isAllDay = enabled,
+                                        dueAt = if (enabled) {
+                                            reminderDraft.dueAt.withHour(9).withMinute(0).withSecond(0).withNano(0)
+                                        } else {
+                                            reminderDraft.dueAt.withSecond(0).withNano(0)
+                                        },
+                                    )
+                                },
+                            )
+                        }
                         DateTimeSection(
                             title = if (reminderDraft.recurrenceType == RecurrenceType.NONE) "Remind me" else "First reminder time",
                             dateTime = reminderDraft.dueAt,
                             onDateTimeChanged = { reminderDraft = reminderDraft.copy(dueAt = it) },
                             context = context,
+                            dateOnly = reminderDraft.isAllDay,
                         )
                         RecurrenceSection(
                             recurrenceType = reminderDraft.recurrenceType,
@@ -985,12 +1008,14 @@ fun DateTimeSection(
     dateTime: LocalDateTime,
     onDateTimeChanged: (LocalDateTime) -> Unit,
     context: android.content.Context,
+    dateOnly: Boolean = false,
 ) {
     TaskSectionTitle(title)
     DateTimePickerRows(
         dateTime = dateTime,
         onDateTimeChanged = onDateTimeChanged,
         context = context,
+        dateOnly = dateOnly,
     )
 }
 
@@ -1040,6 +1065,7 @@ fun DateTimePickerRows(
     dateTime: LocalDateTime,
     onDateTimeChanged: (LocalDateTime) -> Unit,
     context: android.content.Context,
+    dateOnly: Boolean = false,
 ) {
     val dateLabel = remember(dateTime) { DateTimeFormatter.ofPattern("EEE, MMM d").format(dateTime) }
     val timeLabel = remember(dateTime) { DateTimeFormatter.ofPattern("h:mm a").format(dateTime) }
@@ -1061,20 +1087,30 @@ fun DateTimePickerRows(
                 ).show()
             },
         )
-        DateTimePickerCard(
-            label = "Time",
-            value = timeLabel,
-            modifier = Modifier.weight(1f),
-            onClick = {
-                TimePickerDialog(
-                    context,
-                    { _, hour, minute -> onDateTimeChanged(dateTime.withHour(hour).withMinute(minute)) },
-                    dateTime.hour,
-                    dateTime.minute,
-                    false,
-                ).show()
-            },
-        )
+        if (!dateOnly) {
+            DateTimePickerCard(
+                label = "Time",
+                value = timeLabel,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            onDateTimeChanged(
+                                dateTime
+                                    .withHour(hour)
+                                    .withMinute(minute)
+                                    .withSecond(0)
+                                    .withNano(0),
+                            )
+                        },
+                        dateTime.hour,
+                        dateTime.minute,
+                        false,
+                    ).show()
+                },
+            )
+        }
     }
 }
 

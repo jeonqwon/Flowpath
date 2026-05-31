@@ -212,6 +212,7 @@ data class Reminder(
     val title: String,
     val description: String = "",
     val dueAt: Instant,
+    val isAllDay: Boolean = false,
     val recurrenceRule: RecurrenceRule = RecurrenceRule(),
     val linkedTaskId: String? = null,
     val status: ReminderStatus = ReminderStatus.ACTIVE,

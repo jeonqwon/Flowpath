@@ -99,6 +99,7 @@ data class ReminderEntity(
     val title: String,
     val description: String,
     val dueAtEpochMillis: Long,
+    val isAllDay: Boolean,
     val recurrenceType: RecurrenceType,
     val recurrenceInterval: Int,
     val recurrenceDaysCsv: String,
@@ -362,7 +363,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -441,6 +442,12 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
+            }
+        }
+
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE reminders ADD COLUMN isAllDay INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

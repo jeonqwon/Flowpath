@@ -218,6 +218,7 @@ class PlannerCoordinator(
         title: String,
         description: String,
         dueAt: Instant,
+        isAllDay: Boolean = false,
         recurrenceRule: RecurrenceRule = RecurrenceRule(),
         linkedTaskId: String? = null,
     ): String {
@@ -228,6 +229,7 @@ class PlannerCoordinator(
                 title = title,
                 description = description,
                 dueAt = dueAt,
+                isAllDay = isAllDay,
                 recurrenceRule = recurrenceRule,
                 linkedTaskId = linkedTaskId,
             ),
@@ -256,6 +258,7 @@ class PlannerCoordinator(
             title = task.title,
             description = task.description,
             dueAt = reminderDueAt,
+            isAllDay = false,
             recurrenceRule = task.recurrenceRule,
             linkedTaskId = task.id,
         )

@@ -145,6 +145,12 @@ fun RemindersScreen(
     val zoneId = remember { ZoneId.systemDefault() }
     val today = remember(zoneId) { LocalDate.now(zoneId) }
     val formatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
+    val dateOnlyFormatter = remember(settings.dateFormatPreference) {
+        when (settings.dateFormatPreference) {
+            dev.codex.reclaimoss.settings.DateFormatPreference.MONTH_DAY_YEAR -> DateTimeFormatter.ofPattern("MMM d")
+            dev.codex.reclaimoss.settings.DateFormatPreference.DAY_MONTH_YEAR -> DateTimeFormatter.ofPattern("d MMM")
+        }
+    }
     val active = reminders
         .filter { it.status != ReminderStatus.COMPLETED }
         .sortedBy { it.dueAt }
@@ -214,9 +220,9 @@ fun RemindersScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(bottom = 120.dp),
         ) {
-            reminderSection("Overdue", overdue, formatter, zoneId, tasksById, onOpenReminder)
-            reminderSection("Today", dueToday, formatter, zoneId, tasksById, onOpenReminder)
-            reminderSection("Upcoming", upcoming, formatter, zoneId, tasksById, onOpenReminder)
+            reminderSection("Overdue", overdue, formatter, dateOnlyFormatter, zoneId, tasksById, onOpenReminder)
+            reminderSection("Today", dueToday, formatter, dateOnlyFormatter, zoneId, tasksById, onOpenReminder)
+            reminderSection("Upcoming", upcoming, formatter, dateOnlyFormatter, zoneId, tasksById, onOpenReminder)
             if (active.isEmpty()) {
                 item { EmptyCard("No reminders yet.") }
             }
@@ -228,6 +234,7 @@ fun LazyListScope.reminderSection(
     title: String,
     reminders: List<Reminder>,
     formatter: DateTimeFormatter,
+    dateOnlyFormatter: DateTimeFormatter,
     zoneId: ZoneId,
     tasksById: Map<String, ScheduleTask>,
     onOpenReminder: (Reminder) -> Unit,
@@ -248,7 +255,7 @@ fun LazyListScope.reminderSection(
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(formatter.format(reminder.dueAt.atZone(zoneId)), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(reminder.dueDisplayText(formatter, dateOnlyFormatter, zoneId), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 val detailText = reminder.linkedTaskId?.let { taskId -> tasksById[taskId]?.description } ?: reminder.description
                 if (!detailText.isNullOrBlank()) {
                     Text(

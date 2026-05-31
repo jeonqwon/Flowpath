@@ -145,6 +145,7 @@ fun TaskDetailScreen(
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val formatter = remember { DateTimeFormatter.ofPattern("MMM d, h:mm a") }
+    val dateOnlyFormatter = remember { DateTimeFormatter.ofPattern("MMM d") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
     val firstBlock = blocks.firstOrNull()
     var showActionsMenu by rememberSaveable { mutableStateOf(false) }
@@ -221,7 +222,7 @@ fun TaskDetailScreen(
                         DetailRow("Repeat", recurrenceSummary(task.recurrenceRule))
                     }
                     if (linkedReminder != null) {
-                        DetailRow("Reminder", formatter.format(linkedReminder.dueAt.atZone(zoneId)))
+                        DetailRow("Reminder", linkedReminder.dueDisplayText(formatter, dateOnlyFormatter, zoneId))
                     }
                 }
             }
@@ -309,6 +310,7 @@ fun ReminderDetailScreen(
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val formatter = remember { DateTimeFormatter.ofPattern("MMM d, h:mm a") }
+    val dateOnlyFormatter = remember { DateTimeFormatter.ofPattern("MMM d") }
     val description = linkedTask?.description?.takeIf { it.isNotBlank() } ?: reminder.description
 
     LazyColumn(
@@ -340,7 +342,7 @@ fun ReminderDetailScreen(
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Text(reminder.title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        formatter.format(reminder.dueAt.atZone(zoneId)),
+                        reminder.dueDisplayText(formatter, dateOnlyFormatter, zoneId),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.SemiBold,
@@ -358,7 +360,7 @@ fun ReminderDetailScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    DetailRow("Due", formatter.format(reminder.dueAt.atZone(zoneId)))
+                    DetailRow("Due", reminder.dueDisplayText(formatter, dateOnlyFormatter, zoneId))
                     if (linkedTask != null) {
                         DetailRow("Task", linkedTask.title)
                     }

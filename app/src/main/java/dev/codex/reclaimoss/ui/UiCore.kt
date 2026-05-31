@@ -202,6 +202,7 @@ data class ReminderDraft(
     val title: String = "",
     val description: String = "",
     val dueAt: LocalDateTime = LocalDateTime.now().plusHours(1).withMinute(0),
+    val isAllDay: Boolean = false,
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
     val recurrenceInterval: Int = 1,
     val recurrenceDays: Set<DayOfWeek> = emptySet(),
@@ -401,6 +402,7 @@ class PlannerViewModel(
             title = draft.title,
             description = draft.description,
             dueAt = draft.dueAt.atZone(ZoneId.systemDefault()).toInstant(),
+            isAllDay = draft.isAllDay,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -599,6 +601,16 @@ fun ScheduleTask.deadlineSummaryText(
     "Deadline ${formatter.format(dueAt.atZone(zoneId))}"
 } else {
     "No deadline"
+}
+
+fun Reminder.dueDisplayText(
+    dateTimeFormatter: java.time.format.DateTimeFormatter,
+    dateFormatter: java.time.format.DateTimeFormatter,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): String = if (isAllDay) {
+    dateFormatter.format(dueAt.atZone(zoneId))
+} else {
+    dateTimeFormatter.format(dueAt.atZone(zoneId))
 }
 
 private fun TaskDraft.schedulingStartInstantOrNull(): Instant? =
