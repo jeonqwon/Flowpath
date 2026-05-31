@@ -20,6 +20,7 @@ import dev.codex.reclaimoss.domain.model.RecurrenceEndMode
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -48,6 +49,8 @@ data class TaskEntity(
     val preferredTimeOfDay: PreferredTimeOfDay,
     val preferredTimePeriodId: String?,
     val hasDeadline: Boolean,
+    val continuationParentTaskId: String?,
+    val continuationMode: TaskContinuationMode?,
     val schedulingMode: TaskSchedulingMode,
     val fixedStartAtEpochMillis: Long?,
     val fixedEndAtEpochMillis: Long?,
@@ -313,7 +316,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -359,6 +362,13 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE tasks ADD COLUMN hasDeadline INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN continuationParentTaskId TEXT")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN continuationMode TEXT")
             }
         }
     }

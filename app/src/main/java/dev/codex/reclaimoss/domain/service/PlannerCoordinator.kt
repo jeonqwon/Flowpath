@@ -15,6 +15,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -86,6 +87,8 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         hasDeadline: Boolean = true,
+        continuationParentTaskId: String? = null,
+        continuationMode: TaskContinuationMode? = null,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -93,6 +96,7 @@ class PlannerCoordinator(
         fixedStartAt: Instant? = null,
         fixedEndAt: Instant? = null,
     ): TaskCreationResult {
+        requireValidContinuationParent(continuationParentTaskId)
         val isRecurringSeries = recurrenceRule.type != RecurrenceType.NONE
         val seriesId = if (isRecurringSeries) newId("series") else null
         val occurrences = materializedOccurrences(
@@ -116,6 +120,8 @@ class PlannerCoordinator(
                     preferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
                     preferredTimePeriodId = preferredTimePeriodId,
                     hasDeadline = hasDeadline,
+                    continuationParentTaskId = continuationParentTaskId,
+                    continuationMode = continuationMode,
                     schedulingMode = schedulingMode,
                     fixedStartAt = occurrence.fixedStartAt,
                     fixedEndAt = occurrence.fixedEndAt,
@@ -160,6 +166,8 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         hasDeadline: Boolean = true,
+        continuationParentTaskId: String? = null,
+        continuationMode: TaskContinuationMode? = null,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -175,6 +183,8 @@ class PlannerCoordinator(
             dueAt = dueAt,
             preferredTimePeriodId = preferredTimePeriodId,
             hasDeadline = hasDeadline,
+            continuationParentTaskId = continuationParentTaskId,
+            continuationMode = continuationMode,
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             addReminder = addReminder,
@@ -307,6 +317,8 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         hasDeadline: Boolean = true,
+        continuationParentTaskId: String? = null,
+        continuationMode: TaskContinuationMode? = null,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         schedulingMode: TaskSchedulingMode,
@@ -319,6 +331,10 @@ class PlannerCoordinator(
                 partial = false,
                 reason = "Task no longer exists.",
             )
+        requireValidContinuationParent(
+            continuationParentTaskId = continuationParentTaskId,
+            currentTaskId = taskId,
+        )
         val originalPendingBlocks = repository.getBlocks()
             .filter { it.taskId == taskId && it.completionState != BlockCompletionState.COMPLETED }
         val originalIssues = repository.getSchedulingIssues().filter { it.taskId == taskId }
@@ -328,6 +344,8 @@ class PlannerCoordinator(
             priority = priority,
             preferredTimePeriodId = preferredTimePeriodId,
             hasDeadline = hasDeadline,
+            continuationParentTaskId = continuationParentTaskId,
+            continuationMode = continuationMode,
             schedulingMode = schedulingMode,
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
@@ -1001,4 +1019,14 @@ class PlannerCoordinator(
     private fun now(): Instant = clock.instant()
 
     private fun zoneId(): ZoneId = clock.zone
+
+    private suspend fun requireValidContinuationParent(
+        continuationParentTaskId: String?,
+        currentTaskId: String? = null,
+    ) {
+        if (continuationParentTaskId == null) return
+        require(continuationParentTaskId != currentTaskId) { "A task cannot continue after itself." }
+        val parentExists = repository.getTasks().any { it.id == continuationParentTaskId }
+        require(parentExists) { "The selected parent task no longer exists." }
+    }
 }

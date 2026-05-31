@@ -110,6 +110,7 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -204,6 +205,8 @@ fun CreateModeSwitch(
 fun CreateWorkScreen(
     padding: PaddingValues,
     periods: List<TimePeriod>,
+    availableTasks: List<ScheduleTask>,
+    currentTaskId: String? = null,
     sessionKey: Int,
     initialMode: CreateMode = CreateMode.Task,
     initialTaskDraft: TaskDraft? = null,
@@ -226,6 +229,8 @@ fun CreateWorkScreen(
                     it.priority.name,
                     it.preferredTimePeriodId ?: "",
                     it.hasDeadline,
+                    it.continuationParentTaskId ?: "",
+                    it.continuationMode?.name ?: "",
                     it.deadline.toString(),
                     it.schedulingMode.name,
                     it.startDate?.toString() ?: "",
@@ -247,18 +252,20 @@ fun CreateWorkScreen(
                     priority = TaskPriority.valueOf(saved[2] as String),
                     preferredTimePeriodId = (saved[3] as String).ifBlank { null },
                     hasDeadline = saved[4] as Boolean,
-                    deadline = LocalDateTime.parse(saved[5] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[6] as String),
-                    startDate = (saved[7] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[8] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[9] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[10] as String),
-                    repeatsForever = saved[11] as Boolean,
-                    estimatedMinutes = saved[12] as Int,
-                    addReminder = saved[13] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[14] as String),
-                    recurrenceInterval = saved[15] as Int,
-                    recurrenceDays = (saved[16] as String)
+                    continuationParentTaskId = (saved[5] as String).ifBlank { null },
+                    continuationMode = (saved[6] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
+                    deadline = LocalDateTime.parse(saved[7] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[8] as String),
+                    startDate = (saved[9] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[10] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[11] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[12] as String),
+                    repeatsForever = saved[13] as Boolean,
+                    estimatedMinutes = saved[14] as Int,
+                    addReminder = saved[15] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[16] as String),
+                    recurrenceInterval = saved[17] as Int,
+                    recurrenceDays = (saved[18] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -302,6 +309,22 @@ fun CreateWorkScreen(
     ) { mutableStateOf(initialReminderDraft ?: ReminderDraft()) }
     var showAdvancedTiming by rememberSaveable(sessionKey) { mutableStateOf(false) }
     val noDeadlineEligible = taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE && taskDraft.recurrenceType == RecurrenceType.NONE
+    val continuationTasks = remember(availableTasks, currentTaskId, taskDraft.continuationParentTaskId) {
+        availableTasks
+            .filter { it.status == TaskStatus.ACTIVE }
+            .filterNot { it.id == currentTaskId }
+            .sortedBy { it.dueAt }
+    }
+    LaunchedEffect(continuationTasks, taskDraft.continuationParentTaskId) {
+        if (taskDraft.continuationParentTaskId != null && continuationTasks.none { it.id == taskDraft.continuationParentTaskId }) {
+            taskDraft = taskDraft.copy(
+                continuationParentTaskId = null,
+                continuationMode = null,
+            )
+        } else if (taskDraft.continuationParentTaskId != null && taskDraft.continuationMode == null) {
+            taskDraft = taskDraft.copy(continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END)
+        }
+    }
     LaunchedEffect(followUpMode, rescheduleMode) {
         if (followUpMode || rescheduleMode) {
             mode = CreateMode.Task
@@ -574,6 +597,22 @@ fun CreateWorkScreen(
                                         )
                                     }
                                 }
+                            }
+                            if (continuationTasks.isNotEmpty()) {
+                                ContinuationSection(
+                                    tasks = continuationTasks,
+                                    selectedParentTaskId = taskDraft.continuationParentTaskId,
+                                    selectedMode = taskDraft.continuationMode,
+                                    onParentSelected = { taskId ->
+                                        taskDraft = taskDraft.copy(
+                                            continuationParentTaskId = taskId,
+                                            continuationMode = if (taskId == null) null else (taskDraft.continuationMode ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END),
+                                        )
+                                    },
+                                    onModeSelected = { mode ->
+                                        taskDraft = taskDraft.copy(continuationMode = mode)
+                                    },
+                                )
                             }
                             if (!followUpMode && !rescheduleMode) {
                                 Row(
@@ -1097,6 +1136,93 @@ fun PreferredPeriodDropdown(
                         onSelected(period.id)
                         expanded = false
                     },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun ContinuationSection(
+    tasks: List<ScheduleTask>,
+    selectedParentTaskId: String?,
+    selectedMode: TaskContinuationMode?,
+    onParentSelected: (String?) -> Unit,
+    onModeSelected: (TaskContinuationMode) -> Unit,
+) {
+    TaskSectionTitle("Continue after")
+    var expanded by remember { mutableStateOf(false) }
+    val selectedTask = tasks.firstOrNull { it.id == selectedParentTaskId }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true },
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    selectedTask?.title ?: "None",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("v", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
+        ) {
+            DropdownMenuItem(
+                text = { Text("None", style = MaterialTheme.typography.titleMedium) },
+                onClick = {
+                    onParentSelected(null)
+                    expanded = false
+                },
+            )
+            tasks.forEach { task ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            task.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (task.id == selectedParentTaskId) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = {
+                        onParentSelected(task.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+    if (selectedParentTaskId != null) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                TaskContinuationMode.AFTER_PARENT_SCHEDULED_END to "After task time",
+                TaskContinuationMode.AFTER_PARENT_DUE_AT to "After due time",
+            ).forEach { (mode, label) ->
+                FilterChip(
+                    selected = selectedMode == mode,
+                    onClick = { onModeSelected(mode) },
+                    label = { Text(label) },
                 )
             }
         }

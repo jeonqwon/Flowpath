@@ -9,6 +9,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -702,6 +703,77 @@ class SchedulerEngineTest {
         assertEquals(LocalTime.of(19, 30), scheduled.endAt.atZone(zone).toLocalTime())
     }
 
+    @Test
+    fun `continuation task waits until parent scheduled work ends`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val parent = task(
+            id = "write-draft",
+            deadline = ZonedDateTime.of(date, LocalTime.of(10, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+        )
+        val child = task(
+            id = "review-draft",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            continuationParentTaskId = parent.id,
+            continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(child, parent),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val parentBlock = plan.blocks.first { it.taskId == parent.id }
+        val childBlock = plan.blocks.first { it.taskId == child.id }
+        assertTrue(!childBlock.startAt.isBefore(parentBlock.endAt))
+    }
+
+    @Test
+    fun `continuation task can wait until parent due time instead of scheduled end`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val parent = task(
+            id = "write-draft",
+            deadline = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+        )
+        val child = task(
+            id = "review-draft",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            continuationParentTaskId = parent.id,
+            continuationMode = TaskContinuationMode.AFTER_PARENT_DUE_AT,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(child, parent),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val childBlock = plan.blocks.first { it.taskId == child.id }
+        assertEquals(LocalTime.of(13, 0), childBlock.startAt.atZone(zone).toLocalTime())
+    }
+
     private fun task(
         id: String,
         deadline: Instant,
@@ -714,6 +786,8 @@ class SchedulerEngineTest {
         schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
         fixedStartAt: Instant? = null,
         fixedEndAt: Instant? = null,
+        continuationParentTaskId: String? = null,
+        continuationMode: TaskContinuationMode? = null,
     ) = ScheduleTask(
         id = id,
         title = id,
@@ -722,6 +796,8 @@ class SchedulerEngineTest {
         schedulingMode = schedulingMode,
         fixedStartAt = fixedStartAt,
         fixedEndAt = fixedEndAt,
+        continuationParentTaskId = continuationParentTaskId,
+        continuationMode = continuationMode,
         dueAt = deadline,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = remainingMinutes,

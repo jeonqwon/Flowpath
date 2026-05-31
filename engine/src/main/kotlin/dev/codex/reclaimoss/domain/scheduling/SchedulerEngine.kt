@@ -9,6 +9,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
@@ -64,7 +65,7 @@ class SchedulerEngine {
         }
         val existingAnchorByTaskId = existingPendingByTaskId
             .mapValues { (_, blocks) -> blocks.minOf { it.startAt } }
-        val tasksToSchedule = tasks
+        val baseTasksToSchedule = tasks
             .filter { it.status == TaskStatus.ACTIVE && it.remainingMinutes > 0 }
             .sortedWith(
                 compareBy<ScheduleTask> { !it.hasDeadline }
@@ -73,6 +74,9 @@ class SchedulerEngine {
                     .thenByDescending { taskScore(it, rangeStart, policy) }
                     .thenBy { it.dueAt },
             )
+        val activeTasksById = baseTasksToSchedule.associateBy { it.id }
+        val allTasksById = tasks.associateBy { it.id }
+        val tasksToSchedule = orderTasksWithDependencies(baseTasksToSchedule, activeTasksById)
         val lockedOrCompleted = existingBlocks.filter { block ->
             block.lockState == BlockLockState.LOCKED ||
                 block.completionState == BlockCompletionState.COMPLETED
@@ -100,22 +104,28 @@ class SchedulerEngine {
             val existingTaskBlocks = existingPendingByTaskId[task.id].orEmpty().sortedBy { it.startAt }
             var remaining = task.remainingMinutes
             val startingRemaining = remaining
+            val dependencyBoundary = dependencyBoundary(
+                task = task,
+                allTasksById = allTasksById,
+                existingBlocks = existingBlocks,
+                scheduledBlocks = results,
+            )
             val firstBlockStart = when {
                 task.schedulingMode == TaskSchedulingMode.FIXED_DAY -> {
                     val occurrenceStart = task.dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
-                    maxInstant(rangeStart, occurrenceStart)
+                    maxInstant(maxInstant(rangeStart, occurrenceStart), dependencyBoundary ?: Instant.MIN)
                 }
                 task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW && task.fixedStartAt != null -> {
-                    maxInstant(rangeStart, task.fixedStartAt)
+                    maxInstant(maxInstant(rangeStart, task.fixedStartAt), dependencyBoundary ?: Instant.MIN)
                 }
                 task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null -> {
-                    maxInstant(rangeStart, task.fixedStartAt)
+                    maxInstant(maxInstant(rangeStart, task.fixedStartAt), dependencyBoundary ?: Instant.MIN)
                 }
                 task.recurrenceRule.type != dev.codex.reclaimoss.domain.model.RecurrenceType.NONE -> {
                     val occurrenceStart = task.dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
-                    maxInstant(rangeStart, occurrenceStart)
+                    maxInstant(maxInstant(rangeStart, occurrenceStart), dependencyBoundary ?: Instant.MIN)
                 }
-                else -> maxInstant(rangeStart, Instant.now().minus(3650, ChronoUnit.DAYS))
+                else -> maxInstant(maxInstant(rangeStart, Instant.now().minus(3650, ChronoUnit.DAYS)), dependencyBoundary ?: Instant.MIN)
             }
             var cursor = firstBlockStart
 
@@ -132,6 +142,7 @@ class SchedulerEngine {
                         workHours = workHours,
                         timePeriods = timePeriods,
                         rangeStart = firstBlockStart,
+                        dependencyBoundary = dependencyBoundary,
                     )
                 }
                 if (canKeepExisting) {
@@ -235,9 +246,11 @@ class SchedulerEngine {
         workHours: WorkHoursProfile,
         timePeriods: List<TimePeriod>,
         rangeStart: Instant,
+        dependencyBoundary: Instant?,
     ): Boolean {
         if (block.endAt > task.dueAt) return false
         if (block.startAt < rangeStart) return false
+        if (dependencyBoundary != null && block.startAt < dependencyBoundary) return false
         if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null && block.startAt < task.fixedStartAt) return false
         if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
             val windowStart = task.fixedStartAt ?: return false
@@ -580,6 +593,49 @@ class SchedulerEngine {
             free += BusyWindow(cursor, end)
         }
         return free.filter { it.endAt > it.startAt }
+    }
+
+    private fun orderTasksWithDependencies(
+        baseTasks: List<ScheduleTask>,
+        tasksById: Map<String, ScheduleTask>,
+    ): List<ScheduleTask> {
+        val ordered = mutableListOf<ScheduleTask>()
+        val visiting = mutableSetOf<String>()
+        val visited = mutableSetOf<String>()
+
+        fun visit(task: ScheduleTask) {
+            if (task.id in visited) return
+            if (!visiting.add(task.id)) return
+            val parentId = task.continuationParentTaskId
+            if (parentId != null) {
+                tasksById[parentId]?.let(::visit)
+            }
+            visiting.remove(task.id)
+            visited += task.id
+            ordered += task
+        }
+
+        baseTasks.forEach(::visit)
+        return ordered
+    }
+
+    private fun dependencyBoundary(
+        task: ScheduleTask,
+        allTasksById: Map<String, ScheduleTask>,
+        existingBlocks: List<ScheduleBlock>,
+        scheduledBlocks: List<ScheduleBlock>,
+    ): Instant? {
+        val parentId = task.continuationParentTaskId ?: return null
+        val parentTask = allTasksById[parentId]
+        return when (task.continuationMode ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END) {
+            TaskContinuationMode.AFTER_PARENT_SCHEDULED_END -> {
+                val latestParentEnd = (existingBlocks.asSequence() + scheduledBlocks.asSequence())
+                    .filter { it.taskId == parentId }
+                    .maxOfOrNull { it.endAt }
+                latestParentEnd ?: parentTask?.dueAt
+            }
+            TaskContinuationMode.AFTER_PARENT_DUE_AT -> parentTask?.dueAt
+        }
     }
 
     private fun taskScore(

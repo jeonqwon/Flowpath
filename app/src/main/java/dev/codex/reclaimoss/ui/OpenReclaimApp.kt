@@ -287,6 +287,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             CreateWorkScreen(
                 padding = padding,
                 periods = state.snapshot.timePeriods,
+                availableTasks = state.snapshot.tasks,
+                currentTaskId = rescheduleSourceTaskId,
                 sessionKey = createSessionKey,
                 initialMode = CreateMode.Task,
                 initialTaskDraft = createTaskDraftOverride ?: TaskDraft(

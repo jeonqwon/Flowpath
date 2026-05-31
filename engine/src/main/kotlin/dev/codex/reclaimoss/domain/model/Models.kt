@@ -77,6 +77,11 @@ enum class TaskSchedulingMode {
     FIXED_EXACT,
 }
 
+enum class TaskContinuationMode {
+    AFTER_PARENT_SCHEDULED_END,
+    AFTER_PARENT_DUE_AT,
+}
+
 data class TimeWindow(
     val start: LocalTime,
     val end: LocalTime,
@@ -168,6 +173,8 @@ data class ScheduleTask(
     val preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
     val preferredTimePeriodId: String? = null,
     val hasDeadline: Boolean = true,
+    val continuationParentTaskId: String? = null,
+    val continuationMode: TaskContinuationMode? = null,
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val fixedStartAt: Instant? = null,
     val fixedEndAt: Instant? = null,

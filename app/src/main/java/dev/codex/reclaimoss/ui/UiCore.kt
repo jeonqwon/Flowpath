@@ -108,6 +108,7 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -175,6 +176,8 @@ data class TaskDraft(
     val priority: TaskPriority = TaskPriority.MEDIUM,
     val preferredTimePeriodId: String? = null,
     val hasDeadline: Boolean = true,
+    val continuationParentTaskId: String? = null,
+    val continuationMode: TaskContinuationMode? = null,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val startDate: LocalDate? = null,
@@ -218,6 +221,8 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
         hasDeadline = true,
+        continuationParentTaskId = null,
+        continuationMode = null,
         schedulingMode = TaskSchedulingMode.FLEXIBLE,
         startDate = null,
         fixedDate = dueAt.atZone(zoneId).toLocalDate().plusDays(1),
@@ -245,6 +250,8 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         priority = priority,
         preferredTimePeriodId = preferredTimePeriodId,
         hasDeadline = hasDeadline,
+        continuationParentTaskId = continuationParentTaskId,
+        continuationMode = continuationMode,
         deadline = localDueAt,
         schedulingMode = schedulingMode,
         startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
@@ -294,6 +301,8 @@ class PlannerViewModel(
             priority = draft.priority,
             preferredTimePeriodId = draft.preferredTimePeriodId,
             hasDeadline = draft.hasDeadline,
+            continuationParentTaskId = draft.continuationParentTaskId,
+            continuationMode = draft.continuationMode,
             dueAt = draft.taskDueAtInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
@@ -320,6 +329,8 @@ class PlannerViewModel(
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
             hasDeadline = draft.hasDeadline,
+            continuationParentTaskId = draft.continuationParentTaskId,
+            continuationMode = draft.continuationMode,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -345,6 +356,8 @@ class PlannerViewModel(
             dueAt = draft.taskDueAtInstant(),
             preferredTimePeriodId = draft.preferredTimePeriodId,
             hasDeadline = draft.hasDeadline,
+            continuationParentTaskId = draft.continuationParentTaskId,
+            continuationMode = draft.continuationMode,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
