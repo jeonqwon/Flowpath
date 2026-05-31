@@ -205,7 +205,6 @@ fun CreateModeSwitch(
 @Composable
 fun CreateWorkScreen(
     padding: PaddingValues,
-    periods: List<TimePeriod>,
     timeframes: List<Timeframe>,
     availableTasks: List<ScheduleTask>,
     currentTaskId: String? = null,

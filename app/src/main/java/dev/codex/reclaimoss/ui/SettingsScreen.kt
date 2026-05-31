@@ -144,7 +144,6 @@ private enum class SettingsSection(val title: String) {
     TaskRules("Task Rules"),
     Reminders("Reminders"),
     History("History"),
-    DailyFlow("Daily Flow"),
 }
 
 private enum class SettingsHubGroup(val title: String, val sections: List<SettingsSection>) {
@@ -161,14 +160,8 @@ private enum class SettingsHubGroup(val title: String, val sections: List<Settin
 @Composable
 fun SettingsScreen(
     padding: PaddingValues,
-    periods: List<TimePeriod>,
     settings: AppSettings,
     isActive: Boolean = true,
-    startInDailyFlow: Boolean = false,
-    startInEditFlow: Boolean = false,
-    showDailyFlowOnboardingPrompt: Boolean = false,
-    onSavePeriod: (TimePeriodDraft) -> Unit,
-    onDeletePeriod: (String) -> Unit,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onFontSizeScaleChanged: (FontSizeScale) -> Unit,
     onDateFormatPreferenceChanged: (DateFormatPreference) -> Unit,
@@ -182,57 +175,16 @@ fun SettingsScreen(
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
     onReminderLeadMinutesChanged: (Int) -> Unit,
     onHistoryRetentionChanged: (HistoryRetention) -> Unit,
-    onFinishDailyFlowOnboarding: () -> Unit,
 ) {
     val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
-    var editingPeriodError by remember { mutableStateOf<String?>(null) }
-    var editFlow by rememberSaveable { mutableStateOf(startInEditFlow) }
     var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
-
-    LaunchedEffect(startInEditFlow, section) {
-        if (startInEditFlow && section == SettingsSection.DailyFlow) {
-            editFlow = true
-        }
-    }
     LaunchedEffect(isActive) {
         if (!isActive) {
             section = null
-            editFlow = false
         }
     }
     BackHandler(enabled = section != null) {
         section = null
-    }
-
-    if (editingPeriod != null) {
-        TimePeriodDialog(
-            initial = editingPeriod!!,
-            errorMessage = editingPeriodError,
-            onDismiss = {
-                editingPeriod = null
-                editingPeriodError = null
-            },
-            onDraftChanged = { editingPeriodError = null },
-            onSave = {
-                val candidate = TimePeriod(
-                    id = it.id.ifBlank { "draft-period" },
-                    label = it.label.trim(),
-                    start = it.start,
-                    end = it.end,
-                    type = it.type,
-                    sortOrder = it.sortOrder,
-                )
-                val overlap = findOverlappingTimePeriod(candidate, periods)
-                if (overlap != null) {
-                    editingPeriodError = timePeriodOverlapMessage(candidate.label, overlap)
-                } else {
-                    onSavePeriod(it)
-                    editingPeriod = null
-                    editingPeriodError = null
-                }
-            },
-        )
     }
 
     Box(
@@ -295,13 +247,6 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             color = settingsPrimaryTextColor(isDarkSettings),
-                        )
-                    }
-                    if (section == SettingsSection.DailyFlow) {
-                        HeaderActionButton(
-                            label = if (editFlow) "Done" else "Edit Flow",
-                            onClick = { editFlow = !editFlow },
-                            width = 156.dp,
                         )
                     }
                 }
@@ -453,88 +398,10 @@ fun SettingsScreen(
                             }
                         }
 
-                        SettingsSection.DailyFlow -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            if (showDailyFlowOnboardingPrompt) {
-                                DailyFlowOnboardingCard(
-                                    hasProductivePeriods = periods.any { it.type == TimePeriodType.PRODUCTIVE },
-                                    onContinue = onFinishDailyFlowOnboarding,
-                                )
-                            }
-                            SettingsFullDayTimeline(
-                                periods = periods,
-                                editFlow = editFlow,
-                                onEditPeriod = { period ->
-                                    val bounds = editableBoundsForPeriod(period, periods)
-                                    editingPeriod = TimePeriodDraft(
-                                        id = period.id,
-                                        label = period.label,
-                                        start = period.start,
-                                        end = period.end,
-                                        boundStart = minutesToLocalTime(bounds.startMinutes),
-                                        boundEnd = minutesToLocalTime(bounds.endMinutes),
-                                        type = period.type,
-                                        sortOrder = period.sortOrder,
-                                    )
-                                },
-                                onSelectFreeGap = { gap ->
-                                    editingPeriod = TimePeriodDraft(
-                                        sortOrder = periods.size,
-                                        start = minutesToLocalTime(gap.startMinutes),
-                                        end = minutesToLocalTime(gap.endMinutes),
-                                        boundStart = minutesToLocalTime(gap.startMinutes),
-                                        boundEnd = minutesToLocalTime(gap.endMinutes),
-                                    )
-                                },
-                                onDeletePeriod = onDeletePeriod,
-                            )
-                        }
-
                             null -> Unit
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DailyFlowOnboardingCard(
-    hasProductivePeriods: Boolean,
-    onContinue: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                if (hasProductivePeriods) "You are ready to start using Flowpath"
-                else "Now add your productive times",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                if (hasProductivePeriods) {
-                    "Your life periods are set. You can keep editing here, or continue to Tasks and start adding work."
-                } else {
-                    "Tap an empty gap to create a productive period. Flowpath only schedules tasks inside productive time."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                onClick = onContinue,
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 14.dp),
-            ) {
-                Text(if (hasProductivePeriods) "Continue to Tasks" else "Skip for now")
             }
         }
     }
@@ -1089,7 +956,6 @@ private fun settingsSectionIcon(section: SettingsSection): ImageVector =
         SettingsSection.TaskRules -> Icons.Outlined.Checklist
         SettingsSection.Reminders -> Icons.Outlined.Notifications
         SettingsSection.History -> Icons.Outlined.MoreHoriz
-        SettingsSection.DailyFlow -> Icons.Outlined.CalendarMonth
     }
 
 @Composable

@@ -314,7 +314,7 @@ class PlannerViewModel(
 
     suspend fun seedIfNeeded() = coordinator.ensureSeedData()
 
-    suspend fun addTask(draft: TaskDraft, timePeriods: List<TimePeriod>): TaskCreationResult {
+    suspend fun addTask(draft: TaskDraft): TaskCreationResult {
         return coordinator.createTask(
             title = draft.title,
             description = draft.description,
@@ -499,23 +499,6 @@ class PlannerViewModel(
 
     suspend fun deleteTask(taskId: String) {
         coordinator.deleteTask(taskId)
-    }
-
-    suspend fun saveTimePeriod(draft: TimePeriodDraft) {
-        coordinator.upsertTimePeriod(
-            TimePeriod(
-                id = draft.id.ifBlank { "period-${System.currentTimeMillis()}" },
-                label = draft.label,
-                start = draft.start,
-                end = draft.end,
-                type = draft.type,
-                sortOrder = draft.sortOrder,
-            ),
-        )
-    }
-
-    suspend fun deleteTimePeriod(periodId: String) {
-        coordinator.deleteTimePeriod(periodId)
     }
 
     suspend fun saveTimeframe(draft: TimeframeDraft) =

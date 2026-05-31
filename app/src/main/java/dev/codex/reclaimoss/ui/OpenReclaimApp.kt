@@ -263,7 +263,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         ) { padding ->
             CreateWorkScreen(
                 padding = padding,
-                periods = state.snapshot.timePeriods,
                 timeframes = state.snapshot.timeframes,
                 availableTasks = state.snapshot.tasks,
                 currentTaskId = rescheduleSourceTaskId,
@@ -291,7 +290,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         } else if (rescheduleTaskId != null) {
                             viewModel.rescheduleTaskWithUpdate(rescheduleTaskId, draft)
                         } else {
-                            viewModel.addTask(draft, state.snapshot.timePeriods)
+                            viewModel.addTask(draft)
                         }
                         if (result == null) {
                             snackbarHostState.showSnackbar("Unable to schedule task")
@@ -636,13 +635,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
 
                 AppTab.Settings -> SettingsScreen(
                     padding = padding,
-                    periods = state.snapshot.timePeriods,
                     settings = state.settings,
-                    startInDailyFlow = false,
-                    startInEditFlow = false,
-                    showDailyFlowOnboardingPrompt = false,
-                    onSavePeriod = {},
-                    onDeletePeriod = {},
                     onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
                     onFontSizeScaleChanged = { value -> scope.launch { viewModel.setFontSizeScale(value) } },
                     onDateFormatPreferenceChanged = { value -> scope.launch { viewModel.setDateFormatPreference(value) } },
@@ -656,7 +649,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
                     onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
                     onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
-                    onFinishDailyFlowOnboarding = {},
                     isActive = selectedTab == AppTab.Settings,
                 )
             }
