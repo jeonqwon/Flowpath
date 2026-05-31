@@ -18,7 +18,10 @@ class MainActivity : ComponentActivity() {
             val settings by app.appGraph.appSettingsRepository.settings.collectAsStateWithLifecycle(
                 initialValue = dev.codex.reclaimoss.settings.AppSettings(),
             )
-            FlowpathTheme(themeMode = settings.themeMode) {
+            FlowpathTheme(
+                themeMode = settings.themeMode,
+                fontSizeScale = settings.fontSizeScale,
+            ) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     OpenReclaimApp(app.appGraph)
                 }

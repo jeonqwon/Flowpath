@@ -697,6 +697,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         }
                     },
                     onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
+                    onFontSizeScaleChanged = { value -> scope.launch { viewModel.setFontSizeScale(value) } },
                     onDateFormatPreferenceChanged = { value -> scope.launch { viewModel.setDateFormatPreference(value) } },
                     onWeekStartChanged = { value -> scope.launch { viewModel.setWeekStart(value) } },
                     onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },

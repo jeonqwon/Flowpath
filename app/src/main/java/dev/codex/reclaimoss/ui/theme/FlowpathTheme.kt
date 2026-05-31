@@ -15,10 +15,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import dev.codex.reclaimoss.settings.FontSizeScale
 import dev.codex.reclaimoss.settings.ThemeMode
 
 private val FlowpathLightColors = lightColorScheme(
@@ -112,6 +114,36 @@ private val FlowpathTypography = Typography(
     ),
 )
 
+internal fun scaledTypography(
+    base: Typography,
+    scaleFactor: Float,
+): Typography = base.copy(
+    displayLarge = base.displayLarge.scaledBy(scaleFactor),
+    displayMedium = base.displayMedium.scaledBy(scaleFactor),
+    displaySmall = base.displaySmall.scaledBy(scaleFactor),
+    headlineLarge = base.headlineLarge.scaledBy(scaleFactor),
+    headlineMedium = base.headlineMedium.scaledBy(scaleFactor),
+    headlineSmall = base.headlineSmall.scaledBy(scaleFactor),
+    titleLarge = base.titleLarge.scaledBy(scaleFactor),
+    titleMedium = base.titleMedium.scaledBy(scaleFactor),
+    titleSmall = base.titleSmall.scaledBy(scaleFactor),
+    bodyLarge = base.bodyLarge.scaledBy(scaleFactor),
+    bodyMedium = base.bodyMedium.scaledBy(scaleFactor),
+    bodySmall = base.bodySmall.scaledBy(scaleFactor),
+    labelLarge = base.labelLarge.scaledBy(scaleFactor),
+    labelMedium = base.labelMedium.scaledBy(scaleFactor),
+    labelSmall = base.labelSmall.scaledBy(scaleFactor),
+)
+
+private fun TextStyle.scaledBy(scaleFactor: Float): TextStyle = copy(
+    fontSize = fontSize.scaledBy(scaleFactor),
+    lineHeight = lineHeight.scaledBy(scaleFactor),
+    letterSpacing = letterSpacing.scaledBy(scaleFactor),
+)
+
+private fun TextUnit.scaledBy(scaleFactor: Float): TextUnit =
+    if (this == TextUnit.Unspecified) this else (value * scaleFactor).sp
+
 private val FlowpathShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
     small = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
@@ -123,6 +155,7 @@ private val FlowpathShapes = Shapes(
 @Composable
 fun FlowpathTheme(
     themeMode: ThemeMode,
+    fontSizeScale: FontSizeScale,
     content: @Composable () -> Unit,
 ) {
     val useDarkTheme = when (themeMode) {
@@ -150,7 +183,7 @@ fun FlowpathTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = FlowpathTypography,
+        typography = scaledTypography(FlowpathTypography, fontSizeScale.scaleFactor),
         shapes = FlowpathShapes,
         content = content,
     )

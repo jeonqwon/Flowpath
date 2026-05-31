@@ -120,6 +120,7 @@ import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import dev.codex.reclaimoss.settings.HistoryRetention
 import dev.codex.reclaimoss.settings.DateFormatPreference
+import dev.codex.reclaimoss.settings.FontSizeScale
 import dev.codex.reclaimoss.settings.ReminderTimingMode
 import dev.codex.reclaimoss.settings.ThemeMode
 import dev.codex.reclaimoss.settings.WeekStart
@@ -169,6 +170,7 @@ fun SettingsScreen(
     onSavePeriod: (TimePeriodDraft) -> Unit,
     onDeletePeriod: (String) -> Unit,
     onThemeModeChanged: (ThemeMode) -> Unit,
+    onFontSizeScaleChanged: (FontSizeScale) -> Unit,
     onDateFormatPreferenceChanged: (DateFormatPreference) -> Unit,
     onWeekStartChanged: (WeekStart) -> Unit,
     onBreakBufferChanged: (Int) -> Unit,
@@ -335,6 +337,24 @@ fun SettingsScreen(
                                         }
                                     },
                                     onSelected = onThemeModeChanged,
+                                )
+                            }
+                            SettingsControlRow(
+                                title = "Font size",
+                                subtitle = "Scale text across the app",
+                            ) {
+                                SegmentedEnumRow(
+                                    options = FontSizeScale.entries,
+                                    selected = settings.fontSizeScale,
+                                    labelFor = {
+                                        when (it) {
+                                            FontSizeScale.SMALL -> "90%"
+                                            FontSizeScale.DEFAULT -> "100%"
+                                            FontSizeScale.LARGE -> "115%"
+                                            FontSizeScale.EXTRA_LARGE -> "130%"
+                                        }
+                                    },
+                                    onSelected = onFontSizeScaleChanged,
                                 )
                             }
                             SettingsControlRow(
