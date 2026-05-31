@@ -17,6 +17,7 @@ import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
@@ -74,17 +75,18 @@ class PlannerCoordinator(
     val snapshot = repository.observeSnapshot()
     private val recurrenceMaterializationDays = 180
 
-    private val emptyWorkHours = WorkHoursProfile(
+    private val alwaysAvailableWorkHours = WorkHoursProfile(
         timezone = clock.zone.id,
         days = DayOfWeek.entries.associateWith {
             WorkHoursDay(
-                windows = emptyList(),
+                windows = listOf(TimeWindow(LocalTime.MIDNIGHT, LocalTime.of(23, 59, 59))),
             )
         },
     )
 
     suspend fun ensureSeedData() {
         repository.seedDemoDataIfEmpty()
+        repository.clearLegacyDailyFlowData()
         rebuildSchedule()
     }
 
@@ -95,6 +97,7 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         timeframeId: String? = null,
+        taskKind: TaskKind = TaskKind.NORMAL,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -103,6 +106,7 @@ class PlannerCoordinator(
         estimatedMinutes: Int,
         addReminder: Boolean,
         schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+        notBeforeAt: Instant? = null,
         fixedStartAt: Instant? = null,
         fixedEndAt: Instant? = null,
     ): TaskCreationResult {
@@ -125,6 +129,7 @@ class PlannerCoordinator(
                     recurrenceSeriesId = seriesId,
                     projectId = "project-default",
                     timeframeId = timeframeId,
+                    taskKind = taskKind,
                     title = title,
                     description = description,
                     priority = priority,
@@ -135,6 +140,7 @@ class PlannerCoordinator(
                     continuationMode = continuationMode,
                     overlapPolicy = overlapPolicy,
                     schedulingMode = schedulingMode,
+                    notBeforeAt = notBeforeAt,
                     fixedStartAt = occurrence.fixedStartAt,
                     fixedEndAt = occurrence.fixedEndAt,
                     dueAt = occurrence.dueAt,
@@ -178,6 +184,7 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         timeframeId: String? = null,
+        taskKind: TaskKind = TaskKind.NORMAL,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -186,6 +193,7 @@ class PlannerCoordinator(
         estimatedMinutes: Int,
         addReminder: Boolean,
         schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+        notBeforeAt: Instant? = null,
         fixedStartAt: Instant? = null,
         fixedEndAt: Instant? = null,
     ): TaskCreationResult? {
@@ -197,6 +205,7 @@ class PlannerCoordinator(
             dueAt = dueAt,
             preferredTimePeriodId = preferredTimePeriodId,
             timeframeId = timeframeId,
+            taskKind = taskKind,
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
@@ -205,6 +214,7 @@ class PlannerCoordinator(
             estimatedMinutes = estimatedMinutes,
             addReminder = addReminder,
             schedulingMode = schedulingMode,
+            notBeforeAt = notBeforeAt,
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
         )
@@ -336,6 +346,7 @@ class PlannerCoordinator(
         dueAt: Instant,
         preferredTimePeriodId: String?,
         timeframeId: String? = null,
+        taskKind: TaskKind = TaskKind.NORMAL,
         hasDeadline: Boolean = true,
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
@@ -343,6 +354,7 @@ class PlannerCoordinator(
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         schedulingMode: TaskSchedulingMode,
+        notBeforeAt: Instant? = null,
         fixedStartAt: Instant? = null,
         fixedEndAt: Instant? = null,
     ): TaskCreationResult {
@@ -365,11 +377,13 @@ class PlannerCoordinator(
             priority = priority,
             preferredTimePeriodId = preferredTimePeriodId,
             timeframeId = timeframeId,
+            taskKind = taskKind,
             hasDeadline = hasDeadline,
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
             overlapPolicy = overlapPolicy,
             schedulingMode = schedulingMode,
+            notBeforeAt = notBeforeAt,
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
             dueAt = dueAt,
@@ -409,23 +423,18 @@ class PlannerCoordinator(
         val schedulableTasks = filteredTasks.filter { it.schedulingMode != TaskSchedulingMode.FIXED_EXACT }
 
         val existingBlocks = repository.getBlocks()
-        val timePeriods = repository.getTimePeriods()
         val rangeStart = now()
         val policy = schedulingPolicy(getSettings())
         val rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays)
-        val busyEvents = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) + lifePeriodBusyWindows(
-            timePeriods = timePeriods,
-            rangeStart = rangeStart,
-            rangeEnd = rangeEnd,
-        )
+        val busyEvents = calendarGateway.syncBusyEvents(rangeStart, rangeEnd)
         if (schedulableTasks.isNotEmpty()) {
             val plan = scheduler.rebuildSchedule(
                 tasks = schedulableTasks,
                 timeframes = repository.getTimeframes(),
                 existingBlocks = existingBlocks,
                 busyWindows = busyEvents,
-                workHours = workHoursFromProductivePeriods(timePeriods),
-                timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
+                workHours = alwaysAvailableWorkHours,
+                timePeriods = emptyList(),
                 policy = policy,
                 rangeStart = rangeStart,
                 reason = reason,
@@ -565,12 +574,12 @@ class PlannerCoordinator(
     }
 
     suspend fun upsertTimePeriod(period: TimePeriod) {
-        repository.upsertTimePeriod(period)
+        repository.clearLegacyDailyFlowData()
         rebuildSchedule()
     }
 
     suspend fun deleteTimePeriod(periodId: String) {
-        repository.deleteTimePeriod(periodId)
+        repository.clearLegacyDailyFlowData()
         rebuildSchedule()
     }
 
@@ -582,7 +591,6 @@ class PlannerCoordinator(
         updatedTask: ScheduleTask,
         allowMovingOtherTasks: Boolean,
     ): Boolean {
-        val timePeriods = repository.getTimePeriods()
         val existingBlocks = repository.getBlocks()
         val currentTaskBlocks = existingBlocks
             .filter { it.taskId == originalTask.id && it.completionState == BlockCompletionState.PENDING }
@@ -596,7 +604,6 @@ class PlannerCoordinator(
         val targetedPlan = buildSchedulePlan(
             tasks = listOf(updatedTask),
             existingBlocks = existingBlocks.filter { it.taskId != originalTask.id },
-            timePeriods = timePeriods,
             rangeStart = rangeStart,
             extraBusyWindows = blockedOldWindows,
             preserveExistingPendingBlocks = true,
@@ -616,7 +623,6 @@ class PlannerCoordinator(
         val rebuildPlan = buildSchedulePlan(
             tasks = allTasks,
             existingBlocks = existingBlocks.filter { it.taskId != originalTask.id },
-            timePeriods = timePeriods,
             rangeStart = now(),
             extraBusyWindows = blockedOldWindows,
             preserveExistingPendingBlocks = false,
@@ -636,7 +642,6 @@ class PlannerCoordinator(
     private suspend fun buildSchedulePlan(
         tasks: List<ScheduleTask>,
         existingBlocks: List<dev.codex.reclaimoss.domain.model.ScheduleBlock>,
-        timePeriods: List<TimePeriod>,
         rangeStart: Instant,
         extraBusyWindows: List<SchedulerEngine.BusyWindow>,
         preserveExistingPendingBlocks: Boolean,
@@ -649,13 +654,9 @@ class PlannerCoordinator(
             busyWindows = calendarGateway.syncBusyEvents(
                 rangeStart,
                 rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays),
-            ) + lifePeriodBusyWindows(
-                timePeriods = timePeriods,
-                rangeStart = rangeStart,
-                rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays),
             ) + extraBusyWindows,
-            workHours = workHoursFromProductivePeriods(timePeriods),
-            timePeriods = timePeriods.filter { it.type == TimePeriodType.PRODUCTIVE },
+            workHours = alwaysAvailableWorkHours,
+            timePeriods = emptyList(),
             policy = policy,
             rangeStart = rangeStart,
             reason = ScheduleRebuildReason.ManualRebuild,
@@ -734,10 +735,7 @@ class PlannerCoordinator(
         }
         val rangeStart = startAt.minus(1, ChronoUnit.DAYS)
         val rangeEnd = endAt.plus(1, ChronoUnit.DAYS)
-        val timePeriods = repository.getTimePeriods()
-        val productiveWorkHours = workHoursFromProductivePeriods(timePeriods)
         val hardBusyWindows = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) +
-            lifePeriodBusyWindows(timePeriods, rangeStart, rangeEnd) +
             repository.getBlocks()
                 .filter { it.taskId != taskId }
                 .filter { it.lockState == BlockLockState.LOCKED || it.completionState == BlockCompletionState.COMPLETED }
@@ -754,10 +752,9 @@ class PlannerCoordinator(
                 otherTask == null || !tasksCanOverlap(task, otherTask, allowConcurrent)
             }
             .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
-        val outsideProductiveHours = !isInsideWorkHours(startAt, endAt, productiveWorkHours)
         val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
         val overlapsOtherTask = otherTaskBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
-        if (outsideProductiveHours || overlapsHardBlock || overlapsOtherTask) {
+        if (overlapsHardBlock || overlapsOtherTask) {
             repository.replaceSchedulingIssuesForTask(
                 taskId,
                 listOf(
@@ -766,8 +763,7 @@ class PlannerCoordinator(
                         type = SchedulingIssueType.UNSCHEDULED,
                         unscheduledMinutes = task.remainingMinutes,
                         reason = when {
-                            overlapsHardBlock -> "This fixed time overlaps a break, sleep, or other blocked time."
-                            outsideProductiveHours -> "This fixed time is outside your productive hours."
+                            overlapsHardBlock -> "This fixed time overlaps another blocked task or event."
                             else -> "This fixed time overlaps another task."
                         },
                     ),
@@ -830,6 +826,8 @@ class PlannerCoordinator(
         val initial = initialDueAt.atZone(zoneId)
         val fixedStartLocal = fixedStartAt?.atZone(zoneId)
         val fixedEndLocal = fixedEndAt?.atZone(zoneId)
+        val fixedStartDayOffset = fixedStartLocal?.toLocalDate()?.toEpochDay()?.minus(initial.toLocalDate().toEpochDay())
+        val fixedEndDayOffset = fixedEndLocal?.toLocalDate()?.toEpochDay()?.minus(initial.toLocalDate().toEpochDay())
         var emitted = 0
         return when (recurrenceRule.type) {
             RecurrenceType.NONE -> listOf(TaskOccurrence(initialDueAt, fixedStartAt, fixedEndAt))
@@ -842,12 +840,20 @@ class PlannerCoordinator(
                                 TaskOccurrence(
                                     dueAt = candidate.toInstant(),
                                     fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
-                                        ZonedDateTime.of(candidate.toLocalDate(), fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidate.toLocalDate().plusDays(fixedStartDayOffset ?: 0L),
+                                            fixedStartLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
                                     fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
-                                        ZonedDateTime.of(candidate.toLocalDate(), fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidate.toLocalDate().plusDays(fixedEndDayOffset ?: 0L),
+                                            fixedEndLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
@@ -875,12 +881,20 @@ class PlannerCoordinator(
                                 TaskOccurrence(
                                     dueAt = candidate,
                                     fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
-                                        ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidateDate.plusDays(fixedStartDayOffset ?: 0L),
+                                            fixedStartLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
                                     fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
-                                        ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidateDate.plusDays(fixedEndDayOffset ?: 0L),
+                                            fixedEndLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
@@ -902,12 +916,20 @@ class PlannerCoordinator(
                                 TaskOccurrence(
                                     dueAt = candidate,
                                     fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
-                                        ZonedDateTime.of(candidateDate, fixedStartLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidateDate.plusDays(fixedStartDayOffset ?: 0L),
+                                            fixedStartLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
                                     fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
-                                        ZonedDateTime.of(candidateDate, fixedEndLocal.toLocalTime(), zoneId).toInstant()
+                                        ZonedDateTime.of(
+                                            candidateDate.plusDays(fixedEndDayOffset ?: 0L),
+                                            fixedEndLocal.toLocalTime(),
+                                            zoneId,
+                                        ).toInstant()
                                     } else {
                                         null
                                     },
@@ -940,11 +962,15 @@ class PlannerCoordinator(
                         dueAt = nextDueAt,
                         fixedStartAt = task.fixedStartAt?.let {
                             val local = it.atZone(zoneId())
-                            ZonedDateTime.of(nextDueAt.atZone(zoneId()).toLocalDate(), local.toLocalTime(), zoneId()).toInstant()
+                            val dueLocalDate = nextDueAt.atZone(zoneId()).toLocalDate()
+                            val offsetDays = local.toLocalDate().toEpochDay() - task.dueAt.atZone(zoneId()).toLocalDate().toEpochDay()
+                            ZonedDateTime.of(dueLocalDate.plusDays(offsetDays), local.toLocalTime(), zoneId()).toInstant()
                         },
                         fixedEndAt = task.fixedEndAt?.let {
                             val local = it.atZone(zoneId())
-                            ZonedDateTime.of(nextDueAt.atZone(zoneId()).toLocalDate(), local.toLocalTime(), zoneId()).toInstant()
+                            val dueLocalDate = nextDueAt.atZone(zoneId()).toLocalDate()
+                            val offsetDays = local.toLocalDate().toEpochDay() - task.dueAt.atZone(zoneId()).toLocalDate().toEpochDay()
+                            ZonedDateTime.of(dueLocalDate.plusDays(offsetDays), local.toLocalTime(), zoneId()).toInstant()
                         },
                         remainingMinutes = task.estimatedMinutes,
                         status = TaskStatus.ACTIVE,
@@ -963,19 +989,6 @@ class PlannerCoordinator(
         return if (until.isBefore(rollingHorizon)) until else rollingHorizon
     }
 
-    private fun workHoursFromProductivePeriods(timePeriods: List<TimePeriod>): WorkHoursProfile {
-        val productiveWindows = timePeriods
-            .filter { it.type == TimePeriodType.PRODUCTIVE }
-            .map { TimeWindow(it.start, it.end) }
-            .sortedBy { it.start }
-        if (productiveWindows.isEmpty()) return emptyWorkHours
-
-        return WorkHoursProfile(
-            timezone = zoneId().id,
-            days = DayOfWeek.entries.associateWith { WorkHoursDay(productiveWindows) },
-        )
-    }
-
     private fun isInsideWorkHours(
         startAt: Instant,
         endAt: Instant,
@@ -989,36 +1002,6 @@ class PlannerCoordinator(
         return day.windows.any { window ->
             localStart.toLocalTime() >= window.start && localEnd.toLocalTime() <= window.end
         }
-    }
-
-    private fun lifePeriodBusyWindows(
-        timePeriods: List<TimePeriod>,
-        rangeStart: Instant,
-        rangeEnd: Instant,
-    ): List<SchedulerEngine.BusyWindow> {
-        val zoneId = zoneId()
-        val startDate = rangeStart.atZone(zoneId).toLocalDate()
-        val endDate = rangeEnd.atZone(zoneId).toLocalDate()
-        val windows = mutableListOf<SchedulerEngine.BusyWindow>()
-        var date: LocalDate = startDate
-        while (!date.isAfter(endDate)) {
-            timePeriods
-                .filter { it.type == TimePeriodType.LIFE }
-                .forEach { period ->
-                    val start = ZonedDateTime.of(date, period.start, zoneId).toInstant()
-                    val endDateTime = if (period.end > period.start) {
-                        ZonedDateTime.of(date, period.end, zoneId)
-                    } else {
-                        ZonedDateTime.of(date.plusDays(1), period.end, zoneId)
-                    }
-                    val end = endDateTime.toInstant()
-                    if (end > rangeStart && start < rangeEnd) {
-                        windows += SchedulerEngine.BusyWindow(start, end)
-                    }
-                }
-            date = date.plusDays(1)
-        }
-        return windows
     }
 
     private fun nextOccurrence(task: ScheduleTask): Instant {

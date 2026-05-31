@@ -21,6 +21,7 @@ import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
@@ -48,6 +49,7 @@ data class TaskEntity(
     val timeframeId: String?,
     val title: String,
     val description: String,
+    val taskKind: TaskKind,
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay,
     val preferredTimePeriodId: String?,
@@ -56,6 +58,7 @@ data class TaskEntity(
     val continuationMode: TaskContinuationMode?,
     val overlapPolicy: TaskOverlapPolicy,
     val schedulingMode: TaskSchedulingMode,
+    val notBeforeAtEpochMillis: Long?,
     val fixedStartAtEpochMillis: Long?,
     val fixedEndAtEpochMillis: Long?,
     val dueAtEpochMillis: Long,
@@ -159,6 +162,9 @@ interface TaskDao {
     @Query("UPDATE tasks SET preferredTimePeriodId = NULL WHERE preferredTimePeriodId = :periodId")
     suspend fun clearPreferredTimePeriod(periodId: String)
 
+    @Query("UPDATE tasks SET preferredTimePeriodId = NULL")
+    suspend fun clearAllPreferredTimePeriods()
+
     @Query("UPDATE tasks SET timeframeId = NULL WHERE timeframeId = :timeframeId")
     suspend fun clearTimeframe(timeframeId: String)
 
@@ -221,6 +227,9 @@ interface TimePeriodDao {
 
     @Query("DELETE FROM time_periods WHERE id = :periodId")
     suspend fun delete(periodId: String)
+
+    @Query("DELETE FROM time_periods")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -271,6 +280,12 @@ class RoomConverters {
 
     @TypeConverter
     fun toTaskSchedulingMode(value: String): TaskSchedulingMode = TaskSchedulingMode.valueOf(value)
+
+    @TypeConverter
+    fun fromTaskKind(value: TaskKind): String = value.name
+
+    @TypeConverter
+    fun toTaskKind(value: String): TaskKind = TaskKind.valueOf(value)
 
     @TypeConverter
     fun fromTaskOverlapPolicy(value: TaskOverlapPolicy): String = value.name
@@ -363,7 +378,7 @@ class RoomConverters {
         ReminderEntity::class,
         SchedulingIssueEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)
@@ -448,6 +463,13 @@ abstract class OpenReclaimDatabase : RoomDatabase() {
         val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE reminders ADD COLUMN isAllDay INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE tasks ADD COLUMN taskKind TEXT NOT NULL DEFAULT 'NORMAL'")
+                database.execSQL("ALTER TABLE tasks ADD COLUMN notBeforeAtEpochMillis INTEGER")
             }
         }
     }

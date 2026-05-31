@@ -10,6 +10,7 @@ import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
@@ -48,11 +49,11 @@ class SchedulerEngine {
 
     fun rebuildSchedule(
         tasks: List<ScheduleTask>,
-        timeframes: List<Timeframe>,
+        timeframes: List<Timeframe> = emptyList(),
         existingBlocks: List<ScheduleBlock>,
         busyWindows: List<BusyWindow>,
         workHours: WorkHoursProfile,
-        timePeriods: List<TimePeriod>,
+        timePeriods: List<TimePeriod> = emptyList(),
         policy: SchedulingPolicy,
         rangeStart: Instant,
         reason: ScheduleRebuildReason,
@@ -71,7 +72,8 @@ class SchedulerEngine {
         val baseTasksToSchedule = tasks
             .filter { it.status == TaskStatus.ACTIVE && it.remainingMinutes > 0 }
             .sortedWith(
-                compareBy<ScheduleTask> { !it.hasDeadline }
+                compareBy<ScheduleTask> { it.taskKind != TaskKind.SLEEP }
+                    .thenBy { !it.hasDeadline }
                     .thenBy { existingAnchorByTaskId[it.id] == null }
                     .thenBy { existingAnchorByTaskId[it.id] ?: Instant.MAX }
                     .thenByDescending { taskScore(it, rangeStart, policy) }
@@ -105,7 +107,13 @@ class SchedulerEngine {
             val existingTaskBlocks = existingPendingByTaskId[task.id].orEmpty().sortedBy { it.startAt }
             var remaining = task.remainingMinutes
             val startingRemaining = remaining
-            val dependencyBoundary = dependencyBoundary(
+            val dependencyStartBoundary = dependencyStartBoundary(
+                task = task,
+                allTasksById = allTasksById,
+                existingBlocks = existingBlocks,
+                scheduledBlocks = results,
+            )
+            val dependencyEndBoundary = dependencyEndBoundary(
                 task = task,
                 allTasksById = allTasksById,
                 existingBlocks = existingBlocks,
@@ -113,24 +121,70 @@ class SchedulerEngine {
             )
             val timeframeStart = timeframe?.startDate?.atStartOfDay(zoneId)?.toInstant()
             val timeframeEnd = timeframe?.endDate?.plusDays(1)?.atStartOfDay(zoneId)?.toInstant()?.minusSeconds(1)
+            val effectiveTaskDueAt = listOfNotNull(task.dueAt, timeframeEnd, dependencyEndBoundary).minOrNull() ?: task.dueAt
             val firstBlockStart = when {
                 task.schedulingMode == TaskSchedulingMode.FIXED_DAY -> {
                     val occurrenceStart = task.dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
-                    maxInstant(maxInstant(maxInstant(rangeStart, occurrenceStart), dependencyBoundary ?: Instant.MIN), timeframeStart ?: Instant.MIN)
+                    maxInstant(
+                        maxInstant(
+                            maxInstant(
+                                maxInstant(rangeStart, occurrenceStart),
+                                dependencyStartBoundary ?: Instant.MIN,
+                            ),
+                            timeframeStart ?: Instant.MIN,
+                        ),
+                        task.notBeforeAt ?: Instant.MIN,
+                    )
                 }
                 task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW && task.fixedStartAt != null -> {
-                    maxInstant(maxInstant(maxInstant(rangeStart, task.fixedStartAt), dependencyBoundary ?: Instant.MIN), timeframeStart ?: Instant.MIN)
+                    maxInstant(
+                        maxInstant(
+                            maxInstant(
+                                maxInstant(rangeStart, task.fixedStartAt),
+                                dependencyStartBoundary ?: Instant.MIN,
+                            ),
+                            timeframeStart ?: Instant.MIN,
+                        ),
+                        task.notBeforeAt ?: Instant.MIN,
+                    )
                 }
                 task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null -> {
-                    maxInstant(maxInstant(maxInstant(rangeStart, task.fixedStartAt), dependencyBoundary ?: Instant.MIN), timeframeStart ?: Instant.MIN)
+                    maxInstant(
+                        maxInstant(
+                            maxInstant(
+                                maxInstant(rangeStart, task.fixedStartAt),
+                                dependencyStartBoundary ?: Instant.MIN,
+                            ),
+                            timeframeStart ?: Instant.MIN,
+                        ),
+                        task.notBeforeAt ?: Instant.MIN,
+                    )
                 }
                 task.recurrenceRule.type != dev.codex.reclaimoss.domain.model.RecurrenceType.NONE -> {
                     val occurrenceStart = task.dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
-                    maxInstant(maxInstant(maxInstant(rangeStart, occurrenceStart), dependencyBoundary ?: Instant.MIN), timeframeStart ?: Instant.MIN)
+                    maxInstant(
+                        maxInstant(
+                            maxInstant(
+                                maxInstant(rangeStart, occurrenceStart),
+                                dependencyStartBoundary ?: Instant.MIN,
+                            ),
+                            timeframeStart ?: Instant.MIN,
+                        ),
+                        task.notBeforeAt ?: Instant.MIN,
+                    )
                 }
                 else -> maxInstant(
-                    maxInstant(maxInstant(rangeStart, Instant.now().minus(3650, ChronoUnit.DAYS)), dependencyBoundary ?: Instant.MIN),
-                    timeframeStart ?: Instant.MIN,
+                    maxInstant(
+                        maxInstant(
+                            maxInstant(
+                                maxInstant(rangeStart, Instant.now().minus(3650, ChronoUnit.DAYS)),
+                                dependencyStartBoundary ?: Instant.MIN,
+                            ),
+                            timeframeStart ?: Instant.MIN,
+                        ),
+                        task.notBeforeAt ?: Instant.MIN,
+                    ),
+                    Instant.MIN,
                 )
             }
             var cursor = firstBlockStart
@@ -152,9 +206,11 @@ class SchedulerEngine {
                         workHours = workHours,
                         timePeriods = timePeriods,
                         rangeStart = firstBlockStart,
-                        dependencyBoundary = dependencyBoundary,
+                        dependencyStartBoundary = dependencyStartBoundary,
+                        dependencyEndBoundary = dependencyEndBoundary,
                         timeframeStart = timeframeStart,
                         timeframeEnd = timeframeEnd,
+                        effectiveDueAt = effectiveTaskDueAt,
                     )
                 }
                 if (canKeepExisting) {
@@ -177,7 +233,7 @@ class SchedulerEngine {
                 cursor = existingAnchorByTaskId[task.id]?.let { maxInstant(firstBlockStart, it) } ?: firstBlockStart
             }
 
-            while (remaining > 0 && cursor <= task.dueAt) {
+            while (remaining > 0 && cursor <= effectiveTaskDueAt) {
                 val (occupied, softOccupied) = partitionBusyWindowsForTask(
                     task = task,
                     taskBlocks = pendingBlocksPool.filter { it.taskId != task.id },
@@ -188,7 +244,7 @@ class SchedulerEngine {
                 val candidate = nextCandidate(
                     task = task,
                     cursor = cursor,
-                    dueAt = task.dueAt,
+                    dueAt = effectiveTaskDueAt,
                     timeframeEnd = timeframeEnd,
                     zoneId = zoneId,
                     workHours = workHours,
@@ -235,11 +291,11 @@ class SchedulerEngine {
                         }
                     } else {
                         if (task.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
-                            "No productive time is available on the selected date."
+                            "No valid time is available on the selected date."
                         } else if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
-                            "No productive time is available inside this time window."
+                            "No valid time is available inside this time window."
                         } else {
-                            "No valid productive slot is available before the deadline."
+                            "No valid slot is available before the deadline."
                         }
                     },
                 )
@@ -261,13 +317,17 @@ class SchedulerEngine {
         workHours: WorkHoursProfile,
         timePeriods: List<TimePeriod>,
         rangeStart: Instant,
-        dependencyBoundary: Instant?,
+        dependencyStartBoundary: Instant?,
+        dependencyEndBoundary: Instant?,
         timeframeStart: Instant?,
         timeframeEnd: Instant?,
+        effectiveDueAt: Instant,
     ): Boolean {
-        if (block.endAt > task.dueAt) return false
+        if (block.endAt > effectiveDueAt) return false
         if (block.startAt < rangeStart) return false
-        if (dependencyBoundary != null && block.startAt < dependencyBoundary) return false
+        if (dependencyStartBoundary != null && block.startAt < dependencyStartBoundary) return false
+        if (dependencyEndBoundary != null && block.endAt > dependencyEndBoundary) return false
+        if (task.notBeforeAt != null && block.startAt < task.notBeforeAt) return false
         if (timeframeStart != null && block.startAt < timeframeStart) return false
         if (timeframeEnd != null && block.endAt > timeframeEnd) return false
         if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null && block.startAt < task.fixedStartAt) return false
@@ -278,7 +338,6 @@ class SchedulerEngine {
         }
         if (occupiedWithoutSelf.any { it.startAt < block.endAt && it.endAt > block.startAt }) return false
         if (!isInsideWorkingWindow(block, zoneId, workHours)) return false
-        if (!matchesPreference(BusyWindow(block.startAt, block.endAt), zoneId, task.preferredTimePeriodId, timePeriods)) return false
         return true
     }
 
@@ -614,12 +673,7 @@ class SchedulerEngine {
         zoneId: ZoneId,
         preferredTimePeriodId: String?,
         timePeriods: List<TimePeriod>,
-    ): Boolean {
-        if (preferredTimePeriodId == null) return true
-        val preferredPeriod = timePeriods.firstOrNull { it.id == preferredTimePeriodId } ?: return false
-        val localStart = segment.startAt.atZone(zoneId).toLocalTime()
-        return localStart >= preferredPeriod.start && localStart < preferredPeriod.end
-    }
+    ): Boolean = true
 
     private fun subtractBusy(
         start: Instant,
@@ -670,7 +724,7 @@ class SchedulerEngine {
         return ordered
     }
 
-    private fun dependencyBoundary(
+    private fun dependencyStartBoundary(
         task: ScheduleTask,
         allTasksById: Map<String, ScheduleTask>,
         existingBlocks: List<ScheduleBlock>,
@@ -686,16 +740,40 @@ class SchedulerEngine {
                 latestParentEnd ?: parentTask?.dueAt
             }
             TaskContinuationMode.AFTER_PARENT_DUE_AT -> parentTask?.dueAt
+            TaskContinuationMode.BEFORE_PARENT_START -> null
+        }
+    }
+
+    private fun dependencyEndBoundary(
+        task: ScheduleTask,
+        allTasksById: Map<String, ScheduleTask>,
+        existingBlocks: List<ScheduleBlock>,
+        scheduledBlocks: List<ScheduleBlock>,
+    ): Instant? {
+        val parentId = task.continuationParentTaskId ?: return null
+        val parentTask = allTasksById[parentId]
+        return when (task.continuationMode ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END) {
+            TaskContinuationMode.BEFORE_PARENT_START -> {
+                val earliestParentStart = (existingBlocks.asSequence() + scheduledBlocks.asSequence())
+                    .filter { it.taskId == parentId }
+                    .minOfOrNull { it.startAt }
+                earliestParentStart ?: parentTask?.fixedStartAt ?: parentTask?.dueAt
+            }
+            TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+            TaskContinuationMode.AFTER_PARENT_DUE_AT -> null
         }
     }
 
     private fun taskAllowsOverlap(
         task: ScheduleTask,
         allowConcurrentTasks: Boolean,
-    ): Boolean = when (task.overlapPolicy) {
+    ): Boolean {
+        if (task.taskKind == TaskKind.SLEEP) return false
+        return when (task.overlapPolicy) {
         TaskOverlapPolicy.INHERIT -> allowConcurrentTasks
         TaskOverlapPolicy.ALLOW -> true
         TaskOverlapPolicy.DISALLOW -> false
+    }
     }
 
     private fun tasksCanOverlap(
@@ -716,7 +794,8 @@ class SchedulerEngine {
             0.0
         }
         val priority = policy.priorityWeight * task.priority.score.toDouble()
-        return urgency + priority
+        val taskKindBoost = if (task.taskKind == TaskKind.SLEEP) 1000.0 else 0.0
+        return taskKindBoost + urgency + priority
     }
 
     private fun minInstant(a: Instant, b: Instant): Instant = if (a <= b) a else b

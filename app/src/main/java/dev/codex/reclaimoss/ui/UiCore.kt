@@ -109,6 +109,7 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskPriority
@@ -339,6 +340,38 @@ class PlannerViewModel(
             fixedStartAt = draft.schedulingStartInstantOrNull(),
             fixedEndAt = draft.fixedEndAtInstantOrNull(),
         )
+    }
+
+    suspend fun completeSleepOnboarding(entries: List<SleepOnboardingEntryDraft>) {
+        entries.forEach { entry ->
+            val occurrence = nextSleepOccurrence(entry, ZoneId.systemDefault())
+            coordinator.createTask(
+                title = "Sleep",
+                description = "",
+                priority = TaskPriority.URGENT,
+                preferredTimePeriodId = null,
+                taskKind = TaskKind.SLEEP,
+                dueAt = occurrence.startAt,
+                hasDeadline = true,
+                continuationParentTaskId = null,
+                continuationMode = null,
+                overlapPolicy = TaskOverlapPolicy.DISALLOW,
+                recurrenceRule = RecurrenceRule(
+                    type = RecurrenceType.WEEKLY,
+                    interval = 1,
+                    daysOfWeek = entry.weekdays,
+                    until = null,
+                    endMode = RecurrenceEndMode.NEVER,
+                    occurrenceCount = null,
+                ),
+                estimatedMinutes = entry.durationMinutes,
+                addReminder = false,
+                schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+                notBeforeAt = null,
+                fixedStartAt = occurrence.startAt,
+                fixedEndAt = occurrence.endAt,
+            )
+        }
     }
 
     suspend fun addFollowUpTask(sourceTaskId: String, draft: TaskDraft): TaskCreationResult? {
@@ -633,6 +666,31 @@ private fun TaskDraft.fixedEndAtInstantOrNull(): Instant? =
         TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
         else -> null
     }
+
+private data class SleepOccurrence(
+    val startAt: Instant,
+    val endAt: Instant,
+)
+
+private fun nextSleepOccurrence(
+    entry: SleepOnboardingEntryDraft,
+    zoneId: ZoneId,
+    now: LocalDateTime = LocalDateTime.now(zoneId),
+): SleepOccurrence {
+    require(entry.weekdays.isNotEmpty())
+    val nextDate = generateSequence(now.toLocalDate()) { it.plusDays(1) }
+        .first { it.dayOfWeek in entry.weekdays }
+    var startAt = LocalDateTime.of(nextDate, entry.windowStart)
+    if (startAt.isBefore(now)) {
+        startAt = generateSequence(nextDate.plusDays(1)) { it.plusDays(1) }
+            .first { it.dayOfWeek in entry.weekdays }
+            .atTime(entry.windowStart)
+    }
+    return SleepOccurrence(
+        startAt = startAt.atZone(zoneId).toInstant(),
+        endAt = startAt.plusMinutes(entry.durationMinutes.toLong()).atZone(zoneId).toInstant(),
+    )
+}
 
 fun Timeframe.toDraft(): TimeframeDraft = TimeframeDraft(
     id = id,

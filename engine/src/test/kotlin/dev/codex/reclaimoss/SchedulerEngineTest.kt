@@ -236,7 +236,7 @@ class SchedulerEngineTest {
     }
 
     @Test
-    fun `preferred time period is used before other open slots`() {
+    fun `earliest same day slot is used when preferred periods are inactive`() {
         val date = LocalDate.of(2026, 5, 19)
         val task = task(
             id = "task-morning",
@@ -258,11 +258,11 @@ class SchedulerEngineTest {
             reason = ScheduleRebuildReason.ManualRebuild,
         )
 
-        assertEquals(LocalTime.of(13, 0), plan.blocks.single().startAt.atZone(zone).toLocalTime())
+        assertEquals(LocalTime.of(9, 0), plan.blocks.single().startAt.atZone(zone).toLocalTime())
     }
 
     @Test
-    fun `preferred time period wins across days before same day fallback`() {
+    fun `same day availability beats a later day when preferred periods are inactive`() {
         val date = LocalDate.of(2026, 5, 19)
         val task = task(
             id = "task-next-morning",
@@ -285,8 +285,8 @@ class SchedulerEngineTest {
         )
 
         val scheduled = plan.blocks.single()
-        assertEquals(date.plusDays(1), scheduled.startAt.atZone(zone).toLocalDate())
-        assertEquals(LocalTime.of(9, 0), scheduled.startAt.atZone(zone).toLocalTime())
+        assertEquals(date, scheduled.startAt.atZone(zone).toLocalDate())
+        assertEquals(LocalTime.of(13, 30), scheduled.startAt.atZone(zone).toLocalTime())
     }
 
     @Test
@@ -628,20 +628,26 @@ class SchedulerEngineTest {
     fun `allow concurrent tasks schedules overlapping work blocks`() {
         val date = LocalDate.of(2026, 5, 19)
         val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
-        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(13, 0), LocalTime.of(15, 0))))
+            },
+        )
         val first = task(
             id = "first-overlap",
             deadline = dueAt,
-            estimatedMinutes = 180,
-            remainingMinutes = 180,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
             priority = TaskPriority.MEDIUM,
             preferredTimePeriodId = "period-afternoon",
         )
         val second = task(
             id = "second-overlap",
             deadline = dueAt,
-            estimatedMinutes = 180,
-            remainingMinutes = 180,
+            estimatedMinutes = 120,
+            remainingMinutes = 120,
             priority = TaskPriority.MEDIUM,
             preferredTimePeriodId = "period-afternoon",
         )
@@ -650,16 +656,24 @@ class SchedulerEngineTest {
             tasks = listOf(first, second),
             existingBlocks = emptyList(),
             busyWindows = emptyList(),
-            workHours = workHours,
+            workHours = afternoonOnly,
             timePeriods = timePeriods,
             policy = concurrentPolicy,
             rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
             reason = ScheduleRebuildReason.ManualRebuild,
         )
 
-        val firstBlock = plan.blocks.first { it.taskId == first.id }
-        val secondBlock = plan.blocks.first { it.taskId == second.id }
-        assertTrue(firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt)
+        val firstBlocks = plan.blocks.filter { it.taskId == first.id }
+        val secondBlocks = plan.blocks.filter { it.taskId == second.id }
+        assertTrue(firstBlocks.isNotEmpty())
+        assertTrue(secondBlocks.isNotEmpty())
+        assertTrue(
+            firstBlocks.any { firstBlock ->
+                secondBlocks.any { secondBlock ->
+                    firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt
+                }
+            },
+        )
     }
 
     @Test
@@ -705,7 +719,13 @@ class SchedulerEngineTest {
     @Test
     fun `task allow overlap can opt into concurrency when global setting is off`() {
         val date = LocalDate.of(2026, 5, 19)
-        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(13, 0), LocalTime.of(15, 0))))
+            },
+        )
         val first = task(
             id = "opt-in-first",
             deadline = dueAt,
@@ -729,7 +749,7 @@ class SchedulerEngineTest {
             tasks = listOf(first, second),
             existingBlocks = emptyList(),
             busyWindows = emptyList(),
-            workHours = workHours,
+            workHours = afternoonOnly,
             timePeriods = timePeriods,
             policy = policy.copy(allowConcurrentTasks = false),
             rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),

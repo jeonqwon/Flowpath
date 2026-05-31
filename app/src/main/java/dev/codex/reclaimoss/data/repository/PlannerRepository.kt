@@ -28,6 +28,7 @@ import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.TimePeriod
@@ -76,6 +77,7 @@ interface PlannerRepository {
     fun observeReminders(): Flow<List<Reminder>>
     suspend fun getSchedulingIssues(): List<SchedulingIssue>
     suspend fun replaceSchedulingIssuesForTask(taskId: String, issues: List<SchedulingIssue>)
+    suspend fun clearLegacyDailyFlowData()
     suspend fun seedDemoDataIfEmpty()
 }
 
@@ -220,6 +222,11 @@ class PlannerRepositoryImpl(
         schedulingIssueDao.upsertAll(issues.map { it.toEntity() })
     }
 
+    override suspend fun clearLegacyDailyFlowData() {
+        taskDao.clearAllPreferredTimePeriods()
+        timePeriodDao.deleteAll()
+    }
+
     override suspend fun seedDemoDataIfEmpty() {
     }
 }
@@ -239,6 +246,7 @@ private fun TaskEntity.toDomain() = ScheduleTask(
     timeframeId = timeframeId,
     title = title,
     description = description,
+    taskKind = taskKind,
     priority = priority,
     preferredTimeOfDay = preferredTimeOfDay,
     preferredTimePeriodId = preferredTimePeriodId,
@@ -247,6 +255,7 @@ private fun TaskEntity.toDomain() = ScheduleTask(
     continuationMode = continuationMode,
     overlapPolicy = overlapPolicy,
     schedulingMode = schedulingMode,
+    notBeforeAt = notBeforeAtEpochMillis?.let(Instant::ofEpochMilli),
     fixedStartAt = fixedStartAtEpochMillis?.let(Instant::ofEpochMilli),
     fixedEndAt = fixedEndAtEpochMillis?.let(Instant::ofEpochMilli),
     dueAt = Instant.ofEpochMilli(dueAtEpochMillis),
@@ -276,6 +285,7 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     timeframeId = timeframeId,
     title = title,
     description = description,
+    taskKind = taskKind,
     priority = priority,
     preferredTimeOfDay = preferredTimeOfDay,
     preferredTimePeriodId = preferredTimePeriodId,
@@ -284,6 +294,7 @@ private fun ScheduleTask.toEntity() = TaskEntity(
     continuationMode = continuationMode,
     overlapPolicy = overlapPolicy,
     schedulingMode = schedulingMode,
+    notBeforeAtEpochMillis = notBeforeAt?.toEpochMilli(),
     fixedStartAtEpochMillis = fixedStartAt?.toEpochMilli(),
     fixedEndAtEpochMillis = fixedEndAt?.toEpochMilli(),
     dueAtEpochMillis = dueAt.toEpochMilli(),

@@ -1217,7 +1217,7 @@ fun ContinuationSection(
     onParentSelected: (String?) -> Unit,
     onModeSelected: (TaskContinuationMode) -> Unit,
 ) {
-    TaskSectionTitle("Continue after")
+    TaskSectionTitle("Dependency")
     var expanded by remember { mutableStateOf(false) }
     val selectedTask = tasks.firstOrNull { it.id == selectedParentTaskId }
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -1284,6 +1284,7 @@ fun ContinuationSection(
             listOf(
                 TaskContinuationMode.AFTER_PARENT_SCHEDULED_END to "After task time",
                 TaskContinuationMode.AFTER_PARENT_DUE_AT to "After due time",
+                TaskContinuationMode.BEFORE_PARENT_START to "Finish first",
             ).forEach { (mode, label) ->
                 FilterChip(
                     selected = selectedMode == mode,

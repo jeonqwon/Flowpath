@@ -78,9 +78,15 @@ enum class TaskSchedulingMode {
     FIXED_EXACT,
 }
 
+enum class TaskKind {
+    NORMAL,
+    SLEEP,
+}
+
 enum class TaskContinuationMode {
     AFTER_PARENT_SCHEDULED_END,
     AFTER_PARENT_DUE_AT,
+    BEFORE_PARENT_START,
 }
 
 enum class TaskOverlapPolicy {
@@ -187,6 +193,7 @@ data class ScheduleTask(
     val description: String = "",
     val projectId: String? = null,
     val timeframeId: String? = null,
+    val taskKind: TaskKind = TaskKind.NORMAL,
     val priority: TaskPriority,
     val preferredTimeOfDay: PreferredTimeOfDay = PreferredTimeOfDay.ANYTIME,
     val preferredTimePeriodId: String? = null,
@@ -195,6 +202,7 @@ data class ScheduleTask(
     val continuationMode: TaskContinuationMode? = null,
     val overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+    val notBeforeAt: Instant? = null,
     val fixedStartAt: Instant? = null,
     val fixedEndAt: Instant? = null,
     val dueAt: Instant,

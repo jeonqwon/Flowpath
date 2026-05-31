@@ -111,10 +111,9 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
-import dev.codex.reclaimoss.domain.model.TimePeriod
-import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
@@ -151,7 +150,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
-    var onboardingStep by rememberSaveable { mutableStateOf<OnboardingStep?>(null) }
     var onboardingDismissedThisSession by rememberSaveable { mutableStateOf(false) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -187,12 +185,16 @@ fun OpenReclaimApp(appGraph: AppGraph) {
 
     val shouldShowOnboarding = state.settingsLoaded &&
         !state.settings.hasCompletedOnboarding &&
-        !onboardingDismissedThisSession
+        !onboardingDismissedThisSession &&
+        !hasCompleteSleepCoverage(state.snapshot.tasks)
 
-    LaunchedEffect(shouldShowOnboarding, onboardingStep) {
-        if (shouldShowOnboarding) {
-            selectedTab = AppTab.Settings
-            if (onboardingStep == null) onboardingStep = OnboardingStep.Sleep
+    LaunchedEffect(state.settingsLoaded, state.settings.hasCompletedOnboarding, state.snapshot.tasks) {
+        if (
+            state.settingsLoaded &&
+            !state.settings.hasCompletedOnboarding &&
+            hasCompleteSleepCoverage(state.snapshot.tasks)
+        ) {
+            viewModel.setHasCompletedOnboarding(true)
         }
     }
     LaunchedEffect(pagerState) {
@@ -229,49 +231,16 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         selectedTaskId = null
     }
 
-    if (shouldShowOnboarding && onboardingStep != null && onboardingStep != OnboardingStep.DailyFlow) {
-        val step = onboardingStep!!
-        val initialRange = existingOnboardingRange(step, state.snapshot.timePeriods)
-        OnboardingSetupScreen(
-            step = step,
-            initialRange = initialRange,
+    if (shouldShowOnboarding) {
+        SleepOnboardingScreen(
             errorMessage = onboardingErrorMessage,
-            onNext = { range ->
+            onComplete = { entries ->
                 scope.launch {
-                    val existingPeriod = existingOnboardingPeriod(step, state.snapshot.timePeriods)
-                    val period = onboardingPeriodForStep(step, range, existingPeriod)
-                    val overlap = findOverlappingTimePeriod(period, state.snapshot.timePeriods)
-                    if (overlap != null) {
-                        onboardingErrorMessage = timePeriodOverlapMessage(period.label, overlap)
-                    } else {
-                        onboardingErrorMessage = null
-                        viewModel.saveTimePeriod(
-                            TimePeriodDraft(
-                                id = period.id,
-                                label = period.label,
-                                start = period.start,
-                                end = period.end,
-                                boundStart = LocalTime.MIDNIGHT,
-                                boundEnd = LocalTime.MIDNIGHT,
-                                type = period.type,
-                                sortOrder = period.sortOrder,
-                            ),
-                        )
-                        onboardingStep = step.nextStep()
-                    }
-                }
-            },
-            onSkip = if (step == OnboardingStep.Sleep) {
-                null
-            } else {
-                {
-                    scope.launch {
-                        onboardingErrorMessage = null
-                        existingOnboardingPeriod(step, state.snapshot.timePeriods)?.id?.let { periodId ->
-                            viewModel.deleteTimePeriod(periodId)
-                        }
-                        onboardingStep = step.nextStep()
-                    }
+                    onboardingErrorMessage = null
+                    viewModel.completeSleepOnboarding(entries)
+                    viewModel.setHasCompletedOnboarding(true)
+                    onboardingDismissedThisSession = true
+                    selectedTab = AppTab.Tasks
                 }
             },
         )
@@ -669,32 +638,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     padding = padding,
                     periods = state.snapshot.timePeriods,
                     settings = state.settings,
-                    startInDailyFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                    startInEditFlow = shouldShowOnboarding || onboardingStep == OnboardingStep.DailyFlow,
-                    showDailyFlowOnboardingPrompt = shouldShowOnboarding,
-                    onSavePeriod = { draft ->
-                        scope.launch {
-                            val isFirstProductiveOnboardingPeriod =
-                                shouldShowOnboarding &&
-                                    draft.type == TimePeriodType.PRODUCTIVE &&
-                                    state.snapshot.timePeriods.none { it.type == TimePeriodType.PRODUCTIVE }
-                            viewModel.saveTimePeriod(draft)
-                            if (isFirstProductiveOnboardingPeriod) {
-                                onboardingDismissedThisSession = true
-                                onboardingStep = null
-                                viewModel.setHasCompletedOnboarding(true)
-                                snackbarHostState.showSnackbar("Productive time added. Keep setting up your day or head to Tasks when you're ready.")
-                            } else {
-                                snackbarHostState.showSnackbar("Time period saved")
-                            }
-                        }
-                    },
-                    onDeletePeriod = { periodId ->
-                        scope.launch {
-                            viewModel.deleteTimePeriod(periodId)
-                            snackbarHostState.showSnackbar("Time period deleted")
-                        }
-                    },
+                    startInDailyFlow = false,
+                    startInEditFlow = false,
+                    showDailyFlowOnboardingPrompt = false,
+                    onSavePeriod = {},
+                    onDeletePeriod = {},
                     onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
                     onFontSizeScaleChanged = { value -> scope.launch { viewModel.setFontSizeScale(value) } },
                     onDateFormatPreferenceChanged = { value -> scope.launch { viewModel.setDateFormatPreference(value) } },
@@ -708,18 +656,30 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
                     onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
                     onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
-                    onFinishDailyFlowOnboarding = {
-                        onboardingDismissedThisSession = true
-                        onboardingStep = null
-                        navigateToTab(AppTab.Tasks)
-                        scope.launch { viewModel.setHasCompletedOnboarding(true) }
-                    },
+                    onFinishDailyFlowOnboarding = {},
                     isActive = selectedTab == AppTab.Settings,
                 )
             }
         }
     }
 }
+
+private fun hasCompleteSleepCoverage(tasks: List<ScheduleTask>): Boolean =
+    coveredSleepWeekdays(
+        tasks.filter { it.taskKind == TaskKind.SLEEP }.mapNotNull { task ->
+            val weekdays = task.recurrenceRule.daysOfWeek
+            if (weekdays.isEmpty()) {
+                null
+            } else {
+                SleepOnboardingEntryDraft(
+                    weekdays = weekdays,
+                    windowStart = task.fixedStartAt?.atZone(ZoneId.systemDefault())?.toLocalTime() ?: LocalTime.of(22, 0),
+                    windowEnd = task.fixedEndAt?.atZone(ZoneId.systemDefault())?.toLocalTime() ?: LocalTime.of(8, 0),
+                    durationMinutes = task.estimatedMinutes,
+                )
+            }
+        },
+    ).size == DayOfWeek.entries.size
 
 @Composable
 private fun InitialLoadingScreen() {

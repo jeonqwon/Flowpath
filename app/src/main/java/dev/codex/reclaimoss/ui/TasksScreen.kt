@@ -113,8 +113,6 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
-import dev.codex.reclaimoss.domain.model.TimePeriod
-import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
@@ -158,9 +156,6 @@ fun TasksScreen(
             .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
     }
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
-    val lifePeriods = remember(state.snapshot.timePeriods) {
-        state.snapshot.timePeriods.filter { it.type == TimePeriodType.LIFE }
-    }
     val hourHeight = 144.dp
     val darkThemeHeader = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val todayHeaderColor = if (darkThemeHeader) {
@@ -243,7 +238,6 @@ fun TasksScreen(
             item {
                 FullDayTimeline(
                     blocks = blocksToday,
-                    lifePeriods = lifePeriods,
                     tasksById = tasksById,
                     zoneId = zoneId,
                     day = selectedDate,
@@ -288,7 +282,6 @@ fun HeaderActionButton(
 @Composable
 fun FullDayTimeline(
     blocks: List<ScheduleBlock>,
-    lifePeriods: List<TimePeriod>,
     tasksById: Map<String, ScheduleTask>,
     zoneId: ZoneId,
     day: LocalDate,
@@ -343,13 +336,6 @@ fun FullDayTimeline(
                 .height(timelineHeight)
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         )
-        lifePeriods.forEach { period ->
-            FullDayLifeBlock(
-                period = period,
-                labelWidth = labelWidth,
-                hourHeight = hourHeight,
-            )
-        }
         positionedBlocks.forEach { positioned ->
             FullDayTaskBlock(
                 positionedBlock = positioned,
@@ -487,39 +473,6 @@ fun FullDayTaskBlock(
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-fun FullDayLifeBlock(
-    period: TimePeriod,
-    labelWidth: Dp,
-    hourHeight: Dp,
-) {
-    val top = timelineOffset(minutes = minutesFromStart(period.start), hourHeight = hourHeight)
-    val height = timelineBlockHeight(
-        minutes = periodDurationMinutes(period.start, period.end),
-        hourHeight = hourHeight,
-        minHeight = 64.dp,
-    )
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = labelWidth + 8.dp)
-            .height(height)
-            .offset(y = top),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                period.label,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

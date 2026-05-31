@@ -150,7 +150,7 @@ private enum class SettingsSection(val title: String) {
 private enum class SettingsHubGroup(val title: String, val sections: List<SettingsSection>) {
     Schedule(
         "Schedule",
-        listOf(SettingsSection.DailyFlow, SettingsSection.TaskRules),
+        listOf(SettingsSection.TaskRules),
     ),
     Preferences(
         "Preferences",
@@ -188,21 +188,16 @@ fun SettingsScreen(
     var editingPeriod by remember { mutableStateOf<TimePeriodDraft?>(null) }
     var editingPeriodError by remember { mutableStateOf<String?>(null) }
     var editFlow by rememberSaveable { mutableStateOf(startInEditFlow) }
-    var section by rememberSaveable { mutableStateOf<SettingsSection?>(if (startInDailyFlow) SettingsSection.DailyFlow else null) }
+    var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
 
-    LaunchedEffect(startInDailyFlow) {
-        if (startInDailyFlow && section == null) {
-            section = SettingsSection.DailyFlow
-        }
-    }
     LaunchedEffect(startInEditFlow, section) {
         if (startInEditFlow && section == SettingsSection.DailyFlow) {
             editFlow = true
         }
     }
-    LaunchedEffect(isActive, startInDailyFlow) {
+    LaunchedEffect(isActive) {
         if (!isActive) {
-            section = if (startInDailyFlow) SettingsSection.DailyFlow else null
+            section = null
             editFlow = false
         }
     }
@@ -263,7 +258,6 @@ fun SettingsScreen(
                     contentPadding = PaddingValues(bottom = 120.dp),
                 ) {
                     listOf(
-                        SettingsSection.DailyFlow,
                         SettingsSection.TaskRules,
                         SettingsSection.Appearance,
                         SettingsSection.Reminders,
