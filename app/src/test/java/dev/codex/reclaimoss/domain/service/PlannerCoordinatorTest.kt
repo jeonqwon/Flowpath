@@ -919,6 +919,68 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `rescheduling fixed exact task outside productive hours restores original reminder timing`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val originalStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(9, 0).atZone(zone).toInstant()
+        val originalEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(10, 0).atZone(zone).toInstant()
+        val task = task(
+            id = "reschedule-after-hours",
+            dueAt = originalEnd,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+        ).copy(
+            title = "Reschedule after hours",
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = originalStart,
+            fixedEndAt = originalEnd,
+        )
+        repository.upsertTask(task)
+        repository.replaceFlexibleBlocks(
+            task.id,
+            listOf(
+                block(task.id, "original-after-hours", originalStart, originalEnd).copy(
+                    source = BlockSource.MANUAL,
+                    lockState = BlockLockState.LOCKED,
+                ),
+            ),
+        )
+        coordinator.createReminderForTask(task.id)
+        val afterHoursStart = now().atZone(zone).toLocalDate().plusDays(2).atTime(18, 0).atZone(zone).toInstant()
+        val afterHoursEnd = now().atZone(zone).toLocalDate().plusDays(2).atTime(18, 30).atZone(zone).toInstant()
+
+        val result = coordinator.rescheduleTaskWithUpdate(
+            taskId = task.id,
+            title = "Reschedule after hours",
+            description = task.description,
+            priority = task.priority,
+            dueAt = afterHoursEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 30,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = afterHoursStart,
+            fixedEndAt = afterHoursEnd,
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("This fixed time is outside your productive hours.", result.reason)
+        val restoredTask = repository.getTasks().single { it.id == task.id }
+        val restoredBlock = repository.getBlocks().single { it.taskId == task.id }
+        val restoredReminder = repository.getReminders().single { it.linkedTaskId == task.id }
+        assertEquals(originalStart, restoredTask.fixedStartAt)
+        assertEquals(originalEnd, restoredTask.fixedEndAt)
+        assertEquals(originalStart, restoredBlock.startAt)
+        assertEquals(originalEnd, restoredBlock.endAt)
+        assertEquals(originalEnd, restoredReminder.dueAt)
+    }
+
+    @Test
     fun `urgent reschedule preserves deadline unless a new deadline is supplied`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)
