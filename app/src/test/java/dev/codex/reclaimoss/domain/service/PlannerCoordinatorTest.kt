@@ -589,6 +589,38 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `creating fixed exact task reports when time is outside productive hours`() = runTest {
+        val repository = FakePlannerRepository(
+            periods = mutableListOf(
+                TimePeriod("period-morning", "Morning", LocalTime.of(9, 0), LocalTime.of(12, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 0),
+                TimePeriod("period-afternoon", "Afternoon", LocalTime.of(13, 0), LocalTime.of(17, 0), type = TimePeriodType.PRODUCTIVE, sortOrder = 1),
+            ),
+        )
+        val coordinator = coordinator(repository)
+        val exactStart = now().atZone(zone).toLocalDate().plusDays(1).atTime(18, 0).atZone(zone).toInstant()
+        val exactEnd = now().atZone(zone).toLocalDate().plusDays(1).atTime(18, 30).atZone(zone).toInstant()
+
+        val result = coordinator.createTask(
+            title = "After-hours call",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = exactEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 30,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = exactStart,
+            fixedEndAt = exactEnd,
+        )
+
+        assertFalse(result.scheduled)
+        assertEquals("This fixed time is outside your productive hours.", result.reason)
+        assertTrue(repository.getTasks().none { it.id == result.taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+    }
+
+    @Test
     fun `creating fixed day task only schedules on the chosen day`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)

@@ -659,6 +659,7 @@ class PlannerCoordinator(
         val rangeStart = startAt.minus(1, ChronoUnit.DAYS)
         val rangeEnd = endAt.plus(1, ChronoUnit.DAYS)
         val timePeriods = repository.getTimePeriods()
+        val productiveWorkHours = workHoursFromProductivePeriods(timePeriods)
         val hardBusyWindows = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) +
             lifePeriodBusyWindows(timePeriods, rangeStart, rangeEnd) +
             repository.getBlocks()
@@ -677,9 +678,10 @@ class PlannerCoordinator(
                 otherTask == null || !tasksCanOverlap(task, otherTask, allowConcurrent)
             }
             .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
+        val outsideProductiveHours = !isInsideWorkHours(startAt, endAt, productiveWorkHours)
         val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
         val overlapsOtherTask = otherTaskBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
-        if (overlapsHardBlock || overlapsOtherTask) {
+        if (outsideProductiveHours || overlapsHardBlock || overlapsOtherTask) {
             repository.replaceSchedulingIssuesForTask(
                 taskId,
                 listOf(
@@ -689,6 +691,7 @@ class PlannerCoordinator(
                         unscheduledMinutes = task.remainingMinutes,
                         reason = when {
                             overlapsHardBlock -> "This fixed time overlaps a break, sleep, or other blocked time."
+                            outsideProductiveHours -> "This fixed time is outside your productive hours."
                             else -> "This fixed time overlaps another task."
                         },
                     ),
@@ -895,6 +898,21 @@ class PlannerCoordinator(
             timezone = zoneId().id,
             days = DayOfWeek.entries.associateWith { WorkHoursDay(productiveWindows) },
         )
+    }
+
+    private fun isInsideWorkHours(
+        startAt: Instant,
+        endAt: Instant,
+        workHours: WorkHoursProfile,
+    ): Boolean {
+        val zoneId = ZoneId.of(workHours.timezone)
+        val localStart = startAt.atZone(zoneId)
+        val localEnd = endAt.atZone(zoneId)
+        if (localStart.toLocalDate() != localEnd.toLocalDate()) return false
+        val day = workHours.days[localStart.dayOfWeek] ?: return false
+        return day.windows.any { window ->
+            localStart.toLocalTime() >= window.start && localEnd.toLocalTime() <= window.end
+        }
     }
 
     private fun lifePeriodBusyWindows(
