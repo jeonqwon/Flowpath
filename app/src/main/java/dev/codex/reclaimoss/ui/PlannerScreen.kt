@@ -166,7 +166,6 @@ fun PlannerScreen(
         activeBlocks.groupBy { it.startAt.atZone(zoneId).toLocalDate() }
     }
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
-    val periodsById = remember(state.snapshot.timePeriods) { state.snapshot.timePeriods.associateBy { it.id } }
     val remindersByDate = remember(state.snapshot.reminders) {
         state.snapshot.reminders
             .filter { it.status != ReminderStatus.COMPLETED }
@@ -249,7 +248,7 @@ fun PlannerScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+            HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -419,7 +418,7 @@ fun PlannerDayScreen(
             }
         }
         if (dayBlocks.isEmpty() && dayReminders.isEmpty()) {
-            item { EmptyCard("No tasks or reminders scheduled for this day yet.") }
+            item { EmptyCard("Nothing scheduled.") }
         } else {
             if (dayBlocks.isNotEmpty()) {
                 item {
@@ -431,7 +430,6 @@ fun PlannerDayScreen(
                 DayTaskCard(
                     block = block,
                     task = task,
-                    periodLabel = task?.preferredTimePeriodId?.let { periodsById[it]?.label } ?: "Anytime",
                     zoneId = zoneId,
                     onToggleLock = { onToggleLock(block) },
                     onMarkDone = { onMarkDone(block) },
@@ -799,7 +797,6 @@ internal fun parseTimeframeColor(colorHex: String): Color = runCatching {
 fun DayTaskCard(
     block: ScheduleBlock,
     task: ScheduleTask?,
-    periodLabel: String,
     zoneId: ZoneId,
     onToggleLock: () -> Unit,
     onMarkDone: () -> Unit,
@@ -822,7 +819,7 @@ fun DayTaskCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(task?.title ?: block.taskId, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Text(
-                    "Priority ${task?.priority?.name?.titlecase() ?: "Medium"} • $periodLabel",
+                    "Priority ${task?.priority?.name?.titlecase() ?: "Medium"}",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

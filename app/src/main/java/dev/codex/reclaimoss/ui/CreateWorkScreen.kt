@@ -117,7 +117,6 @@ import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TimePeriod
-import dev.codex.reclaimoss.domain.model.TimePeriodType
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
@@ -174,7 +173,7 @@ fun CreateModeSwitch(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(999.dp),
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Row(modifier = Modifier.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -192,7 +191,7 @@ fun CreateModeSwitch(
                         Text(
                             option.label,
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -282,7 +281,7 @@ fun CreateWorkScreen(
             },
         ),
     ) {
-        mutableStateOf(initialTaskDraft ?: TaskDraft(preferredTimePeriodId = periods.firstOrNull { it.type == TimePeriodType.PRODUCTIVE }?.id))
+        mutableStateOf(initialTaskDraft ?: TaskDraft())
     }
     var reminderDraft by rememberSaveable(
         sessionKey,
@@ -457,16 +456,6 @@ fun CreateWorkScreen(
                                     context = context,
                                 )
                             }
-                        }
-                        if (taskDraft.schedulingMode != TaskSchedulingMode.FIXED_EXACT) {
-                            TaskSectionTitle("Preferred period")
-                            PreferredPeriodDropdown(
-                                periods = periods,
-                                selectedPeriodId = taskDraft.preferredTimePeriodId,
-                                onSelected = { periodId ->
-                                    taskDraft = taskDraft.copy(preferredTimePeriodId = periodId)
-                                },
-                            )
                         }
                         TaskSectionTitle("Timeframe")
                         TimeframeDropdown(
@@ -1135,93 +1124,6 @@ fun DateTimePickerCard(
 }
 
 @Composable
-fun PreferredPeriodDropdown(
-    periods: List<TimePeriod>,
-    selectedPeriodId: String?,
-    onSelected: (String?) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val productivePeriods = remember(periods) {
-        periods
-            .filter { it.type == TimePeriodType.PRODUCTIVE }
-            .sortedWith(compareBy<TimePeriod> { minutesFromStartForCreate(it.start) }.thenBy { it.sortOrder })
-    }
-    val selectedPeriod = productivePeriods.firstOrNull { it.id == selectedPeriodId }
-    val selectedLabel = selectedPeriod?.let { periodDropdownLabelForCreate(it) } ?: "Anytime"
-
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true },
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    selectedLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("v", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .fillMaxWidth(0.88f)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
-        ) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        "Anytime",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (selectedPeriodId == null) FontWeight.Bold else FontWeight.Normal,
-                    )
-                },
-                onClick = {
-                    onSelected(null)
-                    expanded = false
-                },
-            )
-            productivePeriods.forEach { period ->
-                DropdownMenuItem(
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                period.label,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = if (selectedPeriodId == period.id) FontWeight.Bold else FontWeight.Normal,
-                            )
-                            Text(
-                                "${period.start.formatAsClockForCreate()} - ${period.end.formatAsClockForCreate()}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    },
-                    onClick = {
-                        onSelected(period.id)
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 fun TimeframeDropdown(
     timeframes: List<Timeframe>,
     selectedTimeframeId: String?,
@@ -1512,12 +1414,6 @@ private fun Set<DayOfWeek>.toggleForCreate(day: DayOfWeek): Set<DayOfWeek> =
 
 private fun LocalTime.formatAsClockForCreate(): String =
     format(DateTimeFormatter.ofPattern("h:mm a"))
-
-private fun minutesFromStartForCreate(time: LocalTime): Int =
-    time.hour * 60 + time.minute
-
-private fun periodDropdownLabelForCreate(period: TimePeriod): String =
-    "${period.label} - ${period.start.formatAsClockForCreate()} - ${period.end.formatAsClockForCreate()}"
 
 private fun snapToStepForCreate(value: Int, step: Int): Int =
     ((value + step / 2) / step) * step

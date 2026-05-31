@@ -320,11 +320,6 @@ fun SettingsScreen(
                         SettingsSection.Appearance -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsControlRow(
                                 title = "Theme",
-                                subtitle = when (settings.themeMode) {
-                                    ThemeMode.SYSTEM -> "Follow device theme"
-                                    ThemeMode.LIGHT -> "Always use light mode"
-                                    ThemeMode.DARK -> "Always use dark mode"
-                                },
                             ) {
                                 SegmentedEnumRow(
                                     options = ThemeMode.entries,
@@ -341,7 +336,6 @@ fun SettingsScreen(
                             }
                             SettingsControlRow(
                                 title = "Font size",
-                                subtitle = "Scale text across the app",
                             ) {
                                 SegmentedEnumRow(
                                     options = FontSizeScale.entries,
@@ -359,7 +353,6 @@ fun SettingsScreen(
                             }
                             SettingsControlRow(
                                 title = "Date format",
-                                subtitle = "Choose how dates appear across the app",
                             ) {
                                 SegmentedEnumRow(
                                     options = DateFormatPreference.entries,
@@ -378,7 +371,6 @@ fun SettingsScreen(
                         SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             SettingsControlRow(
                                 title = "Break buffer",
-                                subtitle = "Gap after each work task",
                             ) {
                                 DurationSlider(
                                     minutes = settings.breakBufferMinutes,
@@ -389,7 +381,6 @@ fun SettingsScreen(
                             }
                             SettingsControlRow(
                                 title = "Task alignment",
-                                subtitle = "Snap task starts to fixed intervals",
                             ) {
                                 SegmentedEnumRow(
                                     options = listOf(15, 30, 60),
@@ -406,19 +397,16 @@ fun SettingsScreen(
                             }
                             SettingsInlineSwitchRow(
                                 title = "Allow task splitting",
-                                subtitle = "Break long tasks across open slots",
                                 checked = settings.allowTaskSplitting,
                                 onCheckedChange = onAllowTaskSplittingChanged,
                             )
                             SettingsInlineSwitchRow(
                                 title = "Allow concurrent tasks",
-                                subtitle = "Let tasks overlap side by side when needed",
                                 checked = settings.allowConcurrentTasks,
                                 onCheckedChange = onAllowConcurrentTasksChanged,
                             )
                             SettingsControlRow(
                                 title = "Max task chunk",
-                                subtitle = "Longest block before a task can split",
                             ) {
                                 DurationSlider(
                                     minutes = settings.maxTaskChunkMinutes,
@@ -431,13 +419,11 @@ fun SettingsScreen(
                         SettingsSection.Reminders -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsInlineSwitchRow(
                                 title = "Default reminder for tasks",
-                                subtitle = if (settings.defaultTaskReminder) "New tasks also create reminders" else "New tasks stay reminder-free",
                                 checked = settings.defaultTaskReminder,
                                 onCheckedChange = onDefaultTaskReminderChanged,
                             )
                             SettingsControlRow(
                                 title = "Reminder timing for tasks",
-                                subtitle = "Choose when linked reminders should appear",
                             ) {
                                 SegmentedEnumRow(
                                     options = ReminderTimingMode.entries,
@@ -456,7 +442,6 @@ fun SettingsScreen(
                         SettingsSection.History -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsControlRow(
                                 title = "Keep completed tasks",
-                                subtitle = "How long completed work stays visible",
                             ) {
                                 EnumDropdownRow(
                                     title = "Retention",
@@ -820,7 +805,6 @@ fun SettingsNavigationRow(
 @Composable
 fun SettingsControlRow(
     title: String,
-    subtitle: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -843,7 +827,6 @@ fun SettingsControlRow(
 @Composable
 fun SettingsInlineSwitchRow(
     title: String,
-    subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -890,31 +873,34 @@ fun <T> SegmentedEnumRow(
     labelFor: (T) -> String,
     onSelected: (T) -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        options.forEach { option ->
-            val isSelected = selected == option
-            Surface(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp)
-                    .clickable { onSelected(option) },
-                shape = RoundedCornerShape(18.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                ),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        labelFor(option),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            options.forEach { option ->
+                val isSelected = selected == option
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .clickable { onSelected(option) },
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            labelFor(option),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

@@ -301,7 +301,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 sessionKey = createSessionKey,
                 initialMode = CreateMode.Task,
                 initialTaskDraft = createTaskDraftOverride ?: TaskDraft(
-                    preferredTimePeriodId = state.snapshot.timePeriods.firstOrNull { it.type == TimePeriodType.PRODUCTIVE }?.id,
                     addReminder = state.settings.defaultTaskReminder,
                 ),
                 initialReminderDraft = createReminderDraftOverride,
@@ -332,9 +331,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         if (!result.scheduled) {
                             snackbarHostState.showSnackbar(
                                 result.reason ?: if (result.partial) {
-                                    "Unable to fully schedule task. Try another time, period, or shorter duration."
+                                    "Unable to fully schedule task. Try another time or shorter duration."
                                 } else {
-                                    "Unable to schedule task. Try another time, period, or shorter duration."
+                                    "Unable to schedule task. Try another time or shorter duration."
                                 },
                             )
                             return@launch
