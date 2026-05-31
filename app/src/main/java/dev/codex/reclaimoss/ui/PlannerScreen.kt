@@ -547,9 +547,9 @@ fun CalendarCard(
     }
     val weeks = remember(month, weekStart) { buildCalendarWeeks(month, weekStart) }
     val rowHeight = 64.dp
-    val pillSize = 40.dp
+    val pillSize = 38.dp
     val timeframeStroke = 2.dp
-    val timeframeInset = 6.dp
+    val timeframeInset = 5.dp
     val edgeOverhang = 8.dp
 
     Card(
