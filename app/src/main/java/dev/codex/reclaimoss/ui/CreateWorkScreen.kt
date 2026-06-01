@@ -303,14 +303,12 @@ fun CreateWorkScreen(
         }
     }
     val rulesSummary = remember(
-        taskDraft.timeframeId,
         taskDraft.continuationParentTaskId,
         taskDraft.overlapPolicy,
         taskDraft.addReminder,
         taskDraft.priority,
-        availableTimeframes,
     ) {
-        taskRulesSummary(taskDraft, availableTimeframes)
+        taskRulesSummary(taskDraft)
     }
     val scheduleRowSummary = remember(
         taskDraft.schedulingMode,
@@ -333,13 +331,15 @@ fun CreateWorkScreen(
     ) {
         taskRepeatSummary(taskDraft)
     }
-    val windowSummary = remember(
+    val timingSummary = remember(
         taskDraft.hasWindow,
         taskDraft.fixedStartAt,
         taskDraft.fixedEndAt,
         taskDraft.schedulingMode,
+        taskDraft.timeframeId,
+        availableTimeframes,
     ) {
-        taskWindowSummary(taskDraft)
+        taskTimingSummary(taskDraft, availableTimeframes)
     }
     val saveSummary = remember(
         taskDraft.schedulingMode,
@@ -434,8 +434,8 @@ fun CreateWorkScreen(
                     if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                         SettingsSummaryRow(
-                            title = "Window",
-                            summary = windowSummary,
+                            title = "Timing",
+                            summary = timingSummary,
                             onClick = {
                                 windowDraft = taskDraft
                                 showWindowSheet = true
@@ -496,7 +496,7 @@ fun CreateWorkScreen(
 
     if (showWindowSheet && (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY)) {
         TaskEditorSheet(
-            title = "Window",
+            title = "Timing",
             onDismiss = { showWindowSheet = false },
             onDone = {
                 taskDraft = taskDraft.applyWindowEditor(windowDraft)
@@ -507,6 +507,7 @@ fun CreateWorkScreen(
                 TaskWindowEditor(
                     draft = windowDraft,
                     onDraftChange = { windowDraft = it },
+                    availableTimeframes = availableTimeframes,
                     context = context,
                 )
             }
@@ -544,7 +545,6 @@ fun CreateWorkScreen(
                 TaskRulesEditor(
                     draft = rulesDraft,
                     onDraftChange = { rulesDraft = it },
-                    availableTimeframes = availableTimeframes,
                     continuationTasks = continuationTasks,
                     showReminderToggle = !followUpMode && !rescheduleMode,
                 )
@@ -641,6 +641,14 @@ fun DurationWheelPicker(
                     )
                 },
             )
+            Text(
+                "Duration",
+                modifier = Modifier.padding(horizontal = 4.dp),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
             DurationWheelColumn(
                 modifier = Modifier.weight(1f),
                 label = "M",
@@ -719,6 +727,7 @@ fun TaskEditorSheet(
     onDone: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val sheetScrollState = rememberScrollState()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -727,7 +736,7 @@ fun TaskEditorSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(sheetScrollState)
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -879,6 +888,7 @@ fun TaskScheduleEditor(
 fun TaskWindowEditor(
     draft: TaskDraft,
     onDraftChange: (TaskDraft) -> Unit,
+    availableTimeframes: List<Timeframe>,
     context: android.content.Context,
 ) {
     Row(
@@ -1032,6 +1042,13 @@ fun TaskWindowEditor(
             context = context,
         )
     }
+
+    TaskSectionTitle("Timeframe")
+    TimeframeDropdown(
+        timeframes = availableTimeframes,
+        selectedTimeframeId = draft.timeframeId,
+        onSelected = { timeframeId -> onDraftChange(draft.copy(timeframeId = timeframeId)) },
+    )
 }
 
 @Composable
@@ -1097,7 +1114,6 @@ fun TaskRepeatEditor(
 fun TaskRulesEditor(
     draft: TaskDraft,
     onDraftChange: (TaskDraft) -> Unit,
-    availableTimeframes: List<Timeframe>,
     continuationTasks: List<ScheduleTask>,
     showReminderToggle: Boolean,
 ) {
@@ -1111,12 +1127,6 @@ fun TaskRulesEditor(
             )
         }
     }
-    TaskSectionTitle("Timeframe")
-    TimeframeDropdown(
-        timeframes = availableTimeframes,
-        selectedTimeframeId = draft.timeframeId,
-        onSelected = { timeframeId -> onDraftChange(draft.copy(timeframeId = timeframeId)) },
-    )
     if (continuationTasks.isNotEmpty()) {
         ContinuationSection(
             tasks = continuationTasks,
@@ -1176,7 +1186,7 @@ fun DurationWheelColumn(
 ) {
     val wheelBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHigh.toArgb()
     val wheelTextColor = MaterialTheme.colorScheme.onSurface.toArgb()
-    val wheelHintColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f).toArgb()
+    val wheelHintColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f).toArgb()
     val wheelDividerColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f).toArgb()
 
     Column(
@@ -1760,14 +1770,25 @@ fun DateTimePickerCard(
     onClick: () -> Unit,
 ) {
     Surface(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier
+            .heightIn(min = 96.dp)
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(
+            Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -1871,51 +1892,61 @@ fun ContinuationSection(
     val availableDates = remember(tasks) { dependencyDateOptions(tasks, zoneId) }
     val selectedTask = tasks.firstOrNull { it.id == selectedParentTaskId }
     var selectedDate by remember(tasks, selectedParentTaskId) {
-        mutableStateOf(
-            selectedTask?.dependencyStartDate(zoneId)
-                ?: availableDates.firstOrNull(),
-        )
+        mutableStateOf(initialDependencyDate(tasks, selectedParentTaskId, zoneId))
     }
     val filteredTasks = remember(tasks, selectedDate) {
         tasksForDependencyDate(tasks, selectedDate, zoneId)
     }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d") }
+    val context = LocalContext.current
 
     if (selectedDate != null && availableDates.none { it == selectedDate }) {
         selectedDate = availableDates.firstOrNull()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DependencyDropdown(
-            label = "Day",
-            value = selectedDate?.let(dateFormatter::format) ?: "None",
-            options = availableDates.map { date -> date to dateFormatter.format(date) },
-            onClear = {
-                selectedDate = null
-                onParentSelected(null)
-            },
-            onSelected = { date ->
-                selectedDate = date
-                if (selectedTask?.dependencyStartDate(zoneId) != date) {
-                    onParentSelected(null)
-                }
-            },
-        )
-        DependencyDropdown(
-            label = "Task",
-            value = selectedTask?.title ?: "None",
-            options = filteredTasks.map { task -> task.id to task.title },
-            enabled = selectedDate != null,
-            onClear = { onParentSelected(null) },
-            onSelected = { taskId -> onParentSelected(taskId as String?) },
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            DateTimePickerCard(
+                label = "Day",
+                value = selectedDate?.let(dateFormatter::format) ?: "Pick day",
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    val initialDate = selectedDate ?: availableDates.firstOrNull() ?: LocalDate.now()
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            val picked = LocalDate.of(year, month + 1, dayOfMonth)
+                            selectedDate = picked
+                            if (selectedTask?.dependencyStartDate(zoneId) != picked) {
+                                onParentSelected(null)
+                            }
+                        },
+                        initialDate.year,
+                        initialDate.monthValue - 1,
+                        initialDate.dayOfMonth,
+                    ).show()
+                },
+            )
+            DependencyDropdown(
+                label = "Task",
+                value = selectedTask?.title ?: "None",
+                options = filteredTasks.map { task -> task.id to task.title },
+                enabled = selectedDate != null,
+                modifier = Modifier.weight(1f),
+                onClear = { onParentSelected(null) },
+                onSelected = { taskId -> onParentSelected(taskId as String?) },
+            )
+        }
     }
     if (selectedParentTaskId != null) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                TaskContinuationMode.AFTER_PARENT_SCHEDULED_END to "After task time",
-                TaskContinuationMode.AFTER_PARENT_DUE_AT to "After due time",
-                TaskContinuationMode.BEFORE_PARENT_START to "Finish first",
+                TaskContinuationMode.AFTER_PARENT_SCHEDULED_END to TaskContinuationMode.AFTER_PARENT_SCHEDULED_END.labelForDependency(),
+                TaskContinuationMode.AFTER_PARENT_DUE_AT to TaskContinuationMode.AFTER_PARENT_DUE_AT.labelForDependency(),
+                TaskContinuationMode.BEFORE_PARENT_START to TaskContinuationMode.BEFORE_PARENT_START.labelForDependency(),
             ).forEach { (mode, label) ->
                 FilterChip(
                     selected = selectedMode == mode,
@@ -1933,14 +1964,16 @@ private fun <T> DependencyDropdown(
     value: String,
     options: List<Pair<T, String>>,
     enabled: Boolean = true,
+    modifier: Modifier = Modifier,
     onClear: () -> Unit,
     onSelected: (T?) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth()) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 96.dp)
                 .clickable(enabled = enabled) { expanded = true },
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -2015,6 +2048,13 @@ fun dependencyDateOptions(
     .distinct()
     .sorted()
 
+fun initialDependencyDate(
+    tasks: List<ScheduleTask>,
+    selectedParentTaskId: String?,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): LocalDate? = tasks.firstOrNull { it.id == selectedParentTaskId }?.dependencyStartDate(zoneId)
+    ?: dependencyDateOptions(tasks, zoneId).firstOrNull()
+
 fun tasksForDependencyDate(
     tasks: List<ScheduleTask>,
     date: LocalDate?,
@@ -2072,6 +2112,7 @@ fun TaskDraft.applyWindowEditor(editorDraft: TaskDraft): TaskDraft =
         hasWindow = editorDraft.hasWindow || editorDraft.fixedStartAt != fixedStartAt || editorDraft.fixedEndAt != fixedEndAt,
         fixedStartAt = editorDraft.fixedStartAt,
         fixedEndAt = editorDraft.fixedEndAt,
+        timeframeId = editorDraft.timeframeId,
     )
 
 fun TaskDraft.applyRepeatEditor(editorDraft: TaskDraft): TaskDraft =
@@ -2266,6 +2307,23 @@ fun taskWindowSummary(taskDraft: TaskDraft): String {
     return "${formatter.format(taskDraft.fixedStartAt)}-${formatter.format(taskDraft.fixedEndAt)}"
 }
 
+fun taskTimingSummary(
+    taskDraft: TaskDraft,
+    timeframes: List<Timeframe>,
+): String {
+    val parts = buildList {
+        val windowSummary = taskWindowSummary(taskDraft)
+        if (windowSummary != "None") {
+            add(windowSummary)
+        }
+        val timeframeName = timeframes.firstOrNull { it.id == taskDraft.timeframeId }?.name
+        if (timeframeName != null) {
+            add(timeframeName)
+        }
+    }
+    return if (parts.isEmpty()) "None" else parts.joinToString(", ")
+}
+
 fun taskRepeatSummary(taskDraft: TaskDraft): String {
     if (taskDraft.recurrenceType == RecurrenceType.NONE) return "Once"
     val untilInstant = when {
@@ -2288,13 +2346,8 @@ fun taskRepeatSummary(taskDraft: TaskDraft): String {
     }
 }
 
-fun taskRulesSummary(
-    taskDraft: TaskDraft,
-    timeframes: List<Timeframe>,
-): String {
+fun taskRulesSummary(taskDraft: TaskDraft): String {
     val activeRules = buildList {
-        val timeframeName = timeframes.firstOrNull { it.id == taskDraft.timeframeId }?.name
-        if (timeframeName != null) add(timeframeName)
         if (taskDraft.continuationParentTaskId != null) {
             add("Dependency")
         }
@@ -2375,6 +2428,13 @@ private fun TaskSchedulingMode.labelForCreate(): String =
         TaskSchedulingMode.FIXED_EXACT -> "Fixed time"
     }
 
+fun TaskContinuationMode.labelForDependency(): String =
+    when (this) {
+        TaskContinuationMode.AFTER_PARENT_SCHEDULED_END -> "After task ends"
+        TaskContinuationMode.AFTER_PARENT_DUE_AT -> "After deadline"
+        TaskContinuationMode.BEFORE_PARENT_START -> "Before task starts"
+    }
+
 data class WindowSliderState(
     val startMinutes: Float,
     val endMinutes: Float,
@@ -2451,6 +2511,7 @@ private fun NumberPicker.styleDurationPicker(
     for (index in 0 until childCount) {
         (getChildAt(index) as? android.widget.EditText)?.let { editText ->
             editText.setTextColor(textColor)
+            editText.setHintTextColor(hintColor)
             editText.textSize = 24f
             editText.setBackgroundColor(backgroundColor)
         }

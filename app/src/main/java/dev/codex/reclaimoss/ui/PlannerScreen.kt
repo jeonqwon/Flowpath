@@ -248,7 +248,9 @@ fun PlannerScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+            HeaderActionSlot {
+                HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+            }
         }
         LazyColumn(
             modifier = Modifier.weight(1f),

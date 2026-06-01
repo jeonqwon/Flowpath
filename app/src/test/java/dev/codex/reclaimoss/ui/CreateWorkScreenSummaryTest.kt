@@ -148,7 +148,7 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
-    fun `applying window editor only copies window fields`() {
+    fun `applying window editor copies timing fields including timeframe`() {
         val base = TaskDraft(
             title = "Read",
             schedulingMode = TaskSchedulingMode.FIXED_DAY,
@@ -160,6 +160,7 @@ class CreateWorkScreenSummaryTest {
             hasWindow = true,
             schedulingMode = TaskSchedulingMode.FLEXIBLE,
             fixedDate = LocalDate.of(2026, 6, 10),
+            timeframeId = "tf-3",
             fixedStartAt = LocalDateTime.of(2026, 6, 6, 18, 0),
             fixedEndAt = LocalDateTime.of(2026, 6, 7, 1, 0),
         )
@@ -171,6 +172,7 @@ class CreateWorkScreenSummaryTest {
         assertEquals(LocalDate.of(2026, 6, 6), updated.fixedDate)
         assertEquals(LocalDateTime.of(2026, 6, 6, 18, 0), updated.fixedStartAt)
         assertEquals(LocalDateTime.of(2026, 6, 7, 1, 0), updated.fixedEndAt)
+        assertEquals("tf-3", updated.timeframeId)
     }
 
     @Test
@@ -240,28 +242,43 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
-    fun `task rules summary lists active optional rules`() {
+    fun `task timing summary combines window and timeframe`() {
+        val summary = withLocale(Locale.US) {
+            taskTimingSummary(
+                taskDraft = TaskDraft(
+                    hasWindow = true,
+                    fixedStartAt = LocalDateTime.of(2026, 6, 3, 18, 0),
+                    fixedEndAt = LocalDateTime.of(2026, 6, 3, 21, 0),
+                    timeframeId = "timeframe-1",
+                ),
+                timeframes = listOf(
+                    Timeframe(
+                        id = "timeframe-1",
+                        name = "Finals",
+                        startDate = LocalDate.of(2026, 6, 1),
+                        endDate = LocalDate.of(2026, 6, 7),
+                        colorHex = "#F4B6D2",
+                    ),
+                ),
+            )
+        }
+
+        assertEquals("6:00 PM-9:00 PM, Finals", summary)
+    }
+
+    @Test
+    fun `task rules summary lists active optional rules without timeframe`() {
         val summary = taskRulesSummary(
             taskDraft = TaskDraft(
-                timeframeId = "timeframe-1",
                 continuationParentTaskId = "task-2",
                 continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
                 overlapPolicy = TaskOverlapPolicy.DISALLOW,
                 addReminder = true,
                 priority = TaskPriority.URGENT,
             ),
-            timeframes = listOf(
-                Timeframe(
-                    id = "timeframe-1",
-                    name = "Finals",
-                    startDate = LocalDate.of(2026, 6, 1),
-                    endDate = LocalDate.of(2026, 6, 7),
-                    colorHex = "#F4B6D2",
-                ),
-            ),
         )
 
-        assertEquals("Finals, Dependency, No overlap, Reminder, Urgent", summary)
+        assertEquals("Dependency, No overlap, Reminder, Urgent", summary)
     }
 
     @Test
@@ -292,6 +309,15 @@ class CreateWorkScreenSummaryTest {
             listOf("Morning class", "Essay block"),
             tasksForDependencyDate(tasks, june3, zone).map { it.title },
         )
+        assertEquals(june4, initialDependencyDate(tasks, "c", zone))
+        assertEquals(june3, initialDependencyDate(tasks, null, zone))
+    }
+
+    @Test
+    fun `dependency mode labels stay concise and clearer`() {
+        assertEquals("After task ends", TaskContinuationMode.AFTER_PARENT_SCHEDULED_END.labelForDependency())
+        assertEquals("After deadline", TaskContinuationMode.AFTER_PARENT_DUE_AT.labelForDependency())
+        assertEquals("Before task starts", TaskContinuationMode.BEFORE_PARENT_START.labelForDependency())
     }
 
     private fun dependencyTask(

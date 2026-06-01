@@ -155,6 +155,7 @@ enum class AppTab(val label: String) {
 val HeaderActionShape = RoundedCornerShape(22.dp)
 val HeaderActionHeight = 44.dp
 val HeaderActionWidth = 176.dp
+val HeaderActionSlotWidth = 220.dp
 val SurfaceTintStrong = Color(0xFFE9EEF9)
 val CreateScreenSnackbarBottomOffset = 108.dp
 

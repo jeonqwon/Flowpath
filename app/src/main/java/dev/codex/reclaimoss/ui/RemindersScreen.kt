@@ -213,7 +213,9 @@ fun RemindersScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add Reminder", icon = Icons.Outlined.Add, onClick = onAddReminder)
+            HeaderActionSlot {
+                HeaderActionButton(label = "Add Reminder", icon = Icons.Outlined.Add, onClick = onAddReminder)
+            }
         }
         LazyColumn(
             modifier = Modifier.weight(1f),

@@ -151,8 +151,11 @@ fun TasksScreen(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = 0, initialFirstVisibleItemScrollOffset = savedScrollOffset)
     val density = LocalDensity.current
     val blocksToday = remember(state.snapshot.blocks, selectedDate) {
-        state.snapshot.blocks
-            .filter { it.startAt.atZone(zoneId).toLocalDate() == selectedDate }
+        visibleBlocksForDay(
+            blocks = state.snapshot.blocks,
+            day = selectedDate,
+            zoneId = zoneId,
+        )
             .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
     }
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
@@ -228,7 +231,9 @@ fun TasksScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+            HeaderActionSlot {
+                HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+            }
         }
 
         LazyColumn(
@@ -252,6 +257,18 @@ fun TasksScreen(
 }
 
 @Composable
+fun HeaderActionSlot(
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier.width(HeaderActionSlotWidth),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+@Composable
 fun HeaderActionButton(
     label: String,
     onClick: () -> Unit,
@@ -262,8 +279,7 @@ fun HeaderActionButton(
         onClick = onClick,
         modifier = Modifier
             .width(width)
-            .height(HeaderActionHeight)
-            .wrapContentWidth(Alignment.End),
+            .height(HeaderActionHeight),
         shape = HeaderActionShape,
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
         colors = ButtonDefaults.textButtonColors(
@@ -375,6 +391,24 @@ data class PositionedTaskBlock(
     val laneIndex: Int,
     val totalLanes: Int,
 )
+
+fun visibleBlocksForDay(
+    blocks: List<ScheduleBlock>,
+    day: LocalDate,
+    zoneId: ZoneId,
+): List<ScheduleBlock> {
+    val dayStart = day.atStartOfDay(zoneId).toInstant()
+    val nextDayStart = day.plusDays(1).atStartOfDay(zoneId).toInstant()
+    return blocks.mapNotNull { block ->
+        val segmentStart = if (block.startAt >= dayStart) block.startAt else dayStart
+        val segmentEnd = if (block.endAt <= nextDayStart) block.endAt else nextDayStart
+        if (!segmentEnd.isAfter(segmentStart)) {
+            null
+        } else {
+            block.copy(startAt = segmentStart, endAt = segmentEnd)
+        }
+    }
+}
 
 private fun computeTaskBlockLayout(blocks: List<ScheduleBlock>): List<PositionedTaskBlock> {
     data class ActiveLane(val endAt: Instant, val laneIndex: Int)
