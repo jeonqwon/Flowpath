@@ -139,7 +139,7 @@ fun RemindersScreen(
     settings: AppSettings,
     selectedDate: LocalDate,
     onSelectedDateChange: (LocalDate) -> Unit,
-    onAddTask: () -> Unit,
+    onAddReminder: () -> Unit,
     onOpenReminder: (Reminder) -> Unit,
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
@@ -213,7 +213,7 @@ fun RemindersScreen(
                     Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
                 }
             }
-            HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+            HeaderActionButton(label = "Add Reminder", icon = Icons.Outlined.Add, onClick = onAddReminder)
         }
         LazyColumn(
             modifier = Modifier.weight(1f),

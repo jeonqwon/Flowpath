@@ -152,11 +152,6 @@ enum class AppTab(val label: String) {
     Settings("Settings"),
 }
 
-enum class CreateMode(val label: String) {
-    Task("Task"),
-    Reminder("Reminder"),
-}
-
 val HeaderActionShape = RoundedCornerShape(22.dp)
 val HeaderActionHeight = 44.dp
 val HeaderActionWidth = 176.dp

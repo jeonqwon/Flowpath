@@ -152,12 +152,12 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
     var onboardingDismissedThisSession by rememberSaveable { mutableStateOf(false) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
+    var showingReminderCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var followUpSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var rescheduleSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
-    var createReminderDraftOverride by remember { mutableStateOf<ReminderDraft?>(null) }
     var timeframeDraftOverride by remember { mutableStateOf<TimeframeDraft?>(null) }
     var timeframeErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var createSessionKey by rememberSaveable { mutableStateOf(0) }
@@ -217,7 +217,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         followUpSourceTaskId = null
         rescheduleSourceTaskId = null
         createTaskDraftOverride = null
-        createReminderDraftOverride = null
+    }
+    BackHandler(enabled = showingReminderCreate) {
+        showingReminderCreate = false
     }
     BackHandler(enabled = showingTimeframeEditor) {
         showingTimeframeEditor = false
@@ -267,11 +269,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 availableTasks = state.snapshot.tasks,
                 currentTaskId = rescheduleSourceTaskId,
                 sessionKey = createSessionKey,
-                initialMode = CreateMode.Task,
                 initialTaskDraft = createTaskDraftOverride ?: TaskDraft(
                     addReminder = state.settings.defaultTaskReminder,
                 ),
-                initialReminderDraft = createReminderDraftOverride,
                 followUpMode = followUpSourceTaskId != null,
                 rescheduleMode = rescheduleSourceTaskId != null,
                 onBack = {
@@ -279,7 +279,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     followUpSourceTaskId = null
                     rescheduleSourceTaskId = null
                     createTaskDraftOverride = null
-                    createReminderDraftOverride = null
                 },
                 onSaveTask = { draft ->
                     scope.launch {
@@ -310,7 +309,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         followUpSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
-                        createReminderDraftOverride = null
                         navigateToTab(AppTab.Tasks)
                         snackbarHostState.showSnackbar(
                             when {
@@ -322,14 +320,32 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         )
                     }
                 },
+            )
+        }
+        return
+    }
+
+    if (showingReminderCreate) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            snackbarHost = {
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = CreateScreenSnackbarBottomOffset,
+                    ),
+                )
+            },
+        ) { padding ->
+            CreateReminderScreen(
+                padding = padding,
+                onBack = { showingReminderCreate = false },
                 onSaveReminder = { draft ->
                     scope.launch {
                         viewModel.addReminder(draft)
-                        showingCreate = false
-                        followUpSourceTaskId = null
-                        rescheduleSourceTaskId = null
-                        createTaskDraftOverride = null
-                        createReminderDraftOverride = null
+                        showingReminderCreate = false
                         navigateToTab(AppTab.Reminders)
                         snackbarHostState.showSnackbar("Reminder saved")
                     }
@@ -445,7 +461,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         followUpSourceTaskId = task.id
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = task.toFollowUpDraft()
-                        createReminderDraftOverride = null
                         createSessionKey += 1
                         selectedTaskId = null
                         showingCreate = true
@@ -454,7 +469,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         followUpSourceTaskId = null
                         rescheduleSourceTaskId = task.id
                         createTaskDraftOverride = task.toRescheduleDraft()
-                        createReminderDraftOverride = null
                         createSessionKey += 1
                         selectedTaskId = null
                         showingCreate = true
@@ -551,7 +565,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         followUpSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
-                        createReminderDraftOverride = null
                         createSessionKey += 1
                         showingCreate = true
                     },
@@ -615,13 +628,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     settings = state.settings,
                     selectedDate = sharedSelectedDate,
                     onSelectedDateChange = onSharedDateChange,
-                    onAddTask = {
-                        followUpSourceTaskId = null
-                        rescheduleSourceTaskId = null
-                        createTaskDraftOverride = null
-                        createReminderDraftOverride = null
-                        createSessionKey += 1
-                        showingCreate = true
+                    onAddReminder = {
+                        showingReminderCreate = true
                     },
                     onOpenReminder = { reminder ->
                         val linkedTaskId = reminder.linkedTaskId

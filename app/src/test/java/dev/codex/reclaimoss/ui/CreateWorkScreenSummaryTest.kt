@@ -1,0 +1,99 @@
+package dev.codex.reclaimoss.ui
+
+import dev.codex.reclaimoss.domain.model.RecurrenceType
+import dev.codex.reclaimoss.domain.model.TaskContinuationMode
+import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
+import dev.codex.reclaimoss.domain.model.TaskPriority
+import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
+import dev.codex.reclaimoss.domain.model.Timeframe
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.util.Locale
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class CreateWorkScreenSummaryTest {
+
+    @Test
+    fun `task schedule summary shows no deadline flexible tasks compactly`() {
+        val summary = withLocale(Locale.US) {
+            taskScheduleSummary(
+                TaskDraft(
+                    hasDeadline = false,
+                    estimatedMinutes = 60,
+                    schedulingMode = TaskSchedulingMode.FLEXIBLE,
+                ),
+            )
+        }
+
+        assertEquals("Flexible | No deadline | 1h", summary)
+    }
+
+    @Test
+    fun `task repeat summary reflects weekly recurrence`() {
+        val summary = withLocale(Locale.US) {
+            taskRepeatSummary(
+                TaskDraft(
+                    recurrenceType = RecurrenceType.WEEKLY,
+                    recurrenceInterval = 1,
+                    recurrenceDays = setOf(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY),
+                ),
+            )
+        }
+
+        assertTrue(summary.startsWith("Every 1 week: "))
+        assertTrue(summary.contains("Tue"))
+        assertTrue(summary.contains("Thu"))
+    }
+
+    @Test
+    fun `task rules summary lists active optional rules`() {
+        val summary = taskRulesSummary(
+            taskDraft = TaskDraft(
+                timeframeId = "timeframe-1",
+                continuationParentTaskId = "task-2",
+                continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+                overlapPolicy = TaskOverlapPolicy.DISALLOW,
+                addReminder = true,
+                priority = TaskPriority.URGENT,
+            ),
+            timeframes = listOf(
+                Timeframe(
+                    id = "timeframe-1",
+                    name = "Finals",
+                    startDate = LocalDate.of(2026, 6, 1),
+                    endDate = LocalDate.of(2026, 6, 7),
+                    colorHex = "#F4B6D2",
+                ),
+            ),
+        )
+
+        assertEquals("Finals, Dependency, No overlap, Reminder, Urgent", summary)
+    }
+
+    @Test
+    fun `reminder summary shows due time and repeat state`() {
+        val summary = withLocale(Locale.US) {
+            reminderSummary(
+                ReminderDraft(
+                    dueAt = LocalDateTime.of(2026, 6, 2, 18, 0),
+                    recurrenceType = RecurrenceType.NONE,
+                ),
+            )
+        }
+
+        assertEquals("Tue, Jun 2 6:00 PM | Once", summary)
+    }
+
+    private fun <T> withLocale(locale: Locale, block: () -> T): T {
+        val previous = Locale.getDefault()
+        Locale.setDefault(locale)
+        return try {
+            block()
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+}
