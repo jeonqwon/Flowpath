@@ -2,6 +2,7 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.widget.NumberPicker
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -97,6 +98,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -364,7 +366,7 @@ fun CreateWorkScreen(
                             onToggle = { showNotes = true },
                         )
                     }
-                    DurationStepper(
+                    DurationWheelPicker(
                         minutes = taskDraft.estimatedMinutes,
                         onMinutesChanged = {
                             taskDraft = if (taskDraft.schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
@@ -805,16 +807,19 @@ fun SummaryActionRow(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DurationStepper(
+fun DurationWheelPicker(
     minutes: Int,
     minMinutes: Int = 15,
     maxMinutes: Int = 360,
     onMinutesChanged: (Int) -> Unit,
 ) {
-    val stepMinutes = 15
-    val effectiveMax = maxMinutes.coerceAtLeast(minMinutes)
-    val snapped = snapToStepForCreate(minutes.coerceIn(minMinutes, effectiveMax), stepMinutes).coerceIn(minMinutes, effectiveMax)
-    val presets = listOf(15, 30, 60, 120).filter { it in minMinutes..effectiveMax }
+    val wheelState = remember(minutes, minMinutes, maxMinutes) {
+        durationWheelState(
+            minutes = minutes,
+            minMinutes = minMinutes,
+            maxMinutes = maxMinutes,
+        )
+    }
 
     TaskSectionTitle("Duration")
     Surface(
@@ -826,41 +831,116 @@ fun DurationStepper(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Text(
+                wheelState.durationMinutes.durationLabelForCreate(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedButton(
-                    onClick = { onMinutesChanged((snapped - stepMinutes).coerceAtLeast(minMinutes)) },
-                    shape = RoundedCornerShape(18.dp),
-                ) {
-                    Text("-")
-                }
-                Text(
-                    snapped.durationLabelForCreate(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                DurationWheelColumn(
+                    modifier = Modifier.weight(1f),
+                    label = "Hours",
+                    options = wheelState.hourOptions,
+                    selectedValue = wheelState.selectedHours,
+                    valueText = { value -> value.toString() },
+                    onValueSelected = { selectedHours ->
+                        onMinutesChanged(
+                            durationFromWheelSelection(
+                                selectedHours = selectedHours,
+                                selectedMinute = wheelState.selectedMinute,
+                                minMinutes = minMinutes,
+                                maxMinutes = maxMinutes,
+                            ),
+                        )
+                    },
                 )
-                OutlinedButton(
-                    onClick = { onMinutesChanged((snapped + stepMinutes).coerceAtMost(effectiveMax)) },
-                    shape = RoundedCornerShape(18.dp),
-                ) {
-                    Text("+")
-                }
+                DurationWheelColumn(
+                    modifier = Modifier.weight(1f),
+                    label = "Minutes",
+                    options = wheelState.minuteOptions,
+                    selectedValue = wheelState.selectedMinute,
+                    valueText = { value -> value.toString().padStart(2, '0') },
+                    onValueSelected = { selectedMinute ->
+                        onMinutesChanged(
+                            durationFromWheelSelection(
+                                selectedHours = wheelState.selectedHours,
+                                selectedMinute = selectedMinute,
+                                minMinutes = minMinutes,
+                                maxMinutes = maxMinutes,
+                            ),
+                        )
+                    },
+                )
             }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                presets.forEach { preset ->
-                    FilterChip(
-                        selected = snapped == preset,
-                        onClick = { onMinutesChanged(preset) },
-                        label = { Text(preset.durationLabelForCreate()) },
-                    )
-                }
-            }
+        }
+    }
+}
+
+@Composable
+fun DurationWheelColumn(
+    modifier: Modifier = Modifier,
+    label: String,
+    options: List<Int>,
+    selectedValue: Int,
+    valueText: (Int) -> String,
+    onValueSelected: (Int) -> Unit,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            AndroidView(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                factory = { context ->
+                    NumberPicker(context).apply {
+                        minValue = 0
+                        maxValue = options.lastIndex
+                        displayedValues = options.map(valueText).toTypedArray()
+                        wrapSelectorWheel = false
+                        descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+                        value = options.indexOf(selectedValue).coerceAtLeast(0)
+                        setOnValueChangedListener { _, _, newVal ->
+                            onValueSelected(options[newVal])
+                        }
+                    }
+                },
+                update = { picker ->
+                    val displayValues = options.map(valueText).toTypedArray()
+                    val targetIndex = options.indexOf(selectedValue).coerceAtLeast(0)
+                    if (picker.maxValue != options.lastIndex) {
+                        picker.displayedValues = null
+                        picker.minValue = 0
+                        picker.maxValue = options.lastIndex
+                        picker.displayedValues = displayValues
+                    } else {
+                        picker.displayedValues = displayValues
+                    }
+                    if (picker.value != targetIndex) {
+                        picker.value = targetIndex
+                    }
+                    picker.setOnValueChangedListener { _, _, newVal ->
+                        onValueSelected(options[newVal])
+                    }
+                },
+            )
         }
     }
 }
@@ -1696,6 +1776,44 @@ fun reminderSummary(reminderDraft: ReminderDraft): String {
         )
     }
     return "${formatter.format(reminderDraft.dueAt)} | $repeatLabel"
+}
+
+data class DurationWheelState(
+    val hourOptions: List<Int>,
+    val minuteOptions: List<Int>,
+    val selectedHours: Int,
+    val selectedMinute: Int,
+    val durationMinutes: Int,
+)
+
+fun durationWheelState(
+    minutes: Int,
+    minMinutes: Int,
+    maxMinutes: Int,
+): DurationWheelState {
+    val durationMinutes = durationFromWheelSelection(
+        selectedHours = minutes.coerceAtLeast(0) / 60,
+        selectedMinute = snapToStepForCreate(minutes.coerceAtLeast(0) % 60, 15).coerceIn(0, 45),
+        minMinutes = minMinutes,
+        maxMinutes = maxMinutes,
+    )
+    return DurationWheelState(
+        hourOptions = (0..(maxMinutes.coerceAtLeast(minMinutes) / 60)).toList(),
+        minuteOptions = listOf(0, 15, 30, 45),
+        selectedHours = durationMinutes / 60,
+        selectedMinute = durationMinutes % 60,
+        durationMinutes = durationMinutes,
+    )
+}
+
+fun durationFromWheelSelection(
+    selectedHours: Int,
+    selectedMinute: Int,
+    minMinutes: Int,
+    maxMinutes: Int,
+): Int {
+    val rawMinutes = (selectedHours.coerceAtLeast(0) * 60) + snapToStepForCreate(selectedMinute.coerceAtLeast(0), 15).coerceIn(0, 45)
+    return rawMinutes.coerceIn(minMinutes, maxMinutes.coerceAtLeast(minMinutes))
 }
 
 private fun RecurrenceType.displayNameForCreate(): String =

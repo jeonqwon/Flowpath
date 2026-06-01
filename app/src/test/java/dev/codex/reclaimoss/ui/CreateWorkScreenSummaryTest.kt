@@ -17,6 +17,44 @@ import org.junit.Test
 class CreateWorkScreenSummaryTest {
 
     @Test
+    fun `duration wheel selection clamps below minimum`() {
+        val minutes = durationFromWheelSelection(
+            selectedHours = 0,
+            selectedMinute = 0,
+            minMinutes = 15,
+            maxMinutes = 360,
+        )
+
+        assertEquals(15, minutes)
+    }
+
+    @Test
+    fun `duration wheel selection clamps above maximum`() {
+        val minutes = durationFromWheelSelection(
+            selectedHours = 6,
+            selectedMinute = 45,
+            minMinutes = 15,
+            maxMinutes = 360,
+        )
+
+        assertEquals(360, minutes)
+    }
+
+    @Test
+    fun `duration wheel state snaps current duration into hours and minutes`() {
+        val state = durationWheelState(
+            minutes = 135,
+            minMinutes = 15,
+            maxMinutes = 360,
+        )
+
+        assertEquals(2, state.selectedHours)
+        assertEquals(15, state.selectedMinute)
+        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6), state.hourOptions)
+        assertEquals(listOf(0, 15, 30, 45), state.minuteOptions)
+    }
+
+    @Test
     fun `task schedule summary shows no deadline flexible tasks compactly`() {
         val summary = withLocale(Locale.US) {
             taskScheduleSummary(
