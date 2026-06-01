@@ -5,11 +5,14 @@ import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskSchedulingMode
+import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.Timeframe
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -260,6 +263,52 @@ class CreateWorkScreenSummaryTest {
 
         assertEquals("Finals, Dependency, No overlap, Reminder, Urgent", summary)
     }
+
+    @Test
+    fun `dependency picker groups tasks by their start day`() {
+        val zone = ZoneId.of("America/New_York")
+        val june3 = LocalDate.of(2026, 6, 3)
+        val june4 = LocalDate.of(2026, 6, 4)
+        val tasks = listOf(
+            dependencyTask(
+                id = "a",
+                title = "Morning class",
+                start = LocalDateTime.of(2026, 6, 3, 9, 0),
+            ),
+            dependencyTask(
+                id = "b",
+                title = "Essay block",
+                start = LocalDateTime.of(2026, 6, 3, 18, 0),
+            ),
+            dependencyTask(
+                id = "c",
+                title = "Gym",
+                start = LocalDateTime.of(2026, 6, 4, 7, 30),
+            ),
+        )
+
+        assertEquals(listOf(june3, june4), dependencyDateOptions(tasks, zone))
+        assertEquals(
+            listOf("Morning class", "Essay block"),
+            tasksForDependencyDate(tasks, june3, zone).map { it.title },
+        )
+    }
+
+    private fun dependencyTask(
+        id: String,
+        title: String,
+        start: LocalDateTime,
+    ): ScheduleTask = ScheduleTask(
+        id = id,
+        title = title,
+        priority = TaskPriority.MEDIUM,
+        dueAt = start.plusHours(1).atZone(ZoneId.of("America/New_York")).toInstant(),
+        estimatedMinutes = 60,
+        remainingMinutes = 60,
+        schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+        fixedStartAt = start.atZone(ZoneId.of("America/New_York")).toInstant(),
+        fixedEndAt = start.plusHours(1).atZone(ZoneId.of("America/New_York")).toInstant(),
+    )
 
     @Test
     fun `reminder summary shows due time and repeat state`() {

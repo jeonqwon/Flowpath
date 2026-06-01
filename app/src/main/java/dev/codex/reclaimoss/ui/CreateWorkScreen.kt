@@ -9,7 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -923,6 +922,26 @@ fun TaskWindowEditor(
     }
     val labels = listOf("12a", "6a", "12p", "6p", "12a")
 
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TaskSectionTitle("Overnight")
+        Switch(
+            checked = overnight,
+            onCheckedChange = { enabled ->
+                onDraftChange(
+                    draft.withWindowTimes(
+                        startTime = draft.fixedStartAt.toLocalTime(),
+                        endTime = draft.fixedEndAt.toLocalTime(),
+                        endsNextDay = enabled,
+                    ),
+                )
+            },
+        )
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -932,44 +951,6 @@ fun TaskWindowEditor(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (sliderState.endsNextDay) "Allowed outside handles" else "Allowed between handles",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Overnight",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Switch(
-                        checked = overnight,
-                        onCheckedChange = { enabled ->
-                            onDraftChange(
-                                draft.withWindowTimes(
-                                    startTime = draft.fixedStartAt.toLocalTime(),
-                                    endTime = draft.fixedEndAt.toLocalTime(),
-                                    endsNextDay = enabled,
-                                ),
-                            )
-                        },
-                    )
-                }
-            }
-            WindowPreviewBar(
-                startMinutes = sliderState.startMinutes,
-                endMinutes = sliderState.endMinutes,
-                overnight = sliderState.endsNextDay,
-            )
             RangeSlider(
                 value = sliderState.startMinutes..sliderState.endMinutes,
                 onValueChange = { range ->
@@ -982,6 +963,28 @@ fun TaskWindowEditor(
                 },
                 valueRange = 0f..(24 * 60f),
                 steps = 95,
+                colors = androidx.compose.material3.SliderDefaults.colors(
+                    activeTrackColor = if (overnight) {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    inactiveTrackColor = if (overnight) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    activeTickColor = if (overnight) {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    inactiveTickColor = if (overnight) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                ),
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 labels.forEach { label ->
@@ -994,78 +997,40 @@ fun TaskWindowEditor(
             }
         }
     }
-    TimeOnlySection(
-        title = "Start time",
-        time = draft.fixedStartAt.toLocalTime(),
-        onTimeChanged = { selectedTime ->
-            onDraftChange(
-                draft.withWindowTimes(
-                    startTime = selectedTime,
-                    endTime = draft.fixedEndAt.toLocalTime(),
-                    endsNextDay = overnight,
-                ),
-            )
-        },
-        context = context,
-    )
-    TimeOnlySection(
-        title = "End time",
-        time = draft.fixedEndAt.toLocalTime(),
-        onTimeChanged = { selectedTime ->
-            onDraftChange(
-                draft.withWindowTimes(
-                    startTime = draft.fixedStartAt.toLocalTime(),
-                    endTime = selectedTime,
-                    endsNextDay = overnight,
-                ),
-            )
-        },
-        context = context,
-    )
-}
-
-@Composable
-private fun WindowPreviewBar(
-    startMinutes: Float,
-    endMinutes: Float,
-    overnight: Boolean,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val track = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(10.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(track),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        val startFraction = (startMinutes / (24f * 60f)).coerceIn(0f, 1f)
-        val endFraction = (endMinutes / (24f * 60f)).coerceIn(0f, 1f)
-        val totalWidth = maxWidth
-        if (overnight) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(endFraction)
-                    .height(10.dp)
-                    .background(primary),
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxWidth(1f - startFraction)
-                    .height(10.dp)
-                    .background(primary),
-            )
-        } else {
-            val widthFraction = (endFraction - startFraction).coerceAtLeast(0f)
-            Box(
-                modifier = Modifier
-                    .width(totalWidth * widthFraction)
-                    .height(10.dp)
-                    .absoluteOffset(x = totalWidth * startFraction)
-                    .background(primary),
-            )
-        }
+        WindowTimeField(
+            title = "Start time",
+            time = draft.fixedStartAt.toLocalTime(),
+            modifier = Modifier.weight(1f),
+            onTimeChanged = { selectedTime ->
+                onDraftChange(
+                    draft.withWindowTimes(
+                        startTime = selectedTime,
+                        endTime = draft.fixedEndAt.toLocalTime(),
+                        endsNextDay = overnight,
+                    ),
+                )
+            },
+            context = context,
+        )
+        WindowTimeField(
+            title = "End time",
+            time = draft.fixedEndAt.toLocalTime(),
+            modifier = Modifier.weight(1f),
+            onTimeChanged = { selectedTime ->
+                onDraftChange(
+                    draft.withWindowTimes(
+                        startTime = draft.fixedStartAt.toLocalTime(),
+                        endTime = selectedTime,
+                        endsNextDay = overnight,
+                    ),
+                )
+            },
+            context = context,
+        )
     }
 }
 
@@ -1902,66 +1867,48 @@ fun ContinuationSection(
     onModeSelected: (TaskContinuationMode) -> Unit,
 ) {
     TaskSectionTitle("Dependency")
-    var expanded by remember { mutableStateOf(false) }
+    val zoneId = remember { ZoneId.systemDefault() }
+    val availableDates = remember(tasks) { dependencyDateOptions(tasks, zoneId) }
     val selectedTask = tasks.firstOrNull { it.id == selectedParentTaskId }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true },
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    selectedTask?.title ?: "None",
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("v", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .fillMaxWidth(0.88f)
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
-        ) {
-            DropdownMenuItem(
-                text = { Text("None", style = MaterialTheme.typography.titleMedium) },
-                onClick = {
+    var selectedDate by remember(tasks, selectedParentTaskId) {
+        mutableStateOf(
+            selectedTask?.dependencyStartDate(zoneId)
+                ?: availableDates.firstOrNull(),
+        )
+    }
+    val filteredTasks = remember(tasks, selectedDate) {
+        tasksForDependencyDate(tasks, selectedDate, zoneId)
+    }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d") }
+
+    if (selectedDate != null && availableDates.none { it == selectedDate }) {
+        selectedDate = availableDates.firstOrNull()
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DependencyDropdown(
+            label = "Day",
+            value = selectedDate?.let(dateFormatter::format) ?: "None",
+            options = availableDates.map { date -> date to dateFormatter.format(date) },
+            onClear = {
+                selectedDate = null
+                onParentSelected(null)
+            },
+            onSelected = { date ->
+                selectedDate = date
+                if (selectedTask?.dependencyStartDate(zoneId) != date) {
                     onParentSelected(null)
-                    expanded = false
-                },
-            )
-            tasks.forEach { task ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            task.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = if (task.id == selectedParentTaskId) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    onClick = {
-                        onParentSelected(task.id)
-                        expanded = false
-                    },
-                )
-            }
-        }
+                }
+            },
+        )
+        DependencyDropdown(
+            label = "Task",
+            value = selectedTask?.title ?: "None",
+            options = filteredTasks.map { task -> task.id to task.title },
+            enabled = selectedDate != null,
+            onClear = { onParentSelected(null) },
+            onSelected = { taskId -> onParentSelected(taskId as String?) },
+        )
     }
     if (selectedParentTaskId != null) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1978,6 +1925,119 @@ fun ContinuationSection(
             }
         }
     }
+}
+
+@Composable
+private fun <T> DependencyDropdown(
+    label: String,
+    value: String,
+    options: List<Pair<T, String>>,
+    enabled: Boolean = true,
+    onClear: () -> Unit,
+    onSelected: (T?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) { expanded = true },
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        label.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        value,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text("v", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(18.dp)),
+        ) {
+            DropdownMenuItem(
+                text = { Text("None", style = MaterialTheme.typography.titleMedium) },
+                onClick = {
+                    onClear()
+                    expanded = false
+                },
+            )
+            options.forEach { (option, text) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = {
+                        onSelected(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+fun dependencyDateOptions(
+    tasks: List<ScheduleTask>,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): List<LocalDate> = tasks
+    .map { it.dependencyStartDate(zoneId) }
+    .distinct()
+    .sorted()
+
+fun tasksForDependencyDate(
+    tasks: List<ScheduleTask>,
+    date: LocalDate?,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): List<ScheduleTask> = if (date == null) {
+    emptyList()
+} else {
+    tasks
+        .filter { it.dependencyStartDate(zoneId) == date }
+        .sortedBy { it.dependencyStartInstant(zoneId) }
+}
+
+private fun ScheduleTask.dependencyStartDate(
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): LocalDate = dependencyStartInstant(zoneId).atZone(zoneId).toLocalDate()
+
+private fun ScheduleTask.dependencyStartInstant(
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): Instant = when (schedulingMode) {
+    TaskSchedulingMode.FIXED_EXACT -> fixedStartAt ?: dueAt
+    TaskSchedulingMode.FIXED_DAY -> fixedStartAt ?: dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
+    TaskSchedulingMode.FLEXIBLE,
+    TaskSchedulingMode.FLEXIBLE_WINDOW -> fixedStartAt ?: dueAt
 }
 
 private fun TaskDraft.timeframeCutoffDate(): LocalDate? = when {
@@ -2129,6 +2189,37 @@ fun TimeOnlySection(
             ).show()
         },
     )
+}
+
+@Composable
+private fun WindowTimeField(
+    title: String,
+    time: LocalTime,
+    modifier: Modifier = Modifier,
+    onTimeChanged: (LocalTime) -> Unit,
+    context: android.content.Context,
+) {
+    val timeLabel = remember(time) { DateTimeFormatter.ofPattern("h:mm a").format(time) }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TaskSectionTitle(title)
+        DateTimePickerCard(
+            label = "Time",
+            value = timeLabel,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute -> onTimeChanged(LocalTime.of(hour, minute)) },
+                    time.hour,
+                    time.minute,
+                    false,
+                ).show()
+            },
+        )
+    }
 }
 
 fun taskScheduleSummary(taskDraft: TaskDraft): String {
