@@ -269,8 +269,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 availableTasks = state.snapshot.tasks,
                 currentTaskId = rescheduleSourceTaskId,
                 sessionKey = createSessionKey,
-                initialTaskDraft = createTaskDraftOverride ?: TaskDraft(
-                    addReminder = state.settings.defaultTaskReminder,
+                initialTaskDraft = createTaskDraftOverride ?: defaultCreateTaskDraft(
+                    defaultTaskReminder = state.settings.defaultTaskReminder,
                 ),
                 followUpMode = followUpSourceTaskId != null,
                 rescheduleMode = rescheduleSourceTaskId != null,

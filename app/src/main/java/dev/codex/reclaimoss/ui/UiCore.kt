@@ -326,7 +326,7 @@ class PlannerViewModel(
                 interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
-                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                endMode = draft.recurrenceEndMode(),
                 occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
@@ -387,7 +387,7 @@ class PlannerViewModel(
                 interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
-                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                endMode = draft.recurrenceEndMode(),
                 occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
@@ -416,7 +416,7 @@ class PlannerViewModel(
                 interval = draft.recurrenceInterval,
                 daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
                 until = draft.repeatDeadlineOrNull(),
-                endMode = if (draft.recurrenceType == RecurrenceType.NONE || draft.repeatsForever) RecurrenceEndMode.NEVER else RecurrenceEndMode.ON_DATE,
+                endMode = draft.recurrenceEndMode(),
                 occurrenceCount = draft.recurrenceOccurrenceLimit,
             ),
             estimatedMinutes = draft.estimatedMinutes,
@@ -530,8 +530,15 @@ class PlannerViewModel(
 private fun TaskDraft.taskDueAtInstant(): Instant =
     taskDueAtLocalDateTime().atZone(ZoneId.systemDefault()).toInstant()
 
+private fun TaskDraft.recurrenceEndMode(): RecurrenceEndMode =
+    if (recurrenceType == RecurrenceType.NONE || (!hasDeadline && repeatsForever)) {
+        RecurrenceEndMode.NEVER
+    } else {
+        RecurrenceEndMode.ON_DATE
+    }
+
 private fun TaskDraft.repeatDeadlineOrNull(): Instant? {
-    if (recurrenceType == RecurrenceType.NONE || repeatsForever) return null
+    if (recurrenceType == RecurrenceType.NONE || (!hasDeadline && repeatsForever)) return null
     val deadlineInstant = when (schedulingMode) {
         TaskSchedulingMode.FLEXIBLE -> deadline.atZone(ZoneId.systemDefault()).toInstant()
         TaskSchedulingMode.FLEXIBLE_WINDOW -> deadline.atZone(ZoneId.systemDefault()).toInstant()

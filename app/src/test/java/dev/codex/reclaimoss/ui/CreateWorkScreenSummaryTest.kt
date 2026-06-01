@@ -70,6 +70,64 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
+    fun `task schedule row summary shows no deadline flexible tasks cleanly`() {
+        val summary = withLocale(Locale.US) {
+            taskScheduleRowSummary(
+                TaskDraft(
+                    hasDeadline = false,
+                    schedulingMode = TaskSchedulingMode.FLEXIBLE,
+                ),
+            )
+        }
+
+        assertEquals("Flexible, No deadline", summary)
+    }
+
+    @Test
+    fun `default create task draft starts as flexible no deadline`() {
+        val draft = defaultCreateTaskDraft(defaultTaskReminder = true)
+
+        assertEquals(TaskSchedulingMode.FLEXIBLE, draft.schedulingMode)
+        assertEquals(false, draft.hasDeadline)
+        assertEquals(true, draft.addReminder)
+    }
+
+    @Test
+    fun `applying schedule editor only copies schedule fields`() {
+        val base = TaskDraft(
+            title = "Essay",
+            description = "Draft chapter",
+            priority = TaskPriority.URGENT,
+            timeframeId = "tf-1",
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+            continuationParentTaskId = "task-2",
+            continuationMode = TaskContinuationMode.AFTER_PARENT_DUE_AT,
+            addReminder = true,
+        )
+        val editedSchedule = TaskDraft(
+            title = "Ignored",
+            description = "Ignored",
+            priority = TaskPriority.MEDIUM,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            hasDeadline = true,
+            deadline = LocalDateTime.of(2026, 6, 3, 13, 0),
+            startDate = LocalDate.of(2026, 6, 2),
+            fixedDate = LocalDate.of(2026, 6, 3),
+            fixedStartAt = LocalDateTime.of(2026, 6, 3, 12, 0),
+            fixedEndAt = LocalDateTime.of(2026, 6, 3, 13, 0),
+        )
+
+        val updated = base.applyScheduleEditor(editedSchedule)
+
+        assertEquals("Essay", updated.title)
+        assertEquals(TaskPriority.URGENT, updated.priority)
+        assertEquals("tf-1", updated.timeframeId)
+        assertEquals(TaskSchedulingMode.FIXED_EXACT, updated.schedulingMode)
+        assertEquals(LocalDateTime.of(2026, 6, 3, 13, 0), updated.deadline)
+        assertEquals(LocalDateTime.of(2026, 6, 3, 12, 0), updated.fixedStartAt)
+    }
+
+    @Test
     fun `task repeat summary reflects weekly recurrence`() {
         val summary = withLocale(Locale.US) {
             taskRepeatSummary(
@@ -84,6 +142,42 @@ class CreateWorkScreenSummaryTest {
         assertTrue(summary.startsWith("Every 1 week: "))
         assertTrue(summary.contains("Tue"))
         assertTrue(summary.contains("Thu"))
+    }
+
+    @Test
+    fun `task repeat summary uses deadline as end for recurring deadline tasks`() {
+        val summary = withLocale(Locale.US) {
+            taskRepeatSummary(
+                TaskDraft(
+                    hasDeadline = true,
+                    repeatsForever = true,
+                    recurrenceType = RecurrenceType.WEEKLY,
+                    recurrenceInterval = 1,
+                    recurrenceDays = setOf(DayOfWeek.TUESDAY),
+                    deadline = LocalDateTime.of(2026, 6, 2, 17, 0),
+                ),
+            )
+        }
+
+        assertTrue(summary.contains("until Jun 2"))
+    }
+
+    @Test
+    fun `task repeat summary keeps forever recurrence for no deadline tasks`() {
+        val summary = withLocale(Locale.US) {
+            taskRepeatSummary(
+                TaskDraft(
+                    hasDeadline = false,
+                    repeatsForever = true,
+                    recurrenceType = RecurrenceType.WEEKLY,
+                    recurrenceInterval = 1,
+                    recurrenceDays = setOf(DayOfWeek.TUESDAY),
+                ),
+            )
+        }
+
+        assertTrue(summary.startsWith("Every 1 week: "))
+        assertTrue(!summary.contains("until "))
     }
 
     @Test
