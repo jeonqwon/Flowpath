@@ -171,14 +171,15 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
-    fun `window slider state preserves overnight end beyond midnight`() {
+    fun `window slider state keeps overnight as a separate flag on a 24 hour range`() {
         val state = windowSliderState(
             start = LocalTime.of(22, 0),
             end = LocalTime.of(2, 0),
+            overnight = true,
         )
 
         assertEquals(22 * 60f, state.startMinutes)
-        assertEquals((24 + 2) * 60f, state.endMinutes)
+        assertEquals(2 * 60f, state.endMinutes)
         assertEquals(true, state.endsNextDay)
     }
 

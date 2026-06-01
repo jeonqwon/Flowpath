@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -910,13 +911,17 @@ fun TaskWindowEditor(
     }
     if (!draft.hasWindow) return
 
+    val overnight = remember(draft.fixedStartAt, draft.fixedEndAt) {
+        draft.fixedEndAt.toLocalDate().isAfter(draft.fixedStartAt.toLocalDate())
+    }
     val sliderState = remember(draft.fixedStartAt, draft.fixedEndAt) {
         windowSliderState(
             start = draft.fixedStartAt.toLocalTime(),
             end = draft.fixedEndAt.toLocalTime(),
+            overnight = overnight,
         )
     }
-    val labels = listOf("12a", "6a", "12p", "6p", "12a", "6a")
+    val labels = listOf("12a", "6a", "12p", "6p", "12a")
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -927,19 +932,56 @@ fun TaskWindowEditor(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                if (sliderState.endsNextDay) "Ends next day" else "Same day",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (sliderState.endsNextDay) "Allowed outside handles" else "Allowed between handles",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Overnight",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Switch(
+                        checked = overnight,
+                        onCheckedChange = { enabled ->
+                            onDraftChange(
+                                draft.withWindowTimes(
+                                    startTime = draft.fixedStartAt.toLocalTime(),
+                                    endTime = draft.fixedEndAt.toLocalTime(),
+                                    endsNextDay = enabled,
+                                ),
+                            )
+                        },
+                    )
+                }
+            }
+            WindowPreviewBar(
+                startMinutes = sliderState.startMinutes,
+                endMinutes = sliderState.endMinutes,
+                overnight = sliderState.endsNextDay,
             )
             RangeSlider(
                 value = sliderState.startMinutes..sliderState.endMinutes,
                 onValueChange = { range ->
-                    val updated = draft.windowDraftFromSlider(range.start, range.endInclusive)
+                    val updated = draft.windowDraftFromSlider(
+                        startMinutes = range.start,
+                        endMinutes = range.endInclusive,
+                        overnight = overnight,
+                    )
                     onDraftChange(updated)
                 },
-                valueRange = 0f..(48 * 60f),
-                steps = 191,
+                valueRange = 0f..(24 * 60f),
+                steps = 95,
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 labels.forEach { label ->
@@ -956,7 +998,13 @@ fun TaskWindowEditor(
         title = "Start time",
         time = draft.fixedStartAt.toLocalTime(),
         onTimeChanged = { selectedTime ->
-            onDraftChange(draft.withWindowTimes(startTime = selectedTime, endTime = draft.fixedEndAt.toLocalTime()))
+            onDraftChange(
+                draft.withWindowTimes(
+                    startTime = selectedTime,
+                    endTime = draft.fixedEndAt.toLocalTime(),
+                    endsNextDay = overnight,
+                ),
+            )
         },
         context = context,
     )
@@ -964,10 +1012,61 @@ fun TaskWindowEditor(
         title = "End time",
         time = draft.fixedEndAt.toLocalTime(),
         onTimeChanged = { selectedTime ->
-            onDraftChange(draft.withWindowTimes(startTime = draft.fixedStartAt.toLocalTime(), endTime = selectedTime))
+            onDraftChange(
+                draft.withWindowTimes(
+                    startTime = draft.fixedStartAt.toLocalTime(),
+                    endTime = selectedTime,
+                    endsNextDay = overnight,
+                ),
+            )
         },
         context = context,
     )
+}
+
+@Composable
+private fun WindowPreviewBar(
+    startMinutes: Float,
+    endMinutes: Float,
+    overnight: Boolean,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val track = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(track),
+    ) {
+        val startFraction = (startMinutes / (24f * 60f)).coerceIn(0f, 1f)
+        val endFraction = (endMinutes / (24f * 60f)).coerceIn(0f, 1f)
+        val totalWidth = maxWidth
+        if (overnight) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(endFraction)
+                    .height(10.dp)
+                    .background(primary),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(1f - startFraction)
+                    .height(10.dp)
+                    .background(primary),
+            )
+        } else {
+            val widthFraction = (endFraction - startFraction).coerceAtLeast(0f)
+            Box(
+                modifier = Modifier
+                    .width(totalWidth * widthFraction)
+                    .height(10.dp)
+                    .absoluteOffset(x = totalWidth * startFraction)
+                    .background(primary),
+            )
+        }
+    }
 }
 
 @Composable
@@ -2194,27 +2293,28 @@ data class WindowSliderState(
 fun windowSliderState(
     start: LocalTime,
     end: LocalTime,
+    overnight: Boolean,
 ): WindowSliderState {
     val startMinutes = (start.hour * 60 + start.minute).toFloat()
     val rawEndMinutes = (end.hour * 60 + end.minute).toFloat()
-    val endsNextDay = !end.isAfter(start)
     return WindowSliderState(
         startMinutes = startMinutes,
-        endMinutes = if (endsNextDay) rawEndMinutes + (24 * 60f) else rawEndMinutes,
-        endsNextDay = endsNextDay,
+        endMinutes = rawEndMinutes,
+        endsNextDay = overnight,
     )
 }
 
 private fun TaskDraft.windowDraftFromSlider(
     startMinutes: Float,
     endMinutes: Float,
+    overnight: Boolean,
 ): TaskDraft {
     val snappedStart = startMinutes.roundToInt().coerceIn(0, 24 * 60)
-    val snappedEnd = endMinutes.roundToInt().coerceIn(0, 48 * 60)
+    val snappedEnd = endMinutes.roundToInt().coerceIn(0, 24 * 60)
     return withWindowTimes(
         startTime = sliderMinutesToLocalTime(snappedStart),
         endTime = sliderMinutesToLocalTime(snappedEnd),
-        endsNextDay = snappedEnd >= 24 * 60 || snappedEnd <= snappedStart,
+        endsNextDay = overnight,
     )
 }
 
