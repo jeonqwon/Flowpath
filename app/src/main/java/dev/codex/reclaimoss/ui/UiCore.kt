@@ -182,6 +182,7 @@ data class TaskDraft(
     val overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
+    val hasWindow: Boolean = false,
     val startDate: LocalDate? = null,
     val fixedDate: LocalDate = LocalDate.now().plusDays(1),
     val fixedStartAt: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(9).withMinute(0),
@@ -237,6 +238,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         continuationMode = null,
         overlapPolicy = TaskOverlapPolicy.INHERIT,
         schedulingMode = TaskSchedulingMode.FLEXIBLE,
+        hasWindow = false,
         startDate = null,
         fixedDate = dueAt.atZone(zoneId).toLocalDate().plusDays(1),
         fixedStartAt = dueAt.atZone(zoneId).toLocalDateTime(),
@@ -268,8 +270,9 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         continuationMode = continuationMode,
         overlapPolicy = overlapPolicy,
         deadline = localDueAt,
-        schedulingMode = schedulingMode,
-        startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+        schedulingMode = if (schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) TaskSchedulingMode.FLEXIBLE else schedulingMode,
+        hasWindow = schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW || (schedulingMode != TaskSchedulingMode.FIXED_EXACT && fixedEndAt != null),
+        startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE) {
             fixedStartAt?.atZone(zoneId)?.toLocalDate()
         } else {
             null
@@ -541,9 +544,9 @@ private fun TaskDraft.repeatDeadlineOrNull(): Instant? {
     if (recurrenceType == RecurrenceType.NONE || (!hasDeadline && repeatsForever)) return null
     val deadlineInstant = when (schedulingMode) {
         TaskSchedulingMode.FLEXIBLE -> deadline.atZone(ZoneId.systemDefault()).toInstant()
-        TaskSchedulingMode.FLEXIBLE_WINDOW -> deadline.atZone(ZoneId.systemDefault()).toInstant()
         TaskSchedulingMode.FIXED_DAY -> fixedDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().minusSeconds(1)
         TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
+        TaskSchedulingMode.FLEXIBLE_WINDOW -> deadline.atZone(ZoneId.systemDefault()).toInstant()
     }
     val firstOccurrenceInstant = taskDueAtInstant()
     return if (deadlineInstant.isBefore(firstOccurrenceInstant)) firstOccurrenceInstant else deadlineInstant
@@ -552,12 +555,6 @@ private fun TaskDraft.repeatDeadlineOrNull(): Instant? {
 private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.now()): LocalDateTime {
     if (schedulingMode == TaskSchedulingMode.FIXED_DAY) {
         return fixedDate.atTime(23, 59)
-    }
-    if (schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
-        if (recurrenceType == RecurrenceType.NONE) {
-            return fixedEndAt
-        }
-        return LocalDateTime.of(startDate ?: fixedEndAt.toLocalDate(), fixedEndAt.toLocalTime())
     }
     if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
         return fixedEndAt
@@ -635,20 +632,30 @@ fun Reminder.dueDisplayText(
 
 private fun TaskDraft.schedulingStartInstantOrNull(): Instant? =
     when (schedulingMode) {
-        TaskSchedulingMode.FLEXIBLE -> startDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()
+        TaskSchedulingMode.FLEXIBLE -> if (hasWindow) {
+            fixedStartAt.atZone(ZoneId.systemDefault()).toInstant()
+        } else {
+            startDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()
+        }
+        TaskSchedulingMode.FIXED_DAY -> null
+        TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.atZone(ZoneId.systemDefault()).toInstant()
         TaskSchedulingMode.FLEXIBLE_WINDOW -> LocalDateTime.of(startDate ?: fixedStartAt.toLocalDate(), fixedStartAt.toLocalTime())
             .atZone(ZoneId.systemDefault())
             .toInstant()
-        TaskSchedulingMode.FIXED_DAY -> null
-        TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.atZone(ZoneId.systemDefault()).toInstant()
     }
 
 private fun TaskDraft.fixedEndAtInstantOrNull(): Instant? =
     when (schedulingMode) {
+        TaskSchedulingMode.FLEXIBLE -> if (hasWindow) {
+            fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
+        } else {
+            null
+        }
+        TaskSchedulingMode.FIXED_DAY -> if (hasWindow) fixedEndAt.atZone(ZoneId.systemDefault()).toInstant() else null
+        TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
         TaskSchedulingMode.FLEXIBLE_WINDOW -> LocalDateTime.of(startDate ?: fixedEndAt.toLocalDate(), fixedEndAt.toLocalTime())
             .atZone(ZoneId.systemDefault())
             .toInstant()
-        TaskSchedulingMode.FIXED_EXACT -> fixedEndAt.atZone(ZoneId.systemDefault()).toInstant()
         else -> null
     }
 

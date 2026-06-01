@@ -142,6 +142,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -208,6 +209,7 @@ fun CreateWorkScreen(
                     it.overlapPolicy.name,
                     it.deadline.toString(),
                     it.schedulingMode.name,
+                    it.hasWindow,
                     it.startDate?.toString() ?: "",
                     it.fixedDate.toString(),
                     it.fixedStartAt.toString(),
@@ -233,16 +235,17 @@ fun CreateWorkScreen(
                     overlapPolicy = TaskOverlapPolicy.valueOf(saved[8] as String),
                     deadline = LocalDateTime.parse(saved[9] as String),
                     schedulingMode = TaskSchedulingMode.valueOf(saved[10] as String),
-                    startDate = (saved[11] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[12] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[13] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[14] as String),
-                    repeatsForever = saved[15] as Boolean,
-                    estimatedMinutes = saved[16] as Int,
-                    addReminder = saved[17] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[18] as String),
-                    recurrenceInterval = saved[19] as Int,
-                    recurrenceDays = (saved[20] as String)
+                    hasWindow = saved[11] as Boolean,
+                    startDate = (saved[12] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[13] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[14] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[15] as String),
+                    repeatsForever = saved[16] as Boolean,
+                    estimatedMinutes = saved[17] as Int,
+                    addReminder = saved[18] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[19] as String),
+                    recurrenceInterval = saved[20] as Int,
+                    recurrenceDays = (saved[21] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -255,9 +258,11 @@ fun CreateWorkScreen(
         mutableStateOf(initialTaskDraft ?: defaultCreateTaskDraft())
     }
     var showScheduleSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
+    var showWindowSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showRepeatSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showRulesSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var scheduleDraft by remember(sessionKey) { mutableStateOf(taskDraft) }
+    var windowDraft by remember(sessionKey) { mutableStateOf(taskDraft) }
     var repeatDraft by remember(sessionKey) { mutableStateOf(taskDraft) }
     var rulesDraft by remember(sessionKey) { mutableStateOf(taskDraft) }
     val continuationTasks = remember(availableTasks, currentTaskId, taskDraft.continuationParentTaskId) {
@@ -328,6 +333,14 @@ fun CreateWorkScreen(
     ) {
         taskRepeatSummary(taskDraft)
     }
+    val windowSummary = remember(
+        taskDraft.hasWindow,
+        taskDraft.fixedStartAt,
+        taskDraft.fixedEndAt,
+        taskDraft.schedulingMode,
+    ) {
+        taskWindowSummary(taskDraft)
+    }
     val saveSummary = remember(
         taskDraft.schedulingMode,
         taskDraft.hasDeadline,
@@ -340,8 +353,7 @@ fun CreateWorkScreen(
         taskScheduleSummary(taskDraft)
     }
     val canSaveTask = taskDraft.title.isNotBlank() &&
-        ((taskDraft.schedulingMode != TaskSchedulingMode.FIXED_EXACT && taskDraft.schedulingMode != TaskSchedulingMode.FLEXIBLE_WINDOW) || taskDraft.fixedEndAt.isAfter(taskDraft.fixedStartAt)) &&
-        (taskDraft.schedulingMode != TaskSchedulingMode.FLEXIBLE_WINDOW || taskDraft.recurrenceType != RecurrenceType.NONE || taskDraft.fixedStartAt.toLocalDate() == taskDraft.fixedEndAt.toLocalDate()) &&
+        (!taskDraft.hasWindow || taskDraft.fixedEndAt.isAfter(taskDraft.fixedStartAt)) &&
         (taskDraft.recurrenceType != RecurrenceType.WEEKLY || taskDraft.recurrenceDays.isNotEmpty())
 
     Column(
@@ -419,6 +431,17 @@ fun CreateWorkScreen(
                             showScheduleSheet = true
                         },
                     )
+                    if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        SettingsSummaryRow(
+                            title = "Window",
+                            summary = windowSummary,
+                            onClick = {
+                                windowDraft = taskDraft
+                                showWindowSheet = true
+                            },
+                        )
+                    }
                     if (!followUpMode && !rescheduleMode) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                         SettingsSummaryRow(
@@ -465,6 +488,25 @@ fun CreateWorkScreen(
                     draft = scheduleDraft,
                     onDraftChange = { scheduleDraft = it },
                     noDeadlineEligible = scheduleDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE,
+                    context = context,
+                )
+            }
+        }
+    }
+
+    if (showWindowSheet && (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY)) {
+        TaskEditorSheet(
+            title = "Window",
+            onDismiss = { showWindowSheet = false },
+            onDone = {
+                taskDraft = taskDraft.applyWindowEditor(windowDraft)
+                showWindowSheet = false
+            },
+        ) {
+            CreateFormCard {
+                TaskWindowEditor(
+                    draft = windowDraft,
+                    onDraftChange = { windowDraft = it },
                     context = context,
                 )
             }
@@ -520,7 +562,6 @@ fun SchedulingModeSection(
 ) {
     val options = listOf(
         TaskSchedulingMode.FLEXIBLE to "Flexible",
-        TaskSchedulingMode.FLEXIBLE_WINDOW to "Window",
         TaskSchedulingMode.FIXED_DAY to "Fixed date",
         TaskSchedulingMode.FIXED_EXACT to "Fixed time",
     )
@@ -735,12 +776,6 @@ fun TaskScheduleEditor(
                 draft.copy(
                     schedulingMode = newMode,
                     hasDeadline = if (newMode == TaskSchedulingMode.FLEXIBLE) draft.hasDeadline else true,
-                    startDate = when (newMode) {
-                        TaskSchedulingMode.FLEXIBLE_WINDOW -> draft.fixedStartAt.toLocalDate()
-                        else -> null
-                    },
-                    recurrenceType = if (newMode == TaskSchedulingMode.FIXED_DAY) RecurrenceType.NONE else draft.recurrenceType,
-                    recurrenceDays = if (newMode == TaskSchedulingMode.FIXED_DAY) emptySet() else draft.recurrenceDays,
                     fixedDate = draft.deadline.toLocalDate(),
                     fixedStartAt = when (newMode) {
                         TaskSchedulingMode.FIXED_EXACT -> draft.deadline.minusMinutes(draft.estimatedMinutes.toLong()).withSecond(0).withNano(0)
@@ -791,16 +826,6 @@ fun TaskScheduleEditor(
                 }
             }
         }
-        TaskSchedulingMode.FLEXIBLE_WINDOW -> FlexibleWindowSection(
-            recurrenceType = draft.recurrenceType,
-            startDate = draft.startDate ?: draft.fixedStartAt.toLocalDate(),
-            windowStart = draft.fixedStartAt,
-            windowEnd = draft.fixedEndAt,
-            onStartDateChanged = { onDraftChange(draft.copy(startDate = it)) },
-            onWindowStartChanged = { onDraftChange(draft.copy(fixedStartAt = it)) },
-            onWindowEndChanged = { onDraftChange(draft.copy(fixedEndAt = it)) },
-            context = context,
-        )
         TaskSchedulingMode.FIXED_DAY -> FixedDaySection(
             date = draft.fixedDate,
             onDateChanged = {
@@ -845,7 +870,104 @@ fun TaskScheduleEditor(
             },
             context = context,
         )
+        TaskSchedulingMode.FLEXIBLE_WINDOW -> Unit
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TaskWindowEditor(
+    draft: TaskDraft,
+    onDraftChange: (TaskDraft) -> Unit,
+    context: android.content.Context,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TaskSectionTitle("Use daily window")
+        Switch(
+            checked = draft.hasWindow,
+            onCheckedChange = { enabled ->
+                onDraftChange(
+                    if (enabled) {
+                        val anchorDate = when (draft.schedulingMode) {
+                            TaskSchedulingMode.FIXED_DAY -> draft.fixedDate
+                            else -> draft.deadline.toLocalDate()
+                        }
+                        draft.copy(
+                            hasWindow = true,
+                            fixedStartAt = LocalDateTime.of(anchorDate, LocalTime.of(18, 0)),
+                            fixedEndAt = LocalDateTime.of(anchorDate, LocalTime.of(21, 0)),
+                        )
+                    } else {
+                        draft.copy(hasWindow = false)
+                    },
+                )
+            },
+        )
+    }
+    if (!draft.hasWindow) return
+
+    val sliderState = remember(draft.fixedStartAt, draft.fixedEndAt) {
+        windowSliderState(
+            start = draft.fixedStartAt.toLocalTime(),
+            end = draft.fixedEndAt.toLocalTime(),
+        )
+    }
+    val labels = listOf("12a", "6a", "12p", "6p", "12a", "6a")
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                if (sliderState.endsNextDay) "Ends next day" else "Same day",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RangeSlider(
+                value = sliderState.startMinutes..sliderState.endMinutes,
+                onValueChange = { range ->
+                    val updated = draft.windowDraftFromSlider(range.start, range.endInclusive)
+                    onDraftChange(updated)
+                },
+                valueRange = 0f..(48 * 60f),
+                steps = 191,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                labels.forEach { label ->
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+    TimeOnlySection(
+        title = "Start time",
+        time = draft.fixedStartAt.toLocalTime(),
+        onTimeChanged = { selectedTime ->
+            onDraftChange(draft.withWindowTimes(startTime = selectedTime, endTime = draft.fixedEndAt.toLocalTime()))
+        },
+        context = context,
+    )
+    TimeOnlySection(
+        title = "End time",
+        time = draft.fixedEndAt.toLocalTime(),
+        onTimeChanged = { selectedTime ->
+            onDraftChange(draft.withWindowTimes(startTime = draft.fixedStartAt.toLocalTime(), endTime = selectedTime))
+        },
+        context = context,
+    )
 }
 
 @Composable
@@ -1763,7 +1885,7 @@ private fun TaskDraft.timeframeCutoffDate(): LocalDate? = when {
     !hasDeadline -> null
     schedulingMode == TaskSchedulingMode.FIXED_DAY -> fixedDate
     schedulingMode == TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.toLocalDate()
-    schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW -> fixedEndAt.toLocalDate()
+    hasWindow || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW -> fixedEndAt.toLocalDate()
     else -> deadline.toLocalDate()
 }
 
@@ -1778,11 +1900,19 @@ fun TaskDraft.applyScheduleEditor(editorDraft: TaskDraft): TaskDraft =
         hasDeadline = editorDraft.hasDeadline,
         deadline = editorDraft.deadline,
         schedulingMode = editorDraft.schedulingMode,
+        hasWindow = if (editorDraft.schedulingMode == TaskSchedulingMode.FIXED_EXACT) false else editorDraft.hasWindow,
         startDate = editorDraft.startDate,
         fixedDate = editorDraft.fixedDate,
         fixedStartAt = editorDraft.fixedStartAt,
         fixedEndAt = editorDraft.fixedEndAt,
         repeatsForever = editorDraft.repeatsForever,
+    )
+
+fun TaskDraft.applyWindowEditor(editorDraft: TaskDraft): TaskDraft =
+    copy(
+        hasWindow = editorDraft.hasWindow || editorDraft.fixedStartAt != fixedStartAt || editorDraft.fixedEndAt != fixedEndAt,
+        fixedStartAt = editorDraft.fixedStartAt,
+        fixedEndAt = editorDraft.fixedEndAt,
     )
 
 fun TaskDraft.applyRepeatEditor(editorDraft: TaskDraft): TaskDraft =
@@ -1913,10 +2043,6 @@ fun taskScheduleSummary(taskDraft: TaskDraft): String {
                 "Flexible | $stamp | $duration"
             }
         }
-        TaskSchedulingMode.FLEXIBLE_WINDOW -> {
-            val formatter = DateTimeFormatter.ofPattern("h:mm a")
-            "Window | ${formatter.format(taskDraft.fixedStartAt)}-${formatter.format(taskDraft.fixedEndAt)} | $duration"
-        }
         TaskSchedulingMode.FIXED_DAY -> {
             val formatter = DateTimeFormatter.ofPattern("EEE, MMM d")
             "Fixed date | ${formatter.format(taskDraft.fixedDate)} | $duration"
@@ -1924,6 +2050,9 @@ fun taskScheduleSummary(taskDraft: TaskDraft): String {
         TaskSchedulingMode.FIXED_EXACT -> {
             val formatter = DateTimeFormatter.ofPattern("EEE, MMM d h:mm a")
             "Fixed time | ${formatter.format(taskDraft.fixedStartAt)} | $duration"
+        }
+        TaskSchedulingMode.FLEXIBLE_WINDOW -> {
+            "Flexible | No deadline | $duration"
         }
     }
 }
@@ -1936,16 +2065,15 @@ fun taskScheduleRowSummary(taskDraft: TaskDraft): String = when (taskDraft.sched
             "Flexible, ${DateTimeFormatter.ofPattern("EEE, MMM d h:mm a").format(taskDraft.deadline)}"
         }
     }
-    TaskSchedulingMode.FLEXIBLE_WINDOW -> {
-        val formatter = if (taskDraft.recurrenceType == RecurrenceType.NONE) {
-            DateTimeFormatter.ofPattern("MMM d h:mm a")
-        } else {
-            DateTimeFormatter.ofPattern("h:mm a")
-        }
-        "Window, ${formatter.format(taskDraft.fixedStartAt)}-${DateTimeFormatter.ofPattern("h:mm a").format(taskDraft.fixedEndAt)}"
-    }
     TaskSchedulingMode.FIXED_DAY -> "Fixed date, ${DateTimeFormatter.ofPattern("EEE, MMM d").format(taskDraft.fixedDate)}"
     TaskSchedulingMode.FIXED_EXACT -> "Fixed time, ${DateTimeFormatter.ofPattern("EEE, MMM d h:mm a").format(taskDraft.fixedStartAt)}"
+    TaskSchedulingMode.FLEXIBLE_WINDOW -> "Flexible, No deadline"
+}
+
+fun taskWindowSummary(taskDraft: TaskDraft): String {
+    if (!taskDraft.hasWindow && taskDraft.schedulingMode != TaskSchedulingMode.FLEXIBLE_WINDOW) return "None"
+    val formatter = DateTimeFormatter.ofPattern("h:mm a")
+    return "${formatter.format(taskDraft.fixedStartAt)}-${formatter.format(taskDraft.fixedEndAt)}"
 }
 
 fun taskRepeatSummary(taskDraft: TaskDraft): String {
@@ -2052,10 +2180,63 @@ fun durationFromWheelSelection(
 private fun TaskSchedulingMode.labelForCreate(): String =
     when (this) {
         TaskSchedulingMode.FLEXIBLE -> "Flexible"
-        TaskSchedulingMode.FLEXIBLE_WINDOW -> "Window"
+        TaskSchedulingMode.FLEXIBLE_WINDOW -> "Flexible"
         TaskSchedulingMode.FIXED_DAY -> "Fixed date"
         TaskSchedulingMode.FIXED_EXACT -> "Fixed time"
     }
+
+data class WindowSliderState(
+    val startMinutes: Float,
+    val endMinutes: Float,
+    val endsNextDay: Boolean,
+)
+
+fun windowSliderState(
+    start: LocalTime,
+    end: LocalTime,
+): WindowSliderState {
+    val startMinutes = (start.hour * 60 + start.minute).toFloat()
+    val rawEndMinutes = (end.hour * 60 + end.minute).toFloat()
+    val endsNextDay = !end.isAfter(start)
+    return WindowSliderState(
+        startMinutes = startMinutes,
+        endMinutes = if (endsNextDay) rawEndMinutes + (24 * 60f) else rawEndMinutes,
+        endsNextDay = endsNextDay,
+    )
+}
+
+private fun TaskDraft.windowDraftFromSlider(
+    startMinutes: Float,
+    endMinutes: Float,
+): TaskDraft {
+    val snappedStart = startMinutes.roundToInt().coerceIn(0, 24 * 60)
+    val snappedEnd = endMinutes.roundToInt().coerceIn(0, 48 * 60)
+    return withWindowTimes(
+        startTime = sliderMinutesToLocalTime(snappedStart),
+        endTime = sliderMinutesToLocalTime(snappedEnd),
+        endsNextDay = snappedEnd >= 24 * 60 || snappedEnd <= snappedStart,
+    )
+}
+
+private fun TaskDraft.withWindowTimes(
+    startTime: LocalTime,
+    endTime: LocalTime,
+    endsNextDay: Boolean = !endTime.isAfter(startTime),
+): TaskDraft {
+    val anchorDate = when (schedulingMode) {
+        TaskSchedulingMode.FIXED_DAY -> fixedDate
+        TaskSchedulingMode.FIXED_EXACT -> fixedStartAt.toLocalDate()
+        else -> if (hasDeadline) deadline.toLocalDate() else fixedStartAt.toLocalDate()
+    }
+    return copy(
+        hasWindow = true,
+        fixedStartAt = LocalDateTime.of(anchorDate, startTime).withSecond(0).withNano(0),
+        fixedEndAt = LocalDateTime.of(anchorDate.plusDays(if (endsNextDay) 1 else 0), endTime).withSecond(0).withNano(0),
+    )
+}
+
+private fun sliderMinutesToLocalTime(totalMinutes: Int): LocalTime =
+    LocalTime.MIDNIGHT.plusMinutes((totalMinutes % (24 * 60)).toLong())
 
 private fun NumberPicker.styleDurationPicker(
     backgroundColor: Int,

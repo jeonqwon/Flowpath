@@ -9,6 +9,7 @@ import dev.codex.reclaimoss.domain.model.Timeframe
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -125,6 +126,60 @@ class CreateWorkScreenSummaryTest {
         assertEquals(TaskSchedulingMode.FIXED_EXACT, updated.schedulingMode)
         assertEquals(LocalDateTime.of(2026, 6, 3, 13, 0), updated.deadline)
         assertEquals(LocalDateTime.of(2026, 6, 3, 12, 0), updated.fixedStartAt)
+    }
+
+    @Test
+    fun `task window row summary formats overnight windows compactly`() {
+        val summary = withLocale(Locale.US) {
+            taskWindowSummary(
+                TaskDraft(
+                    hasWindow = true,
+                    schedulingMode = TaskSchedulingMode.FLEXIBLE,
+                    fixedStartAt = LocalDateTime.of(2026, 6, 3, 22, 0),
+                    fixedEndAt = LocalDateTime.of(2026, 6, 4, 2, 0),
+                ),
+            )
+        }
+
+        assertEquals("10:00 PM-2:00 AM", summary)
+    }
+
+    @Test
+    fun `applying window editor only copies window fields`() {
+        val base = TaskDraft(
+            title = "Read",
+            schedulingMode = TaskSchedulingMode.FIXED_DAY,
+            fixedDate = LocalDate.of(2026, 6, 6),
+            timeframeId = "tf-2",
+        )
+        val editedWindow = TaskDraft(
+            title = "Ignored",
+            hasWindow = true,
+            schedulingMode = TaskSchedulingMode.FLEXIBLE,
+            fixedDate = LocalDate.of(2026, 6, 10),
+            fixedStartAt = LocalDateTime.of(2026, 6, 6, 18, 0),
+            fixedEndAt = LocalDateTime.of(2026, 6, 7, 1, 0),
+        )
+
+        val updated = base.applyWindowEditor(editedWindow)
+
+        assertEquals("Read", updated.title)
+        assertEquals(TaskSchedulingMode.FIXED_DAY, updated.schedulingMode)
+        assertEquals(LocalDate.of(2026, 6, 6), updated.fixedDate)
+        assertEquals(LocalDateTime.of(2026, 6, 6, 18, 0), updated.fixedStartAt)
+        assertEquals(LocalDateTime.of(2026, 6, 7, 1, 0), updated.fixedEndAt)
+    }
+
+    @Test
+    fun `window slider state preserves overnight end beyond midnight`() {
+        val state = windowSliderState(
+            start = LocalTime.of(22, 0),
+            end = LocalTime.of(2, 0),
+        )
+
+        assertEquals(22 * 60f, state.startMinutes)
+        assertEquals((24 + 2) * 60f, state.endMinutes)
+        assertEquals(true, state.endsNextDay)
     }
 
     @Test

@@ -804,6 +804,48 @@ class SchedulerEngineTest {
     }
 
     @Test
+    fun `fixed day tasks can use an overnight window and schedule inside it`() {
+        val date = LocalDate.of(2026, 5, 20)
+        val overnightHours = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(
+                    windows = listOf(
+                        TimeWindow(LocalTime.MIDNIGHT, LocalTime.of(23, 59, 59)),
+                    ),
+                )
+            },
+        )
+        val windowStart = ZonedDateTime.of(date, LocalTime.of(22, 0), zone).toInstant()
+        val windowEnd = ZonedDateTime.of(date.plusDays(1), LocalTime.of(2, 0), zone).toInstant()
+        val task = task(
+            id = "overnight-dinner",
+            deadline = ZonedDateTime.of(date, LocalTime.of(23, 59), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            schedulingMode = TaskSchedulingMode.FIXED_DAY,
+            fixedStartAt = windowStart,
+            fixedEndAt = windowEnd,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = overnightHours,
+            timePeriods = emptyList(),
+            policy = policy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val scheduled = plan.blocks.single()
+        assertEquals(LocalTime.of(23, 30), scheduled.startAt.atZone(zone).toLocalTime())
+        assertEquals(date.plusDays(1), scheduled.endAt.atZone(zone).toLocalDate())
+    }
+
+    @Test
     fun `continuation task waits until parent scheduled work ends`() {
         val date = LocalDate.of(2026, 5, 19)
         val parent = task(

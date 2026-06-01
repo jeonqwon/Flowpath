@@ -47,6 +47,12 @@ class SchedulerEngine {
         val startAt: Instant,
     )
 
+    private data class DailyWindowConstraint(
+        val startTime: LocalTime,
+        val endTime: LocalTime,
+        val overnight: Boolean,
+    )
+
     fun rebuildSchedule(
         tasks: List<ScheduleTask>,
         timeframes: List<Timeframe> = emptyList(),
@@ -121,7 +127,8 @@ class SchedulerEngine {
             )
             val timeframeStart = timeframe?.startDate?.atStartOfDay(zoneId)?.toInstant()
             val timeframeEnd = timeframe?.endDate?.plusDays(1)?.atStartOfDay(zoneId)?.toInstant()?.minusSeconds(1)
-            val effectiveTaskDueAt = listOfNotNull(task.dueAt, timeframeEnd, dependencyEndBoundary).minOrNull() ?: task.dueAt
+            val taskUpperBound = taskSchedulingUpperBound(task, zoneId)
+            val effectiveTaskDueAt = listOfNotNull(taskUpperBound, timeframeEnd, dependencyEndBoundary).minOrNull() ?: taskUpperBound
             val firstBlockStart = when {
                 task.schedulingMode == TaskSchedulingMode.FIXED_DAY -> {
                     val occurrenceStart = task.dueAt.atZone(zoneId).toLocalDate().atStartOfDay(zoneId).toInstant()
@@ -284,7 +291,7 @@ class SchedulerEngine {
                     reason = if (scheduledMinutes > 0) {
                         if (task.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
                             "Only part of this task fits on the selected date."
-                        } else if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+                        } else if (taskHasWindowConstraint(task, zoneId)) {
                             "Only part of this task fits inside its time window."
                         } else {
                             "Only part of this task fits before its deadline."
@@ -292,7 +299,7 @@ class SchedulerEngine {
                     } else {
                         if (task.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
                             "No valid time is available on the selected date."
-                        } else if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+                        } else if (taskHasWindowConstraint(task, zoneId)) {
                             "No valid time is available inside this time window."
                         } else {
                             "No valid slot is available before the deadline."
@@ -330,11 +337,18 @@ class SchedulerEngine {
         if (task.notBeforeAt != null && block.startAt < task.notBeforeAt) return false
         if (timeframeStart != null && block.startAt < timeframeStart) return false
         if (timeframeEnd != null && block.endAt > timeframeEnd) return false
-        if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null && block.startAt < task.fixedStartAt) return false
+        if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE && task.fixedStartAt != null && !taskHasDailyWindowConstraint(task, zoneId) && block.startAt < task.fixedStartAt) return false
         if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
             val windowStart = task.fixedStartAt ?: return false
             val windowEnd = task.fixedEndAt ?: task.dueAt
             if (block.startAt < windowStart || block.endAt > windowEnd) return false
+        }
+        if (taskHasDailyWindowConstraint(task, zoneId)) {
+            val blockDate = block.startAt.atZone(zoneId).toLocalDate()
+            val fitsWindow = windowSegmentsForDate(task, blockDate, zoneId).any { segment ->
+                block.startAt >= segment.startAt && block.endAt <= segment.endAt
+            }
+            if (!fitsWindow) return false
         }
         if (occupiedWithoutSelf.any { it.startAt < block.endAt && it.endAt > block.startAt }) return false
         if (!isInsideWorkingWindow(block, zoneId, workHours)) return false
@@ -345,14 +359,29 @@ class SchedulerEngine {
         block: ScheduleBlock,
         zoneId: ZoneId,
         workHours: WorkHoursProfile,
+    ): Boolean = isInsideWorkingWindow(BusyWindow(block.startAt, block.endAt), zoneId, workHours)
+
+    private fun isInsideWorkingWindow(
+        window: BusyWindow,
+        zoneId: ZoneId,
+        workHours: WorkHoursProfile,
     ): Boolean {
-        val start = block.startAt.atZone(zoneId)
-        val end = block.endAt.atZone(zoneId)
-        if (start.toLocalDate() != end.toLocalDate()) return false
-        val day = workHours.days[start.dayOfWeek] ?: return false
-        return day.windows.any { window ->
-            start.toLocalTime() >= window.start && end.toLocalTime() <= window.end
+        var cursor = window.startAt
+        while (cursor < window.endAt) {
+            val cursorZoned = cursor.atZone(zoneId)
+            val dayDate = cursorZoned.toLocalDate()
+            val nextMidnight = dayDate.plusDays(1).atStartOfDay(zoneId).toInstant()
+            val segmentEnd = minInstant(window.endAt, nextMidnight)
+            val day = workHours.days[cursorZoned.dayOfWeek] ?: return false
+            val fitsDayWindow = day.windows.any { dayWindow ->
+                val dayWindowStart = ZonedDateTime.of(dayDate, dayWindow.start, zoneId).toInstant()
+                val dayWindowEnd = windowEndInstant(dayDate, dayWindow.end, zoneId)
+                cursor >= dayWindowStart && segmentEnd <= dayWindowEnd
+            }
+            if (!fitsDayWindow) return false
+            cursor = segmentEnd
         }
+        return true
     }
 
     private fun nextCandidate(
@@ -371,18 +400,12 @@ class SchedulerEngine {
         preferredTimePeriodId: String?,
     ): BusyWindow? {
         val fixedDayEnd = if (task.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
-            task.dueAt.atZone(zoneId).toLocalDate().plusDays(1).atStartOfDay(zoneId).toInstant().minusSeconds(1)
+            taskSchedulingUpperBound(task, zoneId)
         } else {
             dueAt
         }
         val effectiveDueAt = timeframeEnd?.let { minInstant(fixedDayEnd, it) } ?: fixedDayEnd
-        val flexibleWindowStart = if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) task.fixedStartAt else null
-        val flexibleWindowEnd = if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
-            val taskWindowEnd = task.fixedEndAt ?: dueAt
-            timeframeEnd?.let { minInstant(taskWindowEnd, it) } ?: taskWindowEnd
-        } else {
-            null
-        }
+        val hasWindowConstraint = taskHasWindowConstraint(task, zoneId)
         val lookAheadEnd = minInstant(
             effectiveDueAt,
             cursor.plus(policy.lookAheadDays.toLong(), ChronoUnit.DAYS),
@@ -393,15 +416,21 @@ class SchedulerEngine {
         var bestConcurrentCandidate: ScoredBusyWindow? = null
 
         while (!date.isAfter(endDate)) {
-            val day = workHours.days[date.dayOfWeek] ?: return null
             val preferredSegments = mutableListOf<BusyWindow>()
             val fallbackSegments = mutableListOf<BusyWindow>()
-            for (window in day.windows) {
-                val windowStart = ZonedDateTime.of(date, window.start, zoneId).toInstant()
-                val windowEnd = ZonedDateTime.of(date, window.end, zoneId).toInstant()
-                if (windowEnd <= cursor) continue
-                val segmentStart = maxInstant(windowStart, maxInstant(cursor, flexibleWindowStart ?: cursor))
-                val segmentEnd = minInstant(windowEnd, minInstant(effectiveDueAt, flexibleWindowEnd ?: effectiveDueAt))
+            val candidateSegments = if (hasWindowConstraint) {
+                windowSegmentsForDate(task, date, zoneId)
+            } else {
+                workHours.days[date.dayOfWeek]?.windows.orEmpty().map { window ->
+                    BusyWindow(
+                        startAt = ZonedDateTime.of(date, window.start, zoneId).toInstant(),
+                        endAt = windowEndInstant(date, window.end, zoneId),
+                    )
+                }
+            }
+            for (candidateSegment in candidateSegments) {
+                val segmentStart = maxInstant(candidateSegment.startAt, cursor)
+                val segmentEnd = minInstant(candidateSegment.endAt, effectiveDueAt)
                 if (segmentEnd <= segmentStart) continue
                 val freeSegments = subtractBusy(
                     start = segmentStart,
@@ -427,6 +456,7 @@ class SchedulerEngine {
                     alignmentMinutes = policy.alignmentMinutes,
                     allowTaskSplitting = policy.allowTaskSplitting,
                     softOccupied = softOccupied,
+                    workHours = if (hasWindowConstraint) workHours else null,
                 )
                 val fallbackCandidate = if (!policy.strictPreferredPeriod && preferredCandidate == null) {
                     fallbackSegments.bestConcurrentBlock(
@@ -437,6 +467,7 @@ class SchedulerEngine {
                         alignmentMinutes = policy.alignmentMinutes,
                         allowTaskSplitting = policy.allowTaskSplitting,
                         softOccupied = softOccupied,
+                        workHours = if (hasWindowConstraint) workHours else null,
                     )
                 } else {
                     null
@@ -446,7 +477,7 @@ class SchedulerEngine {
                     ?: fallbackCandidate?.let { candidate -> minByNullable(bestConcurrentCandidate, candidate) }
                     ?: bestConcurrentCandidate
             } else {
-                val preferredCandidate = if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+                val preferredCandidate = if (hasWindowConstraint) {
                     preferredSegments.bestWindowedBlock(
                         remainingMinutes = remainingMinutes,
                         maxBlockMinutes = policy.maxBlockMinutes,
@@ -454,6 +485,7 @@ class SchedulerEngine {
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
                         allowTaskSplitting = policy.allowTaskSplitting,
+                        workHours = workHours,
                     )
                 } else {
                     preferredSegments.firstBlock(
@@ -468,7 +500,7 @@ class SchedulerEngine {
                 preferredCandidate?.let { return it }
             }
             if (!policy.strictPreferredPeriod && earliestFallback == null) {
-                earliestFallback = if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+                earliestFallback = if (hasWindowConstraint) {
                     fallbackSegments.bestWindowedBlock(
                         remainingMinutes = remainingMinutes,
                         maxBlockMinutes = policy.maxBlockMinutes,
@@ -476,6 +508,7 @@ class SchedulerEngine {
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
                         allowTaskSplitting = policy.allowTaskSplitting,
+                        workHours = workHours,
                     )
                 } else {
                     fallbackSegments.firstBlock(
@@ -577,6 +610,7 @@ class SchedulerEngine {
         alignmentMinutes: Int,
         allowTaskSplitting: Boolean,
         softOccupied: List<BusyWindow>,
+        workHours: WorkHoursProfile? = null,
     ): ScoredBusyWindow? {
         var best: ScoredBusyWindow? = null
         for (segment in this) {
@@ -599,6 +633,10 @@ class SchedulerEngine {
                     startAt = candidateStart,
                     endAt = candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
                 )
+                if (workHours != null && !isInsideWorkingWindow(candidate, zoneId, workHours)) {
+                    candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                    continue
+                }
                 val overlapCount = softOccupied.count { it.startAt < candidate.endAt && it.endAt > candidate.startAt }
                 val candidateMidpoint = Duration.between(Instant.EPOCH, candidate.startAt).toMinutes() + preferredBlockMinutes / 2
                 val score = ScoredBusyWindow(
@@ -621,6 +659,7 @@ class SchedulerEngine {
         zoneId: ZoneId,
         alignmentMinutes: Int,
         allowTaskSplitting: Boolean,
+        workHours: WorkHoursProfile,
     ): BusyWindow? {
         var best: ScoredBusyWindow? = null
         for (segment in this) {
@@ -643,6 +682,10 @@ class SchedulerEngine {
                     startAt = candidateStart,
                     endAt = candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
                 )
+                if (!isInsideWorkingWindow(candidate, zoneId, workHours)) {
+                    candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                    continue
+                }
                 val candidateMidpoint = Duration.between(Instant.EPOCH, candidate.startAt).toMinutes() + preferredBlockMinutes / 2
                 val score = ScoredBusyWindow(
                     window = candidate,
@@ -762,6 +805,100 @@ class SchedulerEngine {
             TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
             TaskContinuationMode.AFTER_PARENT_DUE_AT -> null
         }
+    }
+
+    private fun taskSchedulingUpperBound(
+        task: ScheduleTask,
+        zoneId: ZoneId,
+    ): Instant = when {
+        task.schedulingMode == TaskSchedulingMode.FIXED_DAY && taskHasDailyWindowConstraint(task, zoneId) ->
+            task.fixedEndAt ?: task.dueAt
+        task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW ->
+            task.fixedEndAt ?: task.dueAt
+        else -> task.dueAt
+    }
+
+    private fun taskHasWindowConstraint(
+        task: ScheduleTask,
+        zoneId: ZoneId,
+    ): Boolean = task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW || taskHasDailyWindowConstraint(task, zoneId)
+
+    private fun taskHasDailyWindowConstraint(
+        task: ScheduleTask,
+        zoneId: ZoneId,
+    ): Boolean = task.dailyWindowConstraint(zoneId) != null
+
+    private fun ScheduleTask.dailyWindowConstraint(zoneId: ZoneId): DailyWindowConstraint? {
+        if (schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) return null
+        val start = fixedStartAt ?: return null
+        val end = fixedEndAt ?: return null
+        val startLocal = start.atZone(zoneId)
+        val endLocal = end.atZone(zoneId)
+        return DailyWindowConstraint(
+            startTime = startLocal.toLocalTime(),
+            endTime = endLocal.toLocalTime(),
+            overnight = endLocal.toLocalDate().isAfter(startLocal.toLocalDate()) || !endLocal.toLocalTime().isAfter(startLocal.toLocalTime()),
+        )
+    }
+
+    private fun windowSegmentsForDate(
+        task: ScheduleTask,
+        date: LocalDate,
+        zoneId: ZoneId,
+    ): List<BusyWindow> {
+        if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
+            val startAt = task.fixedStartAt ?: return emptyList()
+            val endAt = task.fixedEndAt ?: task.dueAt
+            val dayStart = date.atStartOfDay(zoneId).toInstant()
+            val nextDayStart = date.plusDays(1).atStartOfDay(zoneId).toInstant()
+            val segmentStart = maxInstant(startAt, dayStart)
+            val segmentEnd = minInstant(endAt, nextDayStart)
+            return if (segmentEnd > segmentStart) listOf(BusyWindow(segmentStart, segmentEnd)) else emptyList()
+        }
+        val constraint = task.dailyWindowConstraint(zoneId) ?: return emptyList()
+        val anchorDate = task.dueAt.atZone(zoneId).toLocalDate()
+        return when {
+            !constraint.overnight && task.schedulingMode == TaskSchedulingMode.FIXED_DAY && date != anchorDate -> emptyList()
+            !constraint.overnight -> listOf(
+                BusyWindow(
+                    startAt = ZonedDateTime.of(date, constraint.startTime, zoneId).toInstant(),
+                    endAt = ZonedDateTime.of(date, constraint.endTime, zoneId).toInstant(),
+                ),
+            )
+            task.schedulingMode == TaskSchedulingMode.FIXED_DAY && date == anchorDate -> listOf(
+                BusyWindow(
+                    startAt = ZonedDateTime.of(date, constraint.startTime, zoneId).toInstant(),
+                    endAt = ZonedDateTime.of(date.plusDays(1), constraint.endTime, zoneId).toInstant(),
+                ),
+            )
+            task.schedulingMode == TaskSchedulingMode.FIXED_DAY && date == anchorDate.plusDays(1) -> listOf(
+                BusyWindow(
+                    startAt = date.atStartOfDay(zoneId).toInstant(),
+                    endAt = ZonedDateTime.of(date, constraint.endTime, zoneId).toInstant(),
+                ),
+            )
+            task.schedulingMode == TaskSchedulingMode.FIXED_DAY -> emptyList()
+            else -> listOf(
+                BusyWindow(
+                    startAt = ZonedDateTime.of(date, constraint.startTime, zoneId).toInstant(),
+                    endAt = ZonedDateTime.of(date.plusDays(1), constraint.endTime, zoneId).toInstant(),
+                ),
+                BusyWindow(
+                    startAt = date.atStartOfDay(zoneId).toInstant(),
+                    endAt = ZonedDateTime.of(date, constraint.endTime, zoneId).toInstant(),
+                ),
+            )
+        }
+    }
+
+    private fun windowEndInstant(
+        date: LocalDate,
+        localEnd: LocalTime,
+        zoneId: ZoneId,
+    ): Instant = if (localEnd == LocalTime.of(23, 59, 59)) {
+        date.plusDays(1).atStartOfDay(zoneId).toInstant()
+    } else {
+        ZonedDateTime.of(date, localEnd, zoneId).toInstant()
     }
 
     private fun taskAllowsOverlap(

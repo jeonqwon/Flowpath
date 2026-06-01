@@ -839,7 +839,7 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate.toInstant(),
-                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
+                                    fixedStartAt = if (fixedStartLocal != null) {
                                         ZonedDateTime.of(
                                             candidate.toLocalDate().plusDays(fixedStartDayOffset ?: 0L),
                                             fixedStartLocal.toLocalTime(),
@@ -848,7 +848,7 @@ class PlannerCoordinator(
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
+                                    fixedEndAt = if (fixedEndLocal != null) {
                                         ZonedDateTime.of(
                                             candidate.toLocalDate().plusDays(fixedEndDayOffset ?: 0L),
                                             fixedEndLocal.toLocalTime(),
@@ -880,7 +880,7 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate,
-                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
+                                    fixedStartAt = if (fixedStartLocal != null) {
                                         ZonedDateTime.of(
                                             candidateDate.plusDays(fixedStartDayOffset ?: 0L),
                                             fixedStartLocal.toLocalTime(),
@@ -889,7 +889,7 @@ class PlannerCoordinator(
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
+                                    fixedEndAt = if (fixedEndLocal != null) {
                                         ZonedDateTime.of(
                                             candidateDate.plusDays(fixedEndDayOffset ?: 0L),
                                             fixedEndLocal.toLocalTime(),
@@ -915,7 +915,7 @@ class PlannerCoordinator(
                             add(
                                 TaskOccurrence(
                                     dueAt = candidate,
-                                    fixedStartAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedStartLocal != null) {
+                                    fixedStartAt = if (fixedStartLocal != null) {
                                         ZonedDateTime.of(
                                             candidateDate.plusDays(fixedStartDayOffset ?: 0L),
                                             fixedStartLocal.toLocalTime(),
@@ -924,7 +924,7 @@ class PlannerCoordinator(
                                     } else {
                                         null
                                     },
-                                    fixedEndAt = if ((schedulingMode == TaskSchedulingMode.FIXED_EXACT || schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) && fixedEndLocal != null) {
+                                    fixedEndAt = if (fixedEndLocal != null) {
                                         ZonedDateTime.of(
                                             candidateDate.plusDays(fixedEndDayOffset ?: 0L),
                                             fixedEndLocal.toLocalTime(),
