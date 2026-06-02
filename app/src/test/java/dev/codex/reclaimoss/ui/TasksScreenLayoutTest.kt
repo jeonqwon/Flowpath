@@ -137,6 +137,63 @@ class TasksScreenLayoutTest {
         assertEquals(TasksViewMode.EXPANDED, dev.codex.reclaimoss.settings.AppSettings().tasksViewMode)
     }
 
+    @Test
+    fun `timeframe rail metadata is continuous across day boundaries`() {
+        val current = timeframe(id = "tf-1", name = "Sprint", startDate = LocalDate.of(2026, 6, 1), endDate = LocalDate.of(2026, 6, 3))
+        val next = timeframe(id = "tf-1", name = "Sprint", startDate = LocalDate.of(2026, 6, 1), endDate = LocalDate.of(2026, 6, 3))
+
+        val metadata = buildTimeframeRailMetadata(
+            currentDayTimeframes = listOf(current),
+            nextDayTimeframes = listOf(next),
+        )
+
+        assertEquals(1, metadata.size)
+        assertTrue(metadata.single().continuesIntoNextDay)
+    }
+
+    @Test
+    fun `timeframe rail metadata keeps parallel rails touching in order`() {
+        val sprint = timeframe(id = "tf-1", name = "Sprint", startDate = LocalDate.of(2026, 6, 1), endDate = LocalDate.of(2026, 6, 5))
+        val finals = timeframe(id = "tf-2", name = "Finals", startDate = LocalDate.of(2026, 6, 2), endDate = LocalDate.of(2026, 6, 4))
+
+        val metadata = buildTimeframeRailMetadata(
+            currentDayTimeframes = listOf(sprint, finals),
+            nextDayTimeframes = emptyList(),
+        )
+
+        assertEquals(listOf("tf-1", "tf-2"), metadata.map { it.id })
+        assertEquals(listOf(0, 1), metadata.map { it.laneIndex })
+    }
+
+    @Test
+    fun `sticky timeframe header text joins active names in a single line`() {
+        val metadata = listOf(
+            TimeframeRailMetadata(
+                id = "tf-1",
+                name = "Sprint",
+                colorHex = "#F4B6D2",
+                laneIndex = 0,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = true,
+            ),
+            TimeframeRailMetadata(
+                id = "tf-2",
+                name = "Finals",
+                colorHex = "#9BCB72",
+                laneIndex = 1,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = false,
+            ),
+        )
+
+        assertEquals("Sprint · Finals", stickyTimeframeHeaderNames(metadata))
+    }
+
+    @Test
+    fun `sticky timeframe header text disappears when no rails are active`() {
+        assertEquals(null, stickyTimeframeHeaderNames(emptyList()))
+    }
+
     private fun scheduleBlock(
         id: String = "block-1",
         taskId: String = "task-1",

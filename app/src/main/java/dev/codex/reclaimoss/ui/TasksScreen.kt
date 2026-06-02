@@ -2,6 +2,7 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,6 +91,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -150,6 +152,15 @@ internal data class TaskDaySection(
     val reminderCount: Int,
 )
 
+internal data class TimeframeRailMetadata(
+    val id: String,
+    val name: String,
+    val colorHex: String,
+    val laneIndex: Int,
+    val continuesFromPreviousDay: Boolean,
+    val continuesIntoNextDay: Boolean,
+)
+
 internal fun activeTimeframesForDay(
     timeframes: List<Timeframe>,
     day: LocalDate,
@@ -187,8 +198,28 @@ internal fun buildTaskDaySection(
     )
 }
 
+internal fun buildTimeframeRailMetadata(
+    currentDayTimeframes: List<Timeframe>,
+    previousDayTimeframes: List<Timeframe> = emptyList(),
+    nextDayTimeframes: List<Timeframe> = emptyList(),
+): List<TimeframeRailMetadata> {
+    val previousIds = previousDayTimeframes.map { it.id }.toSet()
+    val nextIds = nextDayTimeframes.map { it.id }.toSet()
+    return currentDayTimeframes.mapIndexed { index, timeframe ->
+        TimeframeRailMetadata(
+            id = timeframe.id,
+            name = timeframe.name,
+            colorHex = timeframe.colorHex,
+            laneIndex = index,
+            continuesFromPreviousDay = timeframe.id in previousIds,
+            continuesIntoNextDay = timeframe.id in nextIds,
+        )
+    }
+}
+
 private const val TaskFeedDayCount = 20001
 private const val TaskFeedCenterIndex = TaskFeedDayCount / 2
+private val ExpandedStickyHeaderHeight = 44.dp
 
 private enum class TasksSheetType {
     ADD_CHOOSER,
@@ -196,7 +227,7 @@ private enum class TasksSheetType {
     DAY_SUMMARY,
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TasksScreen(
     padding: PaddingValues,
@@ -217,8 +248,7 @@ fun TasksScreen(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val collapsedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
-    val expandedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
-    val activeListState = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
+    val expandedListState = rememberLazyListState(initialFirstVisibleItemIndex = expandedListIndexForDate(today, selectedDate))
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
     val activeReminders = remember(state.snapshot.reminders) { state.snapshot.reminders.filter { it.status != ReminderStatus.COMPLETED } }
     val dateFormatter = remember(settings.dateFormatPreference) {
@@ -229,31 +259,6 @@ fun TasksScreen(
     }
     val reminderFormatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
     val hourHeight = 144.dp
-    val currentPinnedDate = remember(activeListState.firstVisibleItemIndex, settings.tasksViewMode) {
-        taskFeedDateForIndex(
-            today = today,
-            index = when (settings.tasksViewMode) {
-                TasksViewMode.COLLAPSED -> activeListState.firstVisibleItemIndex
-                TasksViewMode.EXPANDED -> activeListState.firstVisibleItemIndex
-            },
-        )
-    }
-    val currentPinnedSection = remember(
-        currentPinnedDate,
-        state.snapshot.blocks,
-        state.snapshot.reminders,
-        state.snapshot.timeframes,
-        tasksById,
-    ) {
-        buildTaskDaySection(
-            date = currentPinnedDate,
-            blocks = state.snapshot.blocks,
-            tasksById = tasksById,
-            reminders = activeReminders,
-            timeframes = state.snapshot.timeframes,
-            zoneId = zoneId,
-        )
-    }
     var showingSheet by rememberSaveable { mutableStateOf<TasksSheetType?>(null) }
     var selectedDaySummaryEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedDaySummary = selectedDaySummaryEpoch?.let { epoch ->
@@ -274,7 +279,7 @@ fun TasksScreen(
                 collapsedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
             }
             TasksViewMode.EXPANDED -> {
-                expandedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
+                expandedListState.scrollToItem(expandedListIndexForDate(today, selectedDate))
             }
         }
     }
@@ -283,7 +288,12 @@ fun TasksScreen(
         val stateToWatch = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
         snapshotFlow { stateToWatch.firstVisibleItemIndex }
             .collect { index ->
-                onSelectedDateChange(taskFeedDateForIndex(today, index))
+                onSelectedDateChange(
+                    when (settings.tasksViewMode) {
+                        TasksViewMode.COLLAPSED -> taskFeedDateForIndex(today, index)
+                        TasksViewMode.EXPANDED -> taskFeedDateForExpandedListIndex(today, index)
+                    },
+                )
             }
     }
 
@@ -321,10 +331,13 @@ fun TasksScreen(
                     onClick = {
                         val targetDate = today
                         onSelectedDateChange(targetDate)
-                        val targetIndex = taskFeedIndexForDate(today, targetDate)
+                        val targetIndex = when (settings.tasksViewMode) {
+                            TasksViewMode.COLLAPSED -> taskFeedIndexForDate(today, targetDate)
+                            TasksViewMode.EXPANDED -> expandedListIndexForDate(today, targetDate)
+                        }
                         val offsetPx = with(density) {
                             if (settings.tasksViewMode == TasksViewMode.EXPANDED) {
-                                timelineOffset((minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0), hourHeight).roundToPx()
+                                (ExpandedStickyHeaderHeight + timelineOffset((minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0), hourHeight)).roundToPx()
                             } else {
                                 0
                             }
@@ -367,6 +380,7 @@ fun TasksScreen(
                             )
                             CollapsedTaskDayRow(
                                 section = section,
+                                railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
                                 formatter = dateFormatter,
                                 today = today,
                                 onClick = {
@@ -378,25 +392,34 @@ fun TasksScreen(
                     }
                 }
                 TasksViewMode.EXPANDED -> {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            state = expandedListState,
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
-                            contentPadding = PaddingValues(top = 64.dp, bottom = 260.dp),
-                        ) {
-                            items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
-                                val date = taskFeedDateForIndex(today, index)
-                                val section = buildTaskDaySection(
-                                    date = date,
-                                    blocks = state.snapshot.blocks,
-                                    tasksById = tasksById,
-                                    reminders = activeReminders,
-                                    timeframes = state.snapshot.timeframes,
-                                    zoneId = zoneId,
+                    LazyColumn(
+                        state = expandedListState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
+                        contentPadding = PaddingValues(bottom = 260.dp),
+                    ) {
+                        for (index in 0 until TaskFeedDayCount) {
+                            val date = taskFeedDateForIndex(today, index)
+                            val section = buildTaskDaySection(
+                                date = date,
+                                blocks = state.snapshot.blocks,
+                                tasksById = tasksById,
+                                reminders = activeReminders,
+                                timeframes = state.snapshot.timeframes,
+                                zoneId = zoneId,
+                            )
+                            val railMetadata = railMetadataForDate(state.snapshot.timeframes, date)
+                            stickyHeader(key = "tasks-header-${date.toEpochDay()}") {
+                                ExpandedTaskDayHeader(
+                                    section = section,
+                                    railMetadata = railMetadata,
+                                    formatter = dateFormatter,
                                 )
+                            }
+                            item(key = "tasks-body-${date.toEpochDay()}") {
                                 ExpandedTaskDaySection(
                                     section = section,
+                                    railMetadata = railMetadata,
                                     tasksById = tasksById,
                                     zoneId = zoneId,
                                     hourHeight = hourHeight,
@@ -405,13 +428,6 @@ fun TasksScreen(
                                 )
                             }
                         }
-                        ExpandedTasksPinnedHeader(
-                            section = currentPinnedSection,
-                            formatter = dateFormatter,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .align(Alignment.TopStart),
-                        )
                     }
                 }
             }
@@ -500,12 +516,28 @@ fun TasksScreen(
 private fun taskFeedIndexForDate(today: LocalDate, date: LocalDate): Int =
     (TaskFeedCenterIndex + ChronoUnit.DAYS.between(today, date).toInt()).coerceIn(0, TaskFeedDayCount - 1)
 
+private fun expandedListIndexForDate(today: LocalDate, date: LocalDate): Int =
+    taskFeedIndexForDate(today, date) * 2
+
+private fun taskFeedDateForExpandedListIndex(today: LocalDate, index: Int): LocalDate =
+    taskFeedDateForIndex(today, (index / 2).coerceIn(0, TaskFeedDayCount - 1))
+
 private fun taskFeedDateForIndex(today: LocalDate, index: Int): LocalDate =
     today.plusDays((index - TaskFeedCenterIndex).toLong())
+
+private fun railMetadataForDate(
+    timeframes: List<Timeframe>,
+    date: LocalDate,
+): List<TimeframeRailMetadata> = buildTimeframeRailMetadata(
+    currentDayTimeframes = activeTimeframesForDay(timeframes, date),
+    previousDayTimeframes = activeTimeframesForDay(timeframes, date.minusDays(1)),
+    nextDayTimeframes = activeTimeframesForDay(timeframes, date.plusDays(1)),
+)
 
 @Composable
 private fun CollapsedTaskDayRow(
     section: TaskDaySection,
+    railMetadata: List<TimeframeRailMetadata>,
     formatter: DateTimeFormatter,
     today: LocalDate,
     onClick: () -> Unit,
@@ -528,9 +560,10 @@ private fun CollapsedTaskDayRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TimeframeRailStrip(
-                timeframes = section.timeframes,
-                modifier = Modifier.height(64.dp),
+                rails = railMetadata,
+                modifier = Modifier.height(68.dp),
                 compact = true,
+                segment = TimeframeRailSegment.COMPACT,
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -546,15 +579,6 @@ private fun CollapsedTaskDayRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (section.timeframes.isNotEmpty()) {
-                    Text(
-                        section.timeframes.joinToString(", ") { it.name },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         }
     }
@@ -569,6 +593,7 @@ private fun collapsedDaySummaryText(section: TaskDaySection): String = buildStri
 @Composable
 private fun ExpandedTaskDaySection(
     section: TaskDaySection,
+    railMetadata: List<TimeframeRailMetadata>,
     tasksById: Map<String, ScheduleTask>,
     zoneId: ZoneId,
     hourHeight: Dp,
@@ -580,12 +605,13 @@ private fun ExpandedTaskDaySection(
         modifier = Modifier
             .fillMaxWidth()
             .height(timelineHeight),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         TimeframeRailStrip(
-            timeframes = section.timeframes,
+            rails = railMetadata,
             modifier = Modifier.height(timelineHeight),
             compact = false,
+            segment = TimeframeRailSegment.BODY,
         )
         Box(modifier = Modifier.weight(1f)) {
             FullDayTimeline(
@@ -597,91 +623,122 @@ private fun ExpandedTaskDaySection(
                 allowConcurrentTasks = allowConcurrentTasks,
                 onOpenTask = onOpenTask,
                 onDeleteTask = {},
+                showMidnightLabel = false,
             )
         }
     }
 }
 
 @Composable
-private fun ExpandedTasksPinnedHeader(
+private fun ExpandedTaskDayHeader(
     section: TaskDaySection,
+    railMetadata: List<TimeframeRailMetadata>,
     formatter: DateTimeFormatter,
-    modifier: Modifier = Modifier,
 ) {
+    val timeframeNames = stickyTimeframeHeaderNames(railMetadata)
     Surface(
-        modifier = modifier,
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .height(ExpandedStickyHeaderHeight)
+                .padding(bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TimeframeRailStrip(
-                timeframes = section.timeframes,
-                modifier = Modifier.height(56.dp),
+                rails = railMetadata,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(top = 2.dp),
                 compact = true,
+                segment = TimeframeRailSegment.HEADER,
             )
-            Column(
+            Row(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     formatter.format(section.date),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                Text(
-                    collapsedDaySummaryText(section),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (timeframeNames != null) {
+                    Text(
+                        timeframeNames,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
 }
 
+private enum class TimeframeRailSegment {
+    COMPACT,
+    HEADER,
+    BODY,
+}
+
+internal fun stickyTimeframeHeaderNames(rails: List<TimeframeRailMetadata>): String? =
+    rails.map { it.name }
+        .distinct()
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ")
+
+internal fun stickyTimeframeHeaderText(rails: List<TimeframeRailMetadata>): String? =
+    rails.map { it.name }
+        .distinct()
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ")
+
 @Composable
 private fun TimeframeRailStrip(
-    timeframes: List<Timeframe>,
+    rails: List<TimeframeRailMetadata>,
     modifier: Modifier = Modifier,
     compact: Boolean,
+    segment: TimeframeRailSegment = TimeframeRailSegment.COMPACT,
 ) {
-    val visible = if (timeframes.isEmpty()) listOf<Timeframe?>(null) else timeframes.map { it }
+    val visible = if (rails.isEmpty()) listOf<TimeframeRailMetadata?>(null) else rails.map { it }
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        visible.forEach { timeframe ->
-            if (timeframe == null) {
-                Spacer(Modifier.width(if (compact) 18.dp else 28.dp))
+        visible.forEach { rail ->
+            if (rail == null) {
+                Spacer(Modifier.width(if (compact) 5.dp else 6.dp))
             } else {
-                val color = parseTimeframeColor(timeframe.colorHex)
+                val color = parseTimeframeColor(rail.colorHex)
+                val topConnected = when (segment) {
+                    TimeframeRailSegment.COMPACT -> rail.continuesFromPreviousDay
+                    TimeframeRailSegment.HEADER -> rail.continuesFromPreviousDay
+                    TimeframeRailSegment.BODY -> true
+                }
+                val bottomConnected = when (segment) {
+                    TimeframeRailSegment.COMPACT -> rail.continuesIntoNextDay
+                    TimeframeRailSegment.HEADER -> true
+                    TimeframeRailSegment.BODY -> rail.continuesIntoNextDay
+                }
+                val shape = RoundedCornerShape(
+                    topStart = if (topConnected) 0.dp else 10.dp,
+                    topEnd = if (topConnected) 0.dp else 10.dp,
+                    bottomStart = if (bottomConnected) 0.dp else 10.dp,
+                    bottomEnd = if (bottomConnected) 0.dp else 10.dp,
+                )
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(if (compact) 22.dp else 34.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(color.copy(alpha = 0.88f))
-                        .padding(3.dp),
-                    contentAlignment = Alignment.TopCenter,
-                ) {
-                    Text(
-                        timeframe.name,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
-                            .padding(horizontal = 4.dp, vertical = 3.dp),
-                        style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center,
-                        maxLines = if (compact) 3 else 4,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                        .width(if (compact) 5.dp else 6.dp)
+                        .clip(shape)
+                        .background(color.copy(alpha = 0.88f)),
+                )
             }
         }
     }
@@ -896,6 +953,7 @@ fun FullDayTimeline(
     day: LocalDate,
     hourHeight: Dp,
     allowConcurrentTasks: Boolean = false,
+    showMidnightLabel: Boolean = true,
     onOpenTask: (String) -> Unit,
     onDeleteTask: (String) -> Unit,
 ) {
@@ -921,14 +979,16 @@ fun FullDayTimeline(
         val contentWidth = maxWidth - contentStart
         for (hour in 0..24) {
             val top = timelineOffset(minutes = hour * 60, hourHeight = hourHeight)
-            Text(
-                LocalTime.of(hour % 24, 0).formatHourLabel(),
-                modifier = Modifier
-                    .width(labelWidth)
-                    .offset(y = if (hour == 0) top else top - 10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (!(hour == 0 && !showMidnightLabel)) {
+                Text(
+                    LocalTime.of(hour % 24, 0).formatHourLabel(),
+                    modifier = Modifier
+                        .width(labelWidth)
+                        .offset(y = if (hour == 0) top else top - 10.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
