@@ -251,6 +251,23 @@ class TasksScreenLayoutTest {
         )
     }
 
+    @Test
+    fun `timeframe dropdown label uses timeframe name when only one is active`() {
+        val labels = listOf(TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2"))
+
+        assertEquals("Sprint", timeframeDropdownLabel(labels))
+    }
+
+    @Test
+    fun `timeframe dropdown label uses count when multiple are active`() {
+        val labels = listOf(
+            TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2"),
+            TimeframeHeaderLabel(name = "Finals", colorHex = "#9BCB72"),
+        )
+
+        assertEquals("2 timeframes", timeframeDropdownLabel(labels))
+    }
+
     private fun scheduleBlock(
         id: String = "block-1",
         taskId: String = "task-1",

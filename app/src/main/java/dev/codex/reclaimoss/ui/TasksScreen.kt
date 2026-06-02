@@ -652,6 +652,8 @@ private fun ExpandedTaskDayHeader(
     formatter: DateTimeFormatter,
 ) {
     val timeframeLabels = stickyTimeframeHeaderLabels(railMetadata)
+    val timeframeDropdownText = timeframeDropdownLabel(timeframeLabels)
+    var timeframeMenuExpanded by rememberSaveable(section.date.toEpochDay()) { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -674,26 +676,69 @@ private fun ExpandedTaskDayHeader(
                 .weight(1f)
                 .padding(start = 100.dp, top = 4.dp, end = 12.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
                     formatter.format(section.date),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                timeframeLabels.forEach { label ->
-                    Text(
-                        text = label.name,
-                        modifier = Modifier
-                            .background(
-                                parseTimeframeColor(label.colorHex).copy(alpha = 0.22f),
-                                RoundedCornerShape(10.dp),
+                if (timeframeDropdownText != null) {
+                    Box {
+                        TextButton(
+                            onClick = { timeframeMenuExpanded = true },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = if (timeframeLabels.size == 1) {
+                                    parseTimeframeColor(timeframeLabels.first().colorHex).copy(alpha = 0.22f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)
+                                },
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                timeframeDropdownText,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Outlined.ChevronRight,
+                                contentDescription = "Show active timeframes",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = timeframeMenuExpanded,
+                            onDismissRequest = { timeframeMenuExpanded = false },
+                        ) {
+                            timeframeLabels.forEach { label ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = label.name,
+                                            modifier = Modifier
+                                                .background(
+                                                    parseTimeframeColor(label.colorHex).copy(alpha = 0.22f),
+                                                    RoundedCornerShape(10.dp),
+                                                )
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    onClick = { timeframeMenuExpanded = false },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -709,6 +754,12 @@ private enum class TimeframeRailSegment {
 internal fun stickyTimeframeHeaderLabels(rails: List<TimeframeRailMetadata>): List<TimeframeHeaderLabel> =
     rails.distinctBy { it.id }
         .map { TimeframeHeaderLabel(name = it.name, colorHex = it.colorHex) }
+
+internal fun timeframeDropdownLabel(labels: List<TimeframeHeaderLabel>): String? = when (labels.size) {
+    0 -> null
+    1 -> labels.first().name
+    else -> "${labels.size} timeframes"
+}
 
 internal fun stickyTimeframeHeaderNames(rails: List<TimeframeRailMetadata>): String? =
     rails.map { it.name }
