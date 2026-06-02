@@ -430,6 +430,35 @@ class PlannerViewModel(
         )
     }
 
+    suspend fun editTask(taskId: String, draft: TaskDraft): TaskCreationResult {
+        return coordinator.editTask(
+            taskId = taskId,
+            title = draft.title,
+            description = draft.description,
+            priority = draft.priority,
+            dueAt = draft.taskDueAtInstant(),
+            preferredTimePeriodId = null,
+            timeframeId = draft.timeframeId,
+            hasDeadline = draft.hasDeadline,
+            continuationParentTaskId = draft.continuationParentTaskId,
+            continuationMode = draft.continuationMode,
+            overlapPolicy = draft.overlapPolicy,
+            recurrenceRule = RecurrenceRule(
+                type = draft.recurrenceType,
+                interval = draft.recurrenceInterval,
+                daysOfWeek = if (draft.recurrenceType == RecurrenceType.WEEKLY) draft.recurrenceDays else emptySet(),
+                until = draft.repeatDeadlineOrNull(),
+                endMode = draft.recurrenceEndMode(),
+                occurrenceCount = draft.recurrenceOccurrenceLimit,
+            ),
+            estimatedMinutes = draft.estimatedMinutes,
+            addReminder = draft.addReminder,
+            schedulingMode = draft.schedulingMode,
+            fixedStartAt = draft.schedulingStartInstantOrNull(),
+            fixedEndAt = draft.fixedEndAtInstantOrNull(),
+        )
+    }
+
     suspend fun addReminder(draft: ReminderDraft) {
         coordinator.createReminder(
             title = draft.title,
@@ -682,6 +711,46 @@ private fun nextSleepOccurrence(
     return SleepOccurrence(
         startAt = startAt.atZone(zoneId).toInstant(),
         endAt = startAt.plusMinutes(entry.durationMinutes.toLong()).atZone(zoneId).toInstant(),
+    )
+}
+
+fun ScheduleTask.toEditDraft(
+    addReminder: Boolean,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): TaskDraft {
+    val localDueAt = dueAt.atZone(zoneId).toLocalDateTime()
+    val localFixedStart = fixedStartAt?.atZone(zoneId)?.toLocalDateTime()
+        ?: localDueAt.minusMinutes(estimatedMinutes.toLong())
+    val localFixedEnd = fixedEndAt?.atZone(zoneId)?.toLocalDateTime()
+        ?: localDueAt
+    return TaskDraft(
+        title = title,
+        description = description,
+        priority = priority,
+        preferredTimePeriodId = null,
+        timeframeId = timeframeId,
+        hasDeadline = hasDeadline,
+        continuationParentTaskId = continuationParentTaskId,
+        continuationMode = continuationMode,
+        overlapPolicy = overlapPolicy,
+        deadline = localDueAt,
+        schedulingMode = if (schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) TaskSchedulingMode.FLEXIBLE else schedulingMode,
+        hasWindow = schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW || (schedulingMode != TaskSchedulingMode.FIXED_EXACT && fixedEndAt != null),
+        startDate = if (schedulingMode == TaskSchedulingMode.FLEXIBLE) {
+            fixedStartAt?.atZone(zoneId)?.toLocalDate()
+        } else {
+            null
+        },
+        fixedDate = localDueAt.toLocalDate(),
+        fixedStartAt = localFixedStart,
+        fixedEndAt = localFixedEnd,
+        repeatsForever = recurrenceRule.until == null,
+        estimatedMinutes = estimatedMinutes,
+        addReminder = addReminder,
+        recurrenceType = recurrenceRule.type,
+        recurrenceInterval = recurrenceRule.interval,
+        recurrenceDays = recurrenceRule.daysOfWeek,
+        recurrenceOccurrenceLimit = recurrenceRule.occurrenceCount,
     )
 }
 

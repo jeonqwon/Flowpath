@@ -906,11 +906,12 @@ class SchedulerEngine {
         allowConcurrentTasks: Boolean,
     ): Boolean {
         if (task.taskKind == TaskKind.SLEEP) return false
+        if (!allowConcurrentTasks) return false
         return when (task.overlapPolicy) {
-        TaskOverlapPolicy.INHERIT -> allowConcurrentTasks
-        TaskOverlapPolicy.ALLOW -> true
-        TaskOverlapPolicy.DISALLOW -> false
-    }
+            TaskOverlapPolicy.INHERIT -> true
+            TaskOverlapPolicy.ALLOW -> true
+            TaskOverlapPolicy.DISALLOW -> false
+        }
     }
 
     private fun tasksCanOverlap(

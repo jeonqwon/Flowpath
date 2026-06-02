@@ -72,6 +72,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -138,6 +139,7 @@ fun TaskDetailScreen(
     onBack: () -> Unit,
     onAddReminder: () -> Unit,
     onFollowUp: () -> Unit,
+    onEdit: () -> Unit,
     onReschedule: () -> Unit,
     onDone: () -> Unit,
     onDoneAllRecurring: () -> Unit,
@@ -149,6 +151,8 @@ fun TaskDetailScreen(
     val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
     val firstBlock = blocks.firstOrNull()
     var showActionsMenu by rememberSaveable { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
+    var showDoneAllConfirm by rememberSaveable { mutableStateOf(false) }
     val isRecurringTask = task.recurrenceSeriesId != null || task.recurrenceRule.type != RecurrenceType.NONE
 
     LazyColumn(
@@ -168,8 +172,22 @@ fun TaskDetailScreen(
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Outlined.Delete, contentDescription = "Delete task")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (task.priority == TaskPriority.URGENT) {
+                        Text(
+                            "Urgent",
+                            modifier = Modifier.align(Alignment.CenterVertically),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Outlined.Edit, contentDescription = "Edit task")
+                    }
+                    IconButton(onClick = { showDeleteConfirm = true }) {
+                        Icon(Icons.Outlined.Delete, contentDescription = "Delete task")
+                    }
                 }
             }
         }
@@ -180,20 +198,6 @@ fun TaskDetailScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    if (task.priority == TaskPriority.URGENT) {
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = Color(0xFFF5E3E0),
-                        ) {
-                            Text(
-                                "Urgent",
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                color = Color(0xFFB45D52),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
                     Text(task.title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(
                         firstBlock?.let {
@@ -219,7 +223,7 @@ fun TaskDetailScreen(
                     DetailRow("Due", task.dueDisplayText(formatter, zoneId))
                     DetailRow("Duration", task.estimatedMinutes.durationLabel())
                     if (task.recurrenceRule.type != RecurrenceType.NONE) {
-                        DetailRow("Repeat", recurrenceSummary(task.recurrenceRule))
+                        RepeatDetailRow(task.recurrenceRule)
                     }
                     if (linkedReminder != null) {
                         DetailRow("Reminder", linkedReminder.dueDisplayText(formatter, dateOnlyFormatter, zoneId))
@@ -260,13 +264,13 @@ fun TaskDetailScreen(
                         ) {
                             if (isRecurringTask) {
                                 ActionMenuItem(
-                                    label = "Done all recurring",
-                                    icon = Icons.Outlined.Checklist,
-                                    onClick = {
-                                        showActionsMenu = false
-                                        onDoneAllRecurring()
-                                    },
-                                )
+                                label = "Done all recurring",
+                                icon = Icons.Outlined.Checklist,
+                                onClick = {
+                                    showActionsMenu = false
+                                    showDoneAllConfirm = true
+                                },
+                            )
                             }
                             ActionMenuItem(
                                 label = if (linkedReminder == null) "Add Reminder" else "Dismiss Reminder",
@@ -278,7 +282,7 @@ fun TaskDetailScreen(
                             )
                             ActionMenuItem(
                                 label = "Follow up",
-                                icon = Icons.Outlined.Edit,
+                                icon = Icons.Outlined.Add,
                                 onClick = {
                                     showActionsMenu = false
                                     onFollowUp()
@@ -297,6 +301,52 @@ fun TaskDetailScreen(
                 }
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete()
+                    },
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+            title = { Text("Delete task?") },
+            text = { Text("Are you sure?") },
+        )
+    }
+
+    if (showDoneAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDoneAllConfirm = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDoneAllConfirm = false
+                        onDoneAllRecurring()
+                    },
+                ) {
+                    Text("Done all")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDoneAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+            title = { Text("Done all recurring?") },
+            text = { Text("Are you sure?") },
+        )
     }
 }
 
@@ -416,6 +466,48 @@ fun DetailRow(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.End)
+    }
+}
+
+@Composable
+fun RepeatDetailRow(rule: RecurrenceRule) {
+    val primary = when (rule.type) {
+        RecurrenceType.DAILY -> "Every ${rule.interval} day" + if (rule.interval == 1) "" else "s"
+        RecurrenceType.WEEKLY -> "Every ${rule.interval} week" + if (rule.interval == 1) "" else "s"
+        RecurrenceType.MONTHLY -> "Every ${rule.interval} month" + if (rule.interval == 1) "" else "s"
+        RecurrenceType.NONE -> "Once"
+    }
+    val secondary = if (rule.type == RecurrenceType.WEEKLY && rule.daysOfWeek.isNotEmpty()) {
+        rule.daysOfWeek
+            .sortedBy { it.value }
+            .joinToString(" · ") { day ->
+                day.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+            }
+    } else {
+        null
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            "Repeat",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            primary,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (secondary != null) {
+            Text(
+                secondary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

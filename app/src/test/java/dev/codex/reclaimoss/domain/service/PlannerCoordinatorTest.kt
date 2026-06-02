@@ -1108,6 +1108,177 @@ class PlannerCoordinatorTest {
     }
 
     @Test
+    fun `editing one-time task updates its configuration and reminder`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val timeframe = Timeframe(
+            id = "timeframe-evening",
+            name = "Evening",
+            startDate = now().atZone(zone).toLocalDate().plusDays(1),
+            endDate = now().atZone(zone).toLocalDate().plusDays(3),
+            colorHex = "#AABBCC",
+        )
+        repository.upsertTimeframe(timeframe)
+        val dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(17, 0).atZone(zone).toInstant()
+        val createdTaskId = coordinator.createTask(
+            title = "Write draft",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = dueAt,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = true,
+        ).taskId
+
+        val editedStart = now().atZone(zone).toLocalDate().plusDays(2).atTime(14, 0).atZone(zone).toInstant()
+        val editedEnd = now().atZone(zone).toLocalDate().plusDays(2).atTime(15, 30).atZone(zone).toInstant()
+
+        val result = coordinator.editTask(
+            taskId = createdTaskId,
+            title = "Write outline",
+            description = "Trim scope",
+            priority = TaskPriority.HIGH,
+            dueAt = editedEnd,
+            preferredTimePeriodId = null,
+            timeframeId = timeframe.id,
+            hasDeadline = true,
+            continuationParentTaskId = null,
+            continuationMode = null,
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 90,
+            addReminder = true,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = editedStart,
+            fixedEndAt = editedEnd,
+        )
+
+        assertTrue(result.scheduled)
+        val updatedTask = repository.getTasks().single { it.id == createdTaskId }
+        val updatedReminder = repository.getReminders().single { it.linkedTaskId == createdTaskId }
+        val updatedBlock = repository.getBlocks().single { it.taskId == createdTaskId }
+        assertEquals("Write outline", updatedTask.title)
+        assertEquals("Trim scope", updatedTask.description)
+        assertEquals(TaskPriority.HIGH, updatedTask.priority)
+        assertEquals(timeframe.id, updatedTask.timeframeId)
+        assertEquals(90, updatedTask.estimatedMinutes)
+        assertEquals(editedStart, updatedTask.fixedStartAt)
+        assertEquals(editedEnd, updatedTask.fixedEndAt)
+        assertEquals(editedEnd, updatedTask.dueAt)
+        assertEquals(editedStart, updatedBlock.startAt)
+        assertEquals(editedEnd, updatedBlock.endAt)
+        assertEquals(editedEnd, updatedReminder.dueAt)
+    }
+
+    @Test
+    fun `editing recurring task fields applies from edited date forward`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val createdTaskId = coordinator.createTask(
+            title = "Study",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(18, 0).atZone(zone).toInstant(),
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.FRIDAY)),
+            estimatedMinutes = 60,
+            addReminder = false,
+        ).taskId
+        val occurrencesBeforeEdit = repository.getTasks()
+            .filter { it.recurrenceSeriesId != null }
+            .sortedBy { it.dueAt }
+        val firstOccurrence = occurrencesBeforeEdit.first { it.id == createdTaskId }
+        val editedOccurrence = occurrencesBeforeEdit[1]
+        val originalSeriesId = editedOccurrence.recurrenceSeriesId
+
+        val result = coordinator.editTask(
+            taskId = editedOccurrence.id,
+            title = "Study deep work",
+            description = "Longer block",
+            priority = TaskPriority.HIGH,
+            dueAt = editedOccurrence.dueAt,
+            preferredTimePeriodId = null,
+            timeframeId = null,
+            hasDeadline = true,
+            continuationParentTaskId = null,
+            continuationMode = null,
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+            recurrenceRule = editedOccurrence.recurrenceRule,
+            estimatedMinutes = 90,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FLEXIBLE,
+        )
+
+        assertTrue(result.scheduled)
+        val occurrencesAfterEdit = repository.getTasks().sortedBy { it.dueAt }
+        val preservedFirst = occurrencesAfterEdit.first { it.id == firstOccurrence.id }
+        val updatedEdited = occurrencesAfterEdit.first { it.id == editedOccurrence.id }
+        val futureOccurrence = occurrencesAfterEdit
+            .filter { it.recurrenceSeriesId == originalSeriesId && it.dueAt.isAfter(updatedEdited.dueAt) }
+            .first()
+        assertEquals("Study", preservedFirst.title)
+        assertEquals(60, preservedFirst.estimatedMinutes)
+        assertEquals("Study deep work", updatedEdited.title)
+        assertEquals(90, updatedEdited.estimatedMinutes)
+        assertEquals("Study deep work", futureOccurrence.title)
+        assertEquals(90, futureOccurrence.estimatedMinutes)
+    }
+
+    @Test
+    fun `changing repeat rule splits recurring series from edited date`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        coordinator.createTask(
+            title = "Dinner",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = now().atZone(zone).toLocalDate().plusDays(1).atTime(19, 0).atZone(zone).toInstant(),
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(RecurrenceType.WEEKLY, setOf(DayOfWeek.FRIDAY)),
+            estimatedMinutes = 30,
+            addReminder = true,
+        )
+        val occurrencesBeforeEdit = repository.getTasks()
+            .filter { it.recurrenceSeriesId != null }
+            .sortedBy { it.dueAt }
+        val firstOccurrence = occurrencesBeforeEdit.first()
+        val editedOccurrence = occurrencesBeforeEdit[1]
+        val originalSeriesId = editedOccurrence.recurrenceSeriesId
+
+        val result = coordinator.editTask(
+            taskId = editedOccurrence.id,
+            title = "Dinner",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = editedOccurrence.dueAt,
+            preferredTimePeriodId = null,
+            timeframeId = null,
+            hasDeadline = true,
+            continuationParentTaskId = null,
+            continuationMode = null,
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+            recurrenceRule = RecurrenceRule(RecurrenceType.DAILY),
+            estimatedMinutes = 30,
+            addReminder = true,
+            schedulingMode = TaskSchedulingMode.FLEXIBLE,
+        )
+
+        assertTrue(result.scheduled)
+        val occurrencesAfterEdit = repository.getTasks().sortedBy { it.dueAt }
+        val preservedFirst = occurrencesAfterEdit.first { it.id == firstOccurrence.id }
+        val updatedEdited = occurrencesAfterEdit.first { it.id == editedOccurrence.id }
+        val newSeriesId = updatedEdited.recurrenceSeriesId
+        val expectedNextDay = editedOccurrence.dueAt.atZone(zone).plusDays(1).toInstant()
+        assertEquals(originalSeriesId, preservedFirst.recurrenceSeriesId)
+        assertTrue(occurrencesAfterEdit.none { it.recurrenceSeriesId == originalSeriesId && it.dueAt.isAfter(firstOccurrence.dueAt) })
+        assertTrue(newSeriesId != null && newSeriesId != originalSeriesId)
+        assertEquals(RecurrenceType.DAILY, updatedEdited.recurrenceRule.type)
+        assertTrue(occurrencesAfterEdit.any { it.recurrenceSeriesId == newSeriesId && it.dueAt == expectedNextDay })
+        assertTrue(repository.getReminders().any { it.linkedTaskId == updatedEdited.id })
+    }
+
+    @Test
     fun `urgent reschedule preserves deadline unless a new deadline is supplied`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)

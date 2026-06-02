@@ -1,6 +1,8 @@
 package dev.codex.reclaimoss.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,15 +12,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -97,6 +102,16 @@ fun coveredSleepWeekdays(entries: List<SleepOnboardingEntryDraft>): Set<DayOfWee
 fun missingSleepWeekdays(entries: List<SleepOnboardingEntryDraft>): Set<DayOfWeek> =
     DayOfWeek.entries.filterNotTo(linkedSetOf()) { it in coveredSleepWeekdays(entries) }
 
+fun unavailableSleepWeekdays(
+    entries: List<SleepOnboardingEntryDraft>,
+    selectedDays: Set<DayOfWeek>,
+    editingIndex: Int,
+): Set<DayOfWeek> =
+    entries
+        .filterIndexed { index, _ -> index != editingIndex }
+        .flatMapTo(linkedSetOf()) { it.weekdays }
+        .minus(selectedDays)
+
 private fun availableWindowMinutes(entry: SleepOnboardingEntryDraft): Int {
     val startMinutes = minutesFromStart(entry.windowStart)
     val endMinutes = minutesFromStart(entry.windowEnd)
@@ -119,6 +134,7 @@ fun SleepOnboardingScreen(
     onComplete: (List<SleepOnboardingEntryDraft>) -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
     LaunchedEffect(errorMessage) {
         if (!errorMessage.isNullOrBlank()) snackbarHostState.showSnackbar(errorMessage)
     }
@@ -253,26 +269,33 @@ fun SleepOnboardingScreen(
                     TaskSectionTitle(if (editingIndex >= 0) "Edit sleep entry" else "Add sleep entry")
                     WeekdayPicker(
                         selectedDays = draft.weekdays,
+                        unavailableDays = remember(entries, draft.weekdays, editingIndex) {
+                            unavailableSleepWeekdays(
+                                entries = entries,
+                                selectedDays = draft.weekdays,
+                                editingIndex = editingIndex,
+                            )
+                        },
                         onSelectionChanged = {
                             draft = draft.copy(weekdays = it)
                             localError = null
                         },
                     )
-                    TimeOfDaySliderCard(
-                        title = "Earliest sleep",
-                        minutes = minutesFromStart(draft.windowStart),
-                        onMinutesChanged = {
-                            draft = draft.copy(windowStart = minutesToLocalTime(it))
+                    DailyWindowConfigurator(
+                        hasWindow = true,
+                        canDisable = false,
+                        startTime = draft.windowStart,
+                        endTime = draft.windowEnd,
+                        minimumWindowMinutes = draft.durationMinutes,
+                        onWindowEnabledChanged = {},
+                        onWindowChanged = { startTime, endTime, _ ->
+                            draft = draft.copy(
+                                windowStart = startTime,
+                                windowEnd = endTime,
+                            )
                             localError = null
                         },
-                    )
-                    TimeOfDaySliderCard(
-                        title = "Latest wake",
-                        minutes = minutesFromStart(draft.windowEnd),
-                        onMinutesChanged = {
-                            draft = draft.copy(windowEnd = minutesToLocalTime(it))
-                            localError = null
-                        },
+                        context = context,
                     )
                     DurationSlider(
                         minutes = draft.durationMinutes,
@@ -334,27 +357,61 @@ fun SleepOnboardingScreen(
 @Composable
 private fun WeekdayPicker(
     selectedDays: Set<DayOfWeek>,
+    unavailableDays: Set<DayOfWeek>,
     onSelectionChanged: (Set<DayOfWeek>) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TaskSectionTitle("Weekdays")
-        Column(
+        Text(
+            "Pick uncovered days for this sleep window.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            DayOfWeek.entries.chunked(4).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { day ->
-                        FilterChip(
-                            selected = day in selectedDays,
-                            onClick = {
-                                onSelectionChanged(
-                                    if (day in selectedDays) selectedDays - day else selectedDays + day,
-                                )
+            DayOfWeek.entries.forEach { day ->
+                val isSelected = day in selectedDays
+                val isUnavailable = day in unavailableDays
+                Surface(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .then(
+                            if (isUnavailable) {
+                                Modifier
+                            } else {
+                                Modifier.clickable {
+                                    onSelectionChanged(
+                                        if (isSelected) selectedDays - day else selectedDays + day,
+                                    )
+                                }
                             },
-                            label = {
-                                Text(day.getDisplayName(TextStyle.SHORT, Locale.getDefault()))
+                        ),
+                    shape = RoundedCornerShape(999.dp),
+                    color = when {
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        isUnavailable -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    border = if (isUnavailable) {
+                        androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        )
+                    } else {
+                        null
+                    },
+                ) {
+                    Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text(
+                            day.shortLabelForOnboarding(),
+                            color = when {
+                                isSelected -> MaterialTheme.colorScheme.onPrimary
+                                isUnavailable -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                            fontWeight = FontWeight.Bold,
                         )
                     }
                 }
@@ -362,6 +419,9 @@ private fun WeekdayPicker(
         }
     }
 }
+
+private fun DayOfWeek.shortLabelForOnboarding(): String =
+    getDisplayName(TextStyle.SHORT, Locale.getDefault()).first().toString()
 
 @Composable
 private fun TimeOfDaySliderCard(

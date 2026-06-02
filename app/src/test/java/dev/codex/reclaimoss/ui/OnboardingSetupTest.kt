@@ -66,4 +66,25 @@ class OnboardingSetupTest {
 
         assertTrue(missingSleepWeekdays(entries).isEmpty())
     }
+
+    @Test
+    fun `unavailable sleep weekdays excludes the draft being edited`() {
+        val entries = listOf(
+            SleepOnboardingEntryDraft(
+                weekdays = setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY),
+            ),
+            SleepOnboardingEntryDraft(
+                weekdays = setOf(DayOfWeek.FRIDAY),
+            ),
+        )
+
+        assertEquals(
+            linkedSetOf(DayOfWeek.FRIDAY),
+            unavailableSleepWeekdays(
+                entries = entries,
+                selectedDays = entries.first().weekdays,
+                editingIndex = 0,
+            ),
+        )
+    }
 }

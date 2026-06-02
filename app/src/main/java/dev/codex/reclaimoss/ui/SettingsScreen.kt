@@ -143,18 +143,6 @@ private enum class SettingsSection(val title: String) {
     Appearance("Appearance"),
     TaskRules("Task Rules"),
     Reminders("Reminders"),
-    History("History"),
-}
-
-private enum class SettingsHubGroup(val title: String, val sections: List<SettingsSection>) {
-    Schedule(
-        "Schedule",
-        listOf(SettingsSection.TaskRules),
-    ),
-    Preferences(
-        "Preferences",
-        listOf(SettingsSection.Appearance, SettingsSection.Reminders, SettingsSection.History),
-    ),
 }
 
 @Composable
@@ -164,16 +152,11 @@ fun SettingsScreen(
     isActive: Boolean = true,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onFontSizeScaleChanged: (FontSizeScale) -> Unit,
-    onDateFormatPreferenceChanged: (DateFormatPreference) -> Unit,
-    onWeekStartChanged: (WeekStart) -> Unit,
     onBreakBufferChanged: (Int) -> Unit,
-    onAlignmentChanged: (Int) -> Unit,
     onAllowTaskSplittingChanged: (Boolean) -> Unit,
     onAllowConcurrentTasksChanged: (Boolean) -> Unit,
-    onMaxTaskChunkChanged: (Int) -> Unit,
     onDefaultTaskReminderChanged: (Boolean) -> Unit,
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
-    onReminderLeadMinutesChanged: (Int) -> Unit,
     onHistoryRetentionChanged: (HistoryRetention) -> Unit,
 ) {
     val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -213,7 +196,6 @@ fun SettingsScreen(
                         SettingsSection.TaskRules,
                         SettingsSection.Appearance,
                         SettingsSection.Reminders,
-                        SettingsSection.History,
                     ).forEach { item ->
                         item {
                             SettingsNavigationRow(
@@ -290,21 +272,6 @@ fun SettingsScreen(
                                     onSelected = onFontSizeScaleChanged,
                                 )
                             }
-                            SettingsControlRow(
-                                title = "Date format",
-                            ) {
-                                SegmentedEnumRow(
-                                    options = DateFormatPreference.entries,
-                                    selected = settings.dateFormatPreference,
-                                    labelFor = {
-                                        when (it) {
-                                            DateFormatPreference.MONTH_DAY_YEAR -> "MM/DD/YY"
-                                            DateFormatPreference.DAY_MONTH_YEAR -> "DD/MM/YY"
-                                        }
-                                    },
-                                    onSelected = onDateFormatPreferenceChanged,
-                                )
-                            }
                         }
 
                         SettingsSection.TaskRules -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -318,22 +285,6 @@ fun SettingsScreen(
                                     onMinutesChanged = onBreakBufferChanged,
                                 )
                             }
-                            SettingsControlRow(
-                                title = "Task alignment",
-                            ) {
-                                SegmentedEnumRow(
-                                    options = listOf(15, 30, 60),
-                                    selected = settings.alignmentMinutes,
-                                    labelFor = {
-                                        when (it) {
-                                            15 -> "15 min"
-                                            30 -> "30 min"
-                                            else -> "60 min"
-                                        }
-                                    },
-                                    onSelected = onAlignmentChanged,
-                                )
-                            }
                             SettingsInlineSwitchRow(
                                 title = "Allow task splitting",
                                 checked = settings.allowTaskSplitting,
@@ -345,12 +296,20 @@ fun SettingsScreen(
                                 onCheckedChange = onAllowConcurrentTasksChanged,
                             )
                             SettingsControlRow(
-                                title = "Max task chunk",
+                                title = "Keep completed tasks",
                             ) {
-                                DurationSlider(
-                                    minutes = settings.maxTaskChunkMinutes,
-                                    maxMinutes = 360,
-                                    onMinutesChanged = onMaxTaskChunkChanged,
+                                EnumDropdownRow(
+                                    title = "Retention",
+                                    selected = settings.historyRetention,
+                                    options = HistoryRetention.entries,
+                                    labelFor = {
+                                        when (it) {
+                                            HistoryRetention.SEVEN_DAYS -> "7 days"
+                                            HistoryRetention.THIRTY_DAYS -> "30 days"
+                                            HistoryRetention.FOREVER -> "Forever"
+                                        }
+                                    },
+                                    onSelected = onHistoryRetentionChanged,
                                 )
                             }
                         }
@@ -378,26 +337,6 @@ fun SettingsScreen(
                             }
                         }
 
-                        SettingsSection.History -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            SettingsControlRow(
-                                title = "Keep completed tasks",
-                            ) {
-                                EnumDropdownRow(
-                                    title = "Retention",
-                                    selected = settings.historyRetention,
-                                    options = HistoryRetention.entries,
-                                    labelFor = {
-                                        when (it) {
-                                            HistoryRetention.SEVEN_DAYS -> "7 days"
-                                            HistoryRetention.THIRTY_DAYS -> "30 days"
-                                            HistoryRetention.FOREVER -> "Forever"
-                                        }
-                                    },
-                                    onSelected = onHistoryRetentionChanged,
-                                )
-                            }
-                        }
-
                             null -> Unit
                         }
                     }
@@ -405,219 +344,6 @@ fun SettingsScreen(
             }
         }
     }
-}
-
-@Composable
-fun SettingsFullDayTimeline(
-    periods: List<TimePeriod>,
-    editFlow: Boolean,
-    onEditPeriod: (TimePeriod) -> Unit,
-    onSelectFreeGap: (FreeGap) -> Unit,
-    onDeletePeriod: (String) -> Unit,
-) {
-    val hourHeight = 144.dp
-    val labelWidth = 92.dp
-    val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(timelineHeight),
-    ) {
-        for (hour in 0..24) {
-            val top = timelineOffset(minutes = hour * 60, hourHeight = hourHeight)
-            Text(
-                LocalTime.of(hour % 24, 0).formatHourLabel(),
-                modifier = Modifier
-                    .width(labelWidth)
-                    .offset(y = if (hour == 0) top else top - 10.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = labelWidth)
-                    .height(1.dp)
-                    .offset(y = top)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .offset(x = labelWidth - 6.dp)
-                .width(1.dp)
-                .height(timelineHeight)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        )
-        periods
-            .sortedWith(compareBy<TimePeriod> { minutesFromStart(it.start) }.thenBy { it.sortOrder })
-            .forEach { period ->
-                periodSegments(period).forEach { segment ->
-                    SettingsPeriodBlock(
-                        period = period,
-                        start = segment.start,
-                        minutes = segment.minutes,
-                        labelWidth = labelWidth,
-                        hourHeight = hourHeight,
-                        editFlow = editFlow,
-                        onEdit = { onEditPeriod(period) },
-                        onDelete = { onDeletePeriod(period.id) },
-                    )
-                }
-            }
-        if (editFlow) {
-            freeGapsForPeriods(periods).forEach { gap ->
-                SettingsFreeGapBlock(
-                    gap = gap,
-                    labelWidth = labelWidth,
-                    hourHeight = hourHeight,
-                    onClick = { onSelectFreeGap(gap) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingsPeriodBlock(
-    period: TimePeriod,
-    start: LocalTime,
-    minutes: Int,
-    labelWidth: Dp,
-    hourHeight: Dp,
-    editFlow: Boolean,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val isLife = period.type == TimePeriodType.LIFE
-    val top = timelineOffset(minutes = minutesFromStart(start), hourHeight = hourHeight)
-    val height = timelineBlockHeight(minutes = minutes, hourHeight = hourHeight, minHeight = 64.dp)
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = labelWidth + 8.dp)
-            .height(height)
-            .offset(y = top),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isLife) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            if (isLife) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(top = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    period.label,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    period.type.name.titlecase(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (editFlow) {
-                Column {
-                    IconButton(onClick = onEdit, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit period")
-                    }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "Delete period")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingsFreeGapBlock(
-    gap: FreeGap,
-    labelWidth: Dp,
-    hourHeight: Dp,
-    onClick: () -> Unit,
-) {
-    val top = timelineOffset(minutes = gap.startMinutes, hourHeight = hourHeight)
-    val height = timelineBlockHeight(minutes = gap.endMinutes - gap.startMinutes, hourHeight = hourHeight, minHeight = 64.dp)
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = labelWidth + 8.dp)
-            .height(height)
-            .offset(y = top)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.52f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
-        ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-            contentAlignment = Alignment.TopStart,
-        ) {
-            Text(
-                "+ Select Time Slot",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
-
-@Composable
-fun SettingsOptionCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
-}
-
-@Composable
-fun SettingsGroupSurface(
-    isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth(), content = content)
 }
 
 @Composable
@@ -715,19 +441,6 @@ fun SettingsInlineSwitchRow(
 }
 
 @Composable
-fun SettingsDivider(
-    isDarkSettings: Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp)
-            .height(1.dp)
-            .background(settingsDividerColor(isDarkSettings)),
-    )
-}
-
-@Composable
 fun <T> SegmentedEnumRow(
     options: List<T>,
     selected: T,
@@ -808,117 +521,6 @@ fun <T> EnumDropdownRow(
 }
 
 @Composable
-fun TimePeriodDialog(
-    initial: TimePeriodDraft,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-    onDraftChanged: () -> Unit,
-    onSave: (TimePeriodDraft) -> Unit,
-) {
-    var draft by remember(initial) { mutableStateOf(initial) }
-    val minMinutes = minutesFromStart(draft.boundStart)
-    val maxMinutes = endBoundaryMinutes(draft.boundStart, draft.boundEnd)
-    val startMinutes = minutesFromStart(draft.start).coerceIn(minMinutes, maxMinutes - 30)
-    val endMinutes = endBoundaryMinutes(draft.start, draft.end).coerceIn(startMinutes + 30, maxMinutes)
-    val sliderSteps = ((maxMinutes - minMinutes) / 30 - 1).coerceAtLeast(0)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial.id.isBlank()) "Add time period" else "Edit time period") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = draft.label,
-                    onValueChange = {
-                        draft = draft.copy(label = it)
-                        onDraftChanged()
-                    },
-                    label = { Text("Label") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                TaskSectionTitle("Type")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = draft.type == TimePeriodType.PRODUCTIVE,
-                        onClick = {
-                            draft = draft.copy(type = TimePeriodType.PRODUCTIVE)
-                            onDraftChanged()
-                        },
-                        label = { Text("Productive") },
-                    )
-                    FilterChip(
-                        selected = draft.type == TimePeriodType.LIFE,
-                        onClick = {
-                            draft = draft.copy(type = TimePeriodType.LIFE)
-                            onDraftChanged()
-                        },
-                        label = { Text("Meal / rest") },
-                    )
-                }
-                TaskSectionTitle("Time")
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(minutesToLocalTime(startMinutes).formatAsClock(), fontWeight = FontWeight.SemiBold)
-                            Text(minutesToLocalTime(endMinutes).formatAsClock(), fontWeight = FontWeight.SemiBold)
-                        }
-                        RangeSlider(
-                            value = startMinutes.toFloat()..endMinutes.toFloat(),
-                            onValueChange = { range ->
-                                val snappedStart = snapToStep(range.start.toInt(), 30).coerceIn(minMinutes, maxMinutes - 30)
-                                val snappedEnd = snapToStep(range.endInclusive.toInt(), 30).coerceIn(snappedStart + 30, maxMinutes)
-                                draft = draft.copy(
-                                    start = minutesToLocalTime(snappedStart),
-                                    end = minutesToLocalTime(snappedEnd),
-                                )
-                                onDraftChanged()
-                            },
-                            valueRange = minMinutes.toFloat()..maxMinutes.toFloat(),
-                            steps = sliderSteps,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(minutesToLocalTime(minMinutes).formatAsClock(), style = MaterialTheme.typography.bodySmall)
-                            Text(minutesToLocalTime(maxMinutes).formatAsClock(), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                if (errorMessage != null) {
-                    Text(
-                        errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(draft.copy(label = draft.label.trim())) },
-                enabled = draft.label.isNotBlank() && draft.end != draft.start,
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-@Composable
 fun EmptyCard(message: String) {
     val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     Card(
@@ -937,30 +539,12 @@ fun EmptyCard(message: String) {
     }
 }
 
-@Composable
-private fun SettingsSectionLabel(
-    title: String,
-    isDarkSettings: Boolean,
-) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.SemiBold,
-        color = settingsPrimaryTextColor(isDarkSettings),
-    )
-}
-
 private fun settingsSectionIcon(section: SettingsSection): ImageVector =
     when (section) {
         SettingsSection.Appearance -> Icons.Outlined.Settings
         SettingsSection.TaskRules -> Icons.Outlined.Checklist
         SettingsSection.Reminders -> Icons.Outlined.Notifications
-        SettingsSection.History -> Icons.Outlined.MoreHoriz
     }
-
-@Composable
-private fun settingsPageBackground(isDarkSettings: Boolean): Color =
-    MaterialTheme.colorScheme.background
 
 @Composable
 private fun settingsSurfaceColor(isDarkSettings: Boolean): Color =
@@ -1056,11 +640,6 @@ data class PeriodSegment(
     val minutes: Int,
 )
 
-data class FreeGap(
-    val startMinutes: Int,
-    val endMinutes: Int,
-)
-
 fun findOverlappingTimePeriod(
     candidate: TimePeriod,
     periods: List<TimePeriod>,
@@ -1103,62 +682,10 @@ fun periodSegments(period: TimePeriod): List<PeriodSegment> {
     }
 }
 
-fun freeGapsForPeriods(periods: List<TimePeriod>): List<FreeGap> {
-    val occupied = periods
-        .flatMap { period ->
-            periodSegments(period).map { segment ->
-                minutesFromStart(segment.start) to (minutesFromStart(segment.start) + segment.minutes).coerceAtMost(24 * 60)
-            }
-        }
-        .filter { (start, end) -> end > start }
-        .sortedBy { it.first }
-
-    val merged = mutableListOf<Pair<Int, Int>>()
-    occupied.forEach { range ->
-        val last = merged.lastOrNull()
-        if (last == null || range.first > last.second) {
-            merged.add(range)
-        } else {
-            merged[merged.lastIndex] = last.first to maxOf(last.second, range.second)
-        }
-    }
-
-    val gaps = mutableListOf<FreeGap>()
-    var cursor = 0
-    merged.forEach { (start, end) ->
-        if (start - cursor >= 30) gaps.add(FreeGap(cursor, start))
-        cursor = maxOf(cursor, end)
-    }
-    if (24 * 60 - cursor >= 30) gaps.add(FreeGap(cursor, 24 * 60))
-    return gaps
-}
-
-fun editableBoundsForPeriod(period: TimePeriod, periods: List<TimePeriod>): FreeGap {
-    val occupied = periods
-        .filterNot { it.id == period.id }
-        .flatMap { other ->
-            periodSegments(other).map { segment ->
-                minutesFromStart(segment.start) to (minutesFromStart(segment.start) + segment.minutes).coerceAtMost(24 * 60)
-            }
-        }
-        .sortedBy { it.first }
-    val start = minutesFromStart(period.start)
-    val end = minutesFromStart(period.end).let { if (it <= start) 24 * 60 else it }
-    val lower = occupied.filter { it.second <= start }.maxOfOrNull { it.second } ?: 0
-    val upper = occupied.filter { it.first >= end }.minOfOrNull { it.first } ?: 24 * 60
-    return FreeGap(lower, upper)
-}
-
 fun minutesToLocalTime(minutes: Int): LocalTime {
     val normalized = minutes.coerceIn(0, 24 * 60)
     if (normalized == 24 * 60) return LocalTime.MIDNIGHT
     return LocalTime.of(normalized / 60, normalized % 60)
-}
-
-fun endBoundaryMinutes(start: LocalTime, end: LocalTime): Int {
-    val startMinutes = minutesFromStart(start)
-    val endMinutes = minutesFromStart(end)
-    return if (endMinutes <= startMinutes) 24 * 60 else endMinutes
 }
 
 fun snapToStep(value: Int, step: Int): Int =

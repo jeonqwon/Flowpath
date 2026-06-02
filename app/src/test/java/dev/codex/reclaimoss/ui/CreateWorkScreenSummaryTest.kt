@@ -26,7 +26,7 @@ class CreateWorkScreenSummaryTest {
             selectedHours = 0,
             selectedMinute = 0,
             minMinutes = 15,
-            maxMinutes = 360,
+            maxMinutes = 24 * 60,
         )
 
         assertEquals(15, minutes)
@@ -35,13 +35,13 @@ class CreateWorkScreenSummaryTest {
     @Test
     fun `duration wheel selection clamps above maximum`() {
         val minutes = durationFromWheelSelection(
-            selectedHours = 6,
+            selectedHours = 24,
             selectedMinute = 45,
             minMinutes = 15,
-            maxMinutes = 360,
+            maxMinutes = 24 * 60,
         )
 
-        assertEquals(360, minutes)
+        assertEquals(24 * 60, minutes)
     }
 
     @Test
@@ -49,12 +49,12 @@ class CreateWorkScreenSummaryTest {
         val state = durationWheelState(
             minutes = 135,
             minMinutes = 15,
-            maxMinutes = 360,
+            maxMinutes = 24 * 60,
         )
 
         assertEquals(2, state.selectedHours)
         assertEquals(15, state.selectedMinute)
-        assertEquals(listOf(0, 1, 2, 3, 4, 5, 6), state.hourOptions)
+        assertEquals((0..24).toList(), state.hourOptions)
         assertEquals(listOf(0, 15, 30, 45), state.minuteOptions)
     }
 
@@ -276,9 +276,37 @@ class CreateWorkScreenSummaryTest {
                 addReminder = true,
                 priority = TaskPriority.URGENT,
             ),
+            allowConcurrentTasks = true,
         )
 
         assertEquals("Dependency, No overlap, Reminder, Urgent", summary)
+    }
+
+    @Test
+    fun `task rules summary hides overlap copy when global overlap is off`() {
+        val summary = taskRulesSummary(
+            taskDraft = TaskDraft(
+                continuationParentTaskId = "task-2",
+                overlapPolicy = TaskOverlapPolicy.DISALLOW,
+                addReminder = true,
+            ),
+            allowConcurrentTasks = false,
+        )
+
+        assertEquals("Dependency, Reminder", summary)
+    }
+
+    @Test
+    fun `window support rejects ranges shorter than task duration`() {
+        assertEquals(
+            false,
+            windowSupportsDuration(
+                startTime = LocalTime.of(18, 0),
+                endTime = LocalTime.of(18, 30),
+                overnight = false,
+                minimumWindowMinutes = 60,
+            ),
+        )
     }
 
     @Test

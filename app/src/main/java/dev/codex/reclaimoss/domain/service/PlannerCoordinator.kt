@@ -11,6 +11,7 @@ import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderPolicy
 import dev.codex.reclaimoss.domain.model.ReminderStatus
+import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
 import dev.codex.reclaimoss.domain.model.SchedulingPolicy
@@ -64,6 +65,15 @@ private data class TaskOccurrence(
     val fixedStartAt: Instant?,
     val fixedEndAt: Instant?,
 )
+
+private data class TaskEditSnapshot(
+    val task: ScheduleTask,
+    val blocks: List<ScheduleBlock>,
+    val issues: List<SchedulingIssue>,
+    val reminders: List<Reminder>,
+)
+
+private const val DEFAULT_MAX_TASK_CHUNK_MINUTES = 120
 
 class PlannerCoordinator(
     private val repository: PlannerRepository,
@@ -411,6 +421,81 @@ class PlannerCoordinator(
         return result
     }
 
+    suspend fun editTask(
+        taskId: String,
+        title: String,
+        description: String,
+        priority: TaskPriority,
+        dueAt: Instant,
+        preferredTimePeriodId: String?,
+        timeframeId: String? = null,
+        hasDeadline: Boolean = true,
+        continuationParentTaskId: String? = null,
+        continuationMode: TaskContinuationMode? = null,
+        overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
+        recurrenceRule: RecurrenceRule,
+        estimatedMinutes: Int,
+        addReminder: Boolean,
+        schedulingMode: TaskSchedulingMode,
+        notBeforeAt: Instant? = null,
+        fixedStartAt: Instant? = null,
+        fixedEndAt: Instant? = null,
+    ): TaskCreationResult {
+        val existingTask = repository.getTasks().firstOrNull { it.id == taskId } ?: return TaskCreationResult(
+            taskId = taskId,
+            scheduled = false,
+            partial = false,
+            reason = "Task no longer exists.",
+        )
+        requireValidContinuationParent(
+            continuationParentTaskId = continuationParentTaskId,
+            currentTaskId = taskId,
+        )
+        return if (existingTask.recurrenceSeriesId == null && existingTask.recurrenceRule.type == RecurrenceType.NONE) {
+            editSingleTask(
+                existingTask = existingTask,
+                title = title,
+                description = description,
+                priority = priority,
+                dueAt = dueAt,
+                preferredTimePeriodId = preferredTimePeriodId,
+                timeframeId = timeframeId,
+                hasDeadline = hasDeadline,
+                continuationParentTaskId = continuationParentTaskId,
+                continuationMode = continuationMode,
+                overlapPolicy = overlapPolicy,
+                recurrenceRule = recurrenceRule,
+                estimatedMinutes = estimatedMinutes,
+                addReminder = addReminder,
+                schedulingMode = schedulingMode,
+                notBeforeAt = notBeforeAt,
+                fixedStartAt = fixedStartAt,
+                fixedEndAt = fixedEndAt,
+            )
+        } else {
+            editRecurringTask(
+                existingTask = existingTask,
+                title = title,
+                description = description,
+                priority = priority,
+                dueAt = dueAt,
+                preferredTimePeriodId = preferredTimePeriodId,
+                timeframeId = timeframeId,
+                hasDeadline = hasDeadline,
+                continuationParentTaskId = continuationParentTaskId,
+                continuationMode = continuationMode,
+                overlapPolicy = overlapPolicy,
+                recurrenceRule = recurrenceRule,
+                estimatedMinutes = estimatedMinutes,
+                addReminder = addReminder,
+                schedulingMode = schedulingMode,
+                notBeforeAt = notBeforeAt,
+                fixedStartAt = fixedStartAt,
+                fixedEndAt = fixedEndAt,
+            )
+        }
+    }
+
     suspend fun rebuildSchedule(
         reason: ScheduleRebuildReason = ScheduleRebuildReason.ManualRebuild,
         onlyTaskId: String? = null,
@@ -690,6 +775,251 @@ class PlannerCoordinator(
                 updatedAt = now(),
             ),
         )
+    }
+
+    private suspend fun editSingleTask(
+        existingTask: ScheduleTask,
+        title: String,
+        description: String,
+        priority: TaskPriority,
+        dueAt: Instant,
+        preferredTimePeriodId: String?,
+        timeframeId: String?,
+        hasDeadline: Boolean,
+        continuationParentTaskId: String?,
+        continuationMode: TaskContinuationMode?,
+        overlapPolicy: TaskOverlapPolicy,
+        recurrenceRule: RecurrenceRule,
+        estimatedMinutes: Int,
+        addReminder: Boolean,
+        schedulingMode: TaskSchedulingMode,
+        notBeforeAt: Instant?,
+        fixedStartAt: Instant?,
+        fixedEndAt: Instant?,
+    ): TaskCreationResult {
+        val snapshots = snapshotTasks(listOf(existingTask))
+        val updatedTask = buildEditedTask(
+            existingTask = existingTask,
+            recurrenceSeriesId = existingTask.recurrenceSeriesId,
+            title = title,
+            description = description,
+            priority = priority,
+            dueAt = dueAt,
+            preferredTimePeriodId = preferredTimePeriodId,
+            timeframeId = timeframeId,
+            hasDeadline = hasDeadline,
+            continuationParentTaskId = continuationParentTaskId,
+            continuationMode = continuationMode,
+            overlapPolicy = overlapPolicy,
+            recurrenceRule = recurrenceRule,
+            estimatedMinutes = estimatedMinutes,
+            schedulingMode = schedulingMode,
+            notBeforeAt = notBeforeAt,
+            fixedStartAt = fixedStartAt,
+            fixedEndAt = fixedEndAt,
+        )
+        repository.clearAllPendingBlocks(existingTask.id)
+        repository.upsertTask(updatedTask)
+        if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
+            placeExactTask(existingTask.id)
+        } else {
+            rebuildSchedule(ScheduleRebuildReason.ManualRebuild, existingTask.id)
+        }
+        val result = taskResultFor(existingTask.id)
+        if (!result.scheduled) {
+            restoreTaskSnapshots(snapshots)
+            return result
+        }
+        syncReminderPreference(listOf(existingTask.id), addReminder)
+        return result
+    }
+
+    private suspend fun editRecurringTask(
+        existingTask: ScheduleTask,
+        title: String,
+        description: String,
+        priority: TaskPriority,
+        dueAt: Instant,
+        preferredTimePeriodId: String?,
+        timeframeId: String?,
+        hasDeadline: Boolean,
+        continuationParentTaskId: String?,
+        continuationMode: TaskContinuationMode?,
+        overlapPolicy: TaskOverlapPolicy,
+        recurrenceRule: RecurrenceRule,
+        estimatedMinutes: Int,
+        addReminder: Boolean,
+        schedulingMode: TaskSchedulingMode,
+        notBeforeAt: Instant?,
+        fixedStartAt: Instant?,
+        fixedEndAt: Instant?,
+    ): TaskCreationResult {
+        val allTasks = repository.getTasks()
+        val relatedTasks = allTasks.filter { task ->
+            task.id == existingTask.id ||
+                (existingTask.recurrenceSeriesId != null && task.recurrenceSeriesId == existingTask.recurrenceSeriesId && task.dueAt.isAfter(existingTask.dueAt))
+        }
+        val snapshots = snapshotTasks(relatedTasks)
+        val recurrenceChanged = existingTask.recurrenceRule != recurrenceRule
+        val newSeriesId = when {
+            recurrenceRule.type == RecurrenceType.NONE -> null
+            recurrenceChanged || existingTask.recurrenceSeriesId == null -> newId("series")
+            else -> existingTask.recurrenceSeriesId
+        }
+        val updatedTask = buildEditedTask(
+            existingTask = existingTask,
+            recurrenceSeriesId = newSeriesId,
+            title = title,
+            description = description,
+            priority = priority,
+            dueAt = dueAt,
+            preferredTimePeriodId = preferredTimePeriodId,
+            timeframeId = timeframeId,
+            hasDeadline = hasDeadline,
+            continuationParentTaskId = continuationParentTaskId,
+            continuationMode = continuationMode,
+            overlapPolicy = overlapPolicy,
+            recurrenceRule = recurrenceRule,
+            estimatedMinutes = estimatedMinutes,
+            schedulingMode = schedulingMode,
+            notBeforeAt = notBeforeAt,
+            fixedStartAt = fixedStartAt,
+            fixedEndAt = fixedEndAt,
+        )
+
+        val futureTasks = relatedTasks.filter { it.id != existingTask.id }
+        futureTasks.forEach { deleteTaskArtifacts(it.id) }
+        repository.clearAllPendingBlocks(existingTask.id)
+        repository.upsertTask(updatedTask)
+
+        val createdFutureTaskIds = mutableListOf<String>()
+        if (recurrenceRule.type != RecurrenceType.NONE) {
+            materializedOccurrences(
+                initialDueAt = dueAt,
+                recurrenceRule = recurrenceRule,
+                schedulingMode = schedulingMode,
+                fixedStartAt = fixedStartAt,
+                fixedEndAt = fixedEndAt,
+            ).drop(1).forEachIndexed { index, occurrence ->
+                val taskId = "${newId("task")}-edit-$index"
+                repository.upsertTask(
+                    updatedTask.copy(
+                        id = taskId,
+                        recurrenceSeriesId = newSeriesId,
+                        dueAt = occurrence.dueAt,
+                        fixedStartAt = occurrence.fixedStartAt,
+                        fixedEndAt = occurrence.fixedEndAt,
+                        remainingMinutes = estimatedMinutes,
+                        status = TaskStatus.ACTIVE,
+                        createdAt = now(),
+                        updatedAt = now(),
+                    ),
+                )
+                createdFutureTaskIds += taskId
+            }
+        }
+
+        if (schedulingMode == TaskSchedulingMode.FIXED_EXACT && createdFutureTaskIds.isEmpty()) {
+            placeExactTask(existingTask.id)
+        } else {
+            rebuildSchedule()
+        }
+        val result = taskResultFor(existingTask.id)
+        if (!result.scheduled) {
+            createdFutureTaskIds.forEach { deleteTaskArtifacts(it) }
+            restoreTaskSnapshots(snapshots)
+            return result
+        }
+        syncReminderPreference(listOf(existingTask.id) + createdFutureTaskIds, addReminder)
+        return result
+    }
+
+    private fun buildEditedTask(
+        existingTask: ScheduleTask,
+        recurrenceSeriesId: String?,
+        title: String,
+        description: String,
+        priority: TaskPriority,
+        dueAt: Instant,
+        preferredTimePeriodId: String?,
+        timeframeId: String?,
+        hasDeadline: Boolean,
+        continuationParentTaskId: String?,
+        continuationMode: TaskContinuationMode?,
+        overlapPolicy: TaskOverlapPolicy,
+        recurrenceRule: RecurrenceRule,
+        estimatedMinutes: Int,
+        schedulingMode: TaskSchedulingMode,
+        notBeforeAt: Instant?,
+        fixedStartAt: Instant?,
+        fixedEndAt: Instant?,
+    ): ScheduleTask = existingTask.copy(
+        recurrenceSeriesId = recurrenceSeriesId,
+        title = title,
+        description = description,
+        priority = priority,
+        preferredTimePeriodId = preferredTimePeriodId,
+        timeframeId = timeframeId,
+        hasDeadline = hasDeadline,
+        continuationParentTaskId = continuationParentTaskId,
+        continuationMode = continuationMode,
+        overlapPolicy = overlapPolicy,
+        schedulingMode = schedulingMode,
+        notBeforeAt = notBeforeAt,
+        fixedStartAt = fixedStartAt,
+        fixedEndAt = fixedEndAt,
+        dueAt = dueAt,
+        estimatedMinutes = estimatedMinutes,
+        remainingMinutes = estimatedMinutes,
+        recurrenceRule = recurrenceRule,
+        updatedAt = now(),
+    )
+
+    private suspend fun snapshotTasks(tasks: List<ScheduleTask>): List<TaskEditSnapshot> {
+        val taskIds = tasks.map { it.id }.toSet()
+        val blocks = repository.getBlocks()
+        val issues = repository.getSchedulingIssues()
+        val reminders = repository.getReminders()
+        return tasks.distinctBy { it.id }.map { task ->
+            TaskEditSnapshot(
+                task = task,
+                blocks = blocks.filter { it.taskId == task.id },
+                issues = issues.filter { it.taskId == task.id },
+                reminders = reminders.filter { it.linkedTaskId == task.id },
+            )
+        }
+    }
+
+    private suspend fun restoreTaskSnapshots(snapshots: List<TaskEditSnapshot>) {
+        snapshots.forEach { snapshot ->
+            deleteLinkedReminders(snapshot.task.id)
+            repository.upsertTask(snapshot.task)
+            repository.replaceFlexibleBlocks(snapshot.task.id, snapshot.blocks)
+            repository.replaceSchedulingIssuesForTask(snapshot.task.id, snapshot.issues)
+            snapshot.reminders.forEach { repository.upsertReminder(it) }
+        }
+    }
+
+    private suspend fun syncReminderPreference(taskIds: List<String>, addReminder: Boolean) {
+        taskIds.distinct().forEach { taskId ->
+            if (addReminder) {
+                createReminderForTask(taskId)
+            } else {
+                deleteLinkedReminders(taskId)
+            }
+        }
+    }
+
+    private suspend fun deleteTaskArtifacts(taskId: String) {
+        deleteLinkedReminders(taskId)
+        repository.replaceSchedulingIssuesForTask(taskId, emptyList())
+        repository.deleteTask(taskId)
+    }
+
+    private suspend fun deleteLinkedReminders(taskId: String) {
+        repository.getReminders()
+            .filter { it.linkedTaskId == taskId }
+            .forEach { repository.deleteReminder(it.id) }
     }
 
     private suspend fun placeExactTask(taskId: String) {
@@ -1113,7 +1443,7 @@ class PlannerCoordinator(
 
     private fun schedulingPolicy(settings: AppSettings) = SchedulingPolicy(
         minBlockMinutes = 30,
-        maxBlockMinutes = settings.maxTaskChunkMinutes,
+        maxBlockMinutes = DEFAULT_MAX_TASK_CHUNK_MINUTES,
         breakBetweenBlocksMinutes = settings.breakBufferMinutes,
         priorityWeight = 1.5,
         deadlineUrgencyWeight = 2.0,
@@ -1133,10 +1463,13 @@ class PlannerCoordinator(
     private fun taskAllowsOverlap(
         task: ScheduleTask,
         allowConcurrentTasks: Boolean,
-    ): Boolean = when (task.overlapPolicy) {
-        TaskOverlapPolicy.INHERIT -> allowConcurrentTasks
-        TaskOverlapPolicy.ALLOW -> true
-        TaskOverlapPolicy.DISALLOW -> false
+    ): Boolean {
+        if (!allowConcurrentTasks) return false
+        return when (task.overlapPolicy) {
+            TaskOverlapPolicy.INHERIT -> true
+            TaskOverlapPolicy.ALLOW -> true
+            TaskOverlapPolicy.DISALLOW -> false
+        }
     }
 
     private fun tasksCanOverlap(

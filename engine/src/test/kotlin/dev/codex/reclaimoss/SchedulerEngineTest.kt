@@ -717,7 +717,7 @@ class SchedulerEngineTest {
     }
 
     @Test
-    fun `task allow overlap can opt into concurrency when global setting is off`() {
+    fun `task allow overlap does not opt into concurrency when global setting is off`() {
         val date = LocalDate.of(2026, 5, 19)
         val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
         val afternoonOnly = WorkHoursProfile(
@@ -756,9 +756,9 @@ class SchedulerEngineTest {
             reason = ScheduleRebuildReason.ManualRebuild,
         )
 
-        val firstBlock = plan.blocks.first { it.taskId == first.id }
-        val secondBlock = plan.blocks.first { it.taskId == second.id }
-        assertTrue(firstBlock.startAt < secondBlock.endAt && secondBlock.startAt < firstBlock.endAt)
+        assertEquals(1, plan.blocks.size)
+        assertEquals(1, plan.unscheduledTaskIds.size)
+        assertTrue(plan.unscheduledTaskIds.contains(first.id) || plan.unscheduledTaskIds.contains(second.id))
     }
 
     @Test

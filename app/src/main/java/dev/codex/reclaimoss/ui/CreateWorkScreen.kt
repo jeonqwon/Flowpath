@@ -184,10 +184,12 @@ fun CreateWorkScreen(
     padding: PaddingValues,
     timeframes: List<Timeframe>,
     availableTasks: List<ScheduleTask>,
+    allowConcurrentTasks: Boolean,
     currentTaskId: String? = null,
     sessionKey: Int,
     initialTaskDraft: TaskDraft? = null,
     followUpMode: Boolean = false,
+    editMode: Boolean = false,
     rescheduleMode: Boolean = false,
     onBack: () -> Unit,
     onSaveTask: (TaskDraft) -> Unit,
@@ -255,7 +257,10 @@ fun CreateWorkScreen(
             },
         ),
     ) {
-        mutableStateOf(initialTaskDraft ?: defaultCreateTaskDraft())
+        mutableStateOf(
+            (initialTaskDraft ?: defaultCreateTaskDraft(allowConcurrentTasks = allowConcurrentTasks))
+                .resolvedOverlapPolicy(allowConcurrentTasks),
+        )
     }
     var showScheduleSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showWindowSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
@@ -307,8 +312,9 @@ fun CreateWorkScreen(
         taskDraft.overlapPolicy,
         taskDraft.addReminder,
         taskDraft.priority,
+        allowConcurrentTasks,
     ) {
-        taskRulesSummary(taskDraft)
+        taskRulesSummary(taskDraft, allowConcurrentTasks)
     }
     val scheduleRowSummary = remember(
         taskDraft.schedulingMode,
@@ -375,6 +381,7 @@ fun CreateWorkScreen(
             Text(
                 when {
                     followUpMode -> "Create Follow-up"
+                    editMode -> "Edit Task"
                     rescheduleMode -> "Reschedule Task"
                     else -> "Create Task"
                 },
@@ -434,7 +441,7 @@ fun CreateWorkScreen(
                     if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                         SettingsSummaryRow(
-                            title = "Timing",
+                            title = "Availability",
                             summary = timingSummary,
                             onClick = {
                                 windowDraft = taskDraft
@@ -455,20 +462,24 @@ fun CreateWorkScreen(
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                     SettingsSummaryRow(
-                        title = "Rules",
-                        summary = rulesSummary,
-                        onClick = {
-                            rulesDraft = taskDraft
-                            showRulesSheet = true
-                        },
-                    )
+                            title = "Rules",
+                            summary = rulesSummary,
+                            onClick = {
+                                rulesDraft = taskDraft.resolvedOverlapPolicy(allowConcurrentTasks)
+                                showRulesSheet = true
+                            },
+                        )
                 }
             }
         }
 
         StickySaveBar(
             summary = saveSummary,
-            actionLabel = if (rescheduleMode) "Save Reschedule" else "Save Task",
+            actionLabel = when {
+                editMode -> "Save Changes"
+                rescheduleMode -> "Save Reschedule"
+                else -> "Save Task"
+            },
             enabled = canSaveTask,
             onClick = { onSaveTask(taskDraft) },
         )
@@ -496,7 +507,7 @@ fun CreateWorkScreen(
 
     if (showWindowSheet && (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY)) {
         TaskEditorSheet(
-            title = "Timing",
+            title = "Availability",
             onDismiss = { showWindowSheet = false },
             onDone = {
                 taskDraft = taskDraft.applyWindowEditor(windowDraft)
@@ -547,6 +558,7 @@ fun CreateWorkScreen(
                     onDraftChange = { rulesDraft = it },
                     continuationTasks = continuationTasks,
                     showReminderToggle = !followUpMode && !rescheduleMode,
+                    showOverlapControls = allowConcurrentTasks,
                 )
             }
         }
@@ -603,7 +615,7 @@ fun SchedulingModeSection(
 fun DurationWheelPicker(
     minutes: Int,
     minMinutes: Int = 15,
-    maxMinutes: Int = 360,
+    maxMinutes: Int = (23 * 60) + 45,
     onMinutesChanged: (Int) -> Unit,
 ) {
     val wheelState = remember(minutes, minMinutes, maxMinutes) {
@@ -891,164 +903,188 @@ fun TaskWindowEditor(
     availableTimeframes: List<Timeframe>,
     context: android.content.Context,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TaskSectionTitle("Use daily window")
-        Switch(
-            checked = draft.hasWindow,
-            onCheckedChange = { enabled ->
-                onDraftChange(
-                    if (enabled) {
-                        val anchorDate = when (draft.schedulingMode) {
-                            TaskSchedulingMode.FIXED_DAY -> draft.fixedDate
-                            else -> draft.deadline.toLocalDate()
-                        }
-                        draft.copy(
-                            hasWindow = true,
-                            fixedStartAt = LocalDateTime.of(anchorDate, LocalTime.of(18, 0)),
-                            fixedEndAt = LocalDateTime.of(anchorDate, LocalTime.of(21, 0)),
-                        )
-                    } else {
-                        draft.copy(hasWindow = false)
-                    },
-                )
-            },
-        )
-    }
-    if (!draft.hasWindow) return
-
-    val overnight = remember(draft.fixedStartAt, draft.fixedEndAt) {
-        draft.fixedEndAt.toLocalDate().isAfter(draft.fixedStartAt.toLocalDate())
-    }
-    val sliderState = remember(draft.fixedStartAt, draft.fixedEndAt) {
-        windowSliderState(
-            start = draft.fixedStartAt.toLocalTime(),
-            end = draft.fixedEndAt.toLocalTime(),
-            overnight = overnight,
-        )
-    }
-    val labels = listOf("12a", "6a", "12p", "6p", "12a")
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TaskSectionTitle("Overnight")
-        Switch(
-            checked = overnight,
-            onCheckedChange = { enabled ->
-                onDraftChange(
-                    draft.withWindowTimes(
-                        startTime = draft.fixedStartAt.toLocalTime(),
-                        endTime = draft.fixedEndAt.toLocalTime(),
-                        endsNextDay = enabled,
-                    ),
-                )
-            },
-        )
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            RangeSlider(
-                value = sliderState.startMinutes..sliderState.endMinutes,
-                onValueChange = { range ->
-                    val updated = draft.windowDraftFromSlider(
-                        startMinutes = range.start,
-                        endMinutes = range.endInclusive,
-                        overnight = overnight,
+    DailyWindowConfigurator(
+        hasWindow = draft.hasWindow,
+        canDisable = true,
+        startTime = draft.fixedStartAt.toLocalTime(),
+        endTime = draft.fixedEndAt.toLocalTime(),
+        minimumWindowMinutes = draft.estimatedMinutes,
+        onWindowEnabledChanged = { enabled ->
+            onDraftChange(
+                if (enabled) {
+                    val anchorDate = when (draft.schedulingMode) {
+                        TaskSchedulingMode.FIXED_DAY -> draft.fixedDate
+                        else -> draft.deadline.toLocalDate()
+                    }
+                    draft.copy(
+                        hasWindow = true,
+                        fixedStartAt = LocalDateTime.of(anchorDate, LocalTime.of(18, 0)),
+                        fixedEndAt = LocalDateTime.of(anchorDate, LocalTime.of(21, 0)),
                     )
-                    onDraftChange(updated)
+                } else {
+                    draft.copy(hasWindow = false)
                 },
-                valueRange = 0f..(24 * 60f),
-                steps = 95,
-                colors = androidx.compose.material3.SliderDefaults.colors(
-                    activeTrackColor = if (overnight) {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    inactiveTrackColor = if (overnight) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
-                    activeTickColor = if (overnight) {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    inactiveTickColor = if (overnight) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
-                    },
+            )
+        },
+        onWindowChanged = { startTime, endTime, endsNextDay ->
+            onDraftChange(
+                draft.withWindowTimes(
+                    startTime = startTime,
+                    endTime = endTime,
+                    endsNextDay = endsNextDay,
                 ),
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                labels.forEach { label ->
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        },
+        context = context,
+    ) {
+        TaskSectionTitle("Timeframe")
+        TimeframeDropdown(
+            timeframes = availableTimeframes,
+            selectedTimeframeId = draft.timeframeId,
+            onSelected = { timeframeId -> onDraftChange(draft.copy(timeframeId = timeframeId)) },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DailyWindowConfigurator(
+    hasWindow: Boolean,
+    canDisable: Boolean,
+    startTime: LocalTime,
+    endTime: LocalTime,
+    minimumWindowMinutes: Int = 15,
+    onWindowEnabledChanged: (Boolean) -> Unit,
+    onWindowChanged: (LocalTime, LocalTime, Boolean) -> Unit,
+    context: android.content.Context,
+    footerContent: @Composable () -> Unit = {},
+) {
+    if (canDisable) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TaskSectionTitle("Use daily window")
+            Switch(
+                checked = hasWindow,
+                onCheckedChange = onWindowEnabledChanged,
+            )
+        }
+    } else {
+        TaskSectionTitle("Daily window")
+    }
+
+    if (hasWindow) {
+        val overnight = remember(startTime, endTime) {
+            endTime <= startTime
+        }
+        val sliderState = remember(startTime, endTime, overnight) {
+            windowSliderState(
+                start = startTime,
+                end = endTime,
+                overnight = overnight,
+            )
+        }
+        val labels = listOf("12a", "6a", "12p", "6p", "12a")
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TaskSectionTitle("Overnight")
+            Switch(
+                checked = overnight,
+                onCheckedChange = { enabled ->
+                    if (windowSupportsDuration(startTime, endTime, enabled, minimumWindowMinutes)) {
+                        onWindowChanged(startTime, endTime, enabled)
+                    }
+                },
+            )
+        }
+
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RangeSlider(
+                    value = sliderState.startMinutes..sliderState.endMinutes,
+                    onValueChange = { range ->
+                        val (updatedStart, updatedEnd) = sliderTimesFromRange(
+                            startMinutes = range.start,
+                            endMinutes = range.endInclusive,
+                        )
+                        if (windowSupportsDuration(updatedStart, updatedEnd, overnight, minimumWindowMinutes)) {
+                            onWindowChanged(updatedStart, updatedEnd, overnight)
+                        }
+                    },
+                    valueRange = 0f..(24 * 60f),
+                    steps = 95,
+                    colors = androidx.compose.material3.SliderDefaults.colors(
+                        activeTrackColor = if (overnight) {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        inactiveTrackColor = if (overnight) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        activeTickColor = if (overnight) {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        inactiveTickColor = if (overnight) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                    ),
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    labels.forEach { label ->
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WindowTimeField(
+                title = "Start time",
+                time = startTime,
+                modifier = Modifier.weight(1f),
+                onTimeChanged = { selectedTime ->
+                    onWindowChanged(selectedTime, endTime, overnight)
+                },
+                context = context,
+            )
+            WindowTimeField(
+                title = "End time",
+                time = endTime,
+                modifier = Modifier.weight(1f),
+                onTimeChanged = { selectedTime ->
+                    onWindowChanged(startTime, selectedTime, overnight)
+                },
+                context = context,
+            )
+        }
     }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        WindowTimeField(
-            title = "Start time",
-            time = draft.fixedStartAt.toLocalTime(),
-            modifier = Modifier.weight(1f),
-            onTimeChanged = { selectedTime ->
-                onDraftChange(
-                    draft.withWindowTimes(
-                        startTime = selectedTime,
-                        endTime = draft.fixedEndAt.toLocalTime(),
-                        endsNextDay = overnight,
-                    ),
-                )
-            },
-            context = context,
-        )
-        WindowTimeField(
-            title = "End time",
-            time = draft.fixedEndAt.toLocalTime(),
-            modifier = Modifier.weight(1f),
-            onTimeChanged = { selectedTime ->
-                onDraftChange(
-                    draft.withWindowTimes(
-                        startTime = draft.fixedStartAt.toLocalTime(),
-                        endTime = selectedTime,
-                        endsNextDay = overnight,
-                    ),
-                )
-            },
-            context = context,
-        )
-    }
-
-    TaskSectionTitle("Timeframe")
-    TimeframeDropdown(
-        timeframes = availableTimeframes,
-        selectedTimeframeId = draft.timeframeId,
-        onSelected = { timeframeId -> onDraftChange(draft.copy(timeframeId = timeframeId)) },
-    )
+    footerContent()
 }
 
 @Composable
@@ -1116,6 +1152,7 @@ fun TaskRulesEditor(
     onDraftChange: (TaskDraft) -> Unit,
     continuationTasks: List<ScheduleTask>,
     showReminderToggle: Boolean,
+    showOverlapControls: Boolean,
 ) {
     TaskSectionTitle("Priority")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1143,21 +1180,22 @@ fun TaskRulesEditor(
             onModeSelected = { mode -> onDraftChange(draft.copy(continuationMode = mode)) },
         )
     }
-    TaskSectionTitle("Overlap")
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        listOf(
-            TaskOverlapPolicy.INHERIT to "Inherit",
-            TaskOverlapPolicy.ALLOW to "Allow",
-            TaskOverlapPolicy.DISALLOW to "No overlap",
-        ).forEach { (policy, label) ->
-            FilterChip(
-                selected = draft.overlapPolicy == policy,
-                onClick = { onDraftChange(draft.copy(overlapPolicy = policy)) },
-                label = { Text(label) },
-            )
+    if (showOverlapControls) {
+        TaskSectionTitle("Overlap")
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                TaskOverlapPolicy.ALLOW to "Allow",
+                TaskOverlapPolicy.DISALLOW to "No overlap",
+            ).forEach { (policy, label) ->
+                FilterChip(
+                    selected = draft.overlapPolicy == policy,
+                    onClick = { onDraftChange(draft.copy(overlapPolicy = policy)) },
+                    label = { Text(label) },
+                )
+            }
         }
     }
     if (showReminderToggle) {
@@ -2094,6 +2132,14 @@ fun defaultCreateTaskDraft(defaultTaskReminder: Boolean = false): TaskDraft =
         addReminder = defaultTaskReminder,
     )
 
+fun defaultCreateTaskDraft(
+    defaultTaskReminder: Boolean = false,
+    allowConcurrentTasks: Boolean,
+): TaskDraft =
+    defaultCreateTaskDraft(defaultTaskReminder).copy(
+        overlapPolicy = if (allowConcurrentTasks) TaskOverlapPolicy.ALLOW else TaskOverlapPolicy.DISALLOW,
+    )
+
 fun TaskDraft.applyScheduleEditor(editorDraft: TaskDraft): TaskDraft =
     copy(
         hasDeadline = editorDraft.hasDeadline,
@@ -2346,15 +2392,13 @@ fun taskRepeatSummary(taskDraft: TaskDraft): String {
     }
 }
 
-fun taskRulesSummary(taskDraft: TaskDraft): String {
+fun taskRulesSummary(taskDraft: TaskDraft, allowConcurrentTasks: Boolean): String {
     val activeRules = buildList {
         if (taskDraft.continuationParentTaskId != null) {
             add("Dependency")
         }
-        when (taskDraft.overlapPolicy) {
-            TaskOverlapPolicy.ALLOW -> add("Allow overlap")
-            TaskOverlapPolicy.DISALLOW -> add("No overlap")
-            TaskOverlapPolicy.INHERIT -> Unit
+        if (allowConcurrentTasks && taskDraft.overlapPolicy == TaskOverlapPolicy.DISALLOW) {
+            add("No overlap")
         }
         if (taskDraft.addReminder) add("Reminder")
         if (taskDraft.priority == TaskPriority.URGENT) add("Urgent")
@@ -2420,6 +2464,13 @@ fun durationFromWheelSelection(
     return rawMinutes.coerceIn(minMinutes, maxMinutes.coerceAtLeast(minMinutes))
 }
 
+private fun TaskDraft.resolvedOverlapPolicy(allowConcurrentTasks: Boolean): TaskDraft =
+    if (overlapPolicy == TaskOverlapPolicy.INHERIT) {
+        copy(overlapPolicy = if (allowConcurrentTasks) TaskOverlapPolicy.ALLOW else TaskOverlapPolicy.DISALLOW)
+    } else {
+        this
+    }
+
 private fun TaskSchedulingMode.labelForCreate(): String =
     when (this) {
         TaskSchedulingMode.FLEXIBLE -> "Flexible"
@@ -2455,6 +2506,15 @@ fun windowSliderState(
     )
 }
 
+fun sliderTimesFromRange(
+    startMinutes: Float,
+    endMinutes: Float,
+): Pair<LocalTime, LocalTime> {
+    val snappedStart = snapToStepForCreate(startMinutes.roundToInt().coerceIn(0, 24 * 60), 15).coerceIn(0, 24 * 60)
+    val snappedEnd = snapToStepForCreate(endMinutes.roundToInt().coerceIn(0, 24 * 60), 15).coerceIn(0, 24 * 60)
+    return sliderMinutesToLocalTime(snappedStart) to sliderMinutesToLocalTime(snappedEnd)
+}
+
 private fun TaskDraft.windowDraftFromSlider(
     startMinutes: Float,
     endMinutes: Float,
@@ -2484,6 +2544,27 @@ private fun TaskDraft.withWindowTimes(
         fixedStartAt = LocalDateTime.of(anchorDate, startTime).withSecond(0).withNano(0),
         fixedEndAt = LocalDateTime.of(anchorDate.plusDays(if (endsNextDay) 1 else 0), endTime).withSecond(0).withNano(0),
     )
+}
+
+fun windowSupportsDuration(
+    startTime: LocalTime,
+    endTime: LocalTime,
+    overnight: Boolean,
+    minimumWindowMinutes: Int,
+): Boolean {
+    val startMinutes = minutesFromStart(startTime)
+    val endMinutes = minutesFromStart(endTime)
+    val selectedSpanMinutes = if (endMinutes >= startMinutes) {
+        endMinutes - startMinutes
+    } else {
+        (24 * 60 - startMinutes) + endMinutes
+    }
+    val availableMinutes = if (overnight) {
+        (24 * 60) - selectedSpanMinutes
+    } else {
+        selectedSpanMinutes
+    }
+    return availableMinutes >= minimumWindowMinutes
 }
 
 private fun sliderMinutesToLocalTime(totalMinutes: Int): LocalTime =

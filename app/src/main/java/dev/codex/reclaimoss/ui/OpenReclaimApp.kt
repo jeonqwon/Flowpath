@@ -156,6 +156,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var followUpSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var rescheduleSourceTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
     var timeframeDraftOverride by remember { mutableStateOf<TimeframeDraft?>(null) }
@@ -215,6 +216,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     BackHandler(enabled = showingCreate) {
         showingCreate = false
         followUpSourceTaskId = null
+        editSourceTaskId = null
         rescheduleSourceTaskId = null
         createTaskDraftOverride = null
     }
@@ -267,36 +269,43 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 padding = padding,
                 timeframes = state.snapshot.timeframes,
                 availableTasks = state.snapshot.tasks,
-                currentTaskId = rescheduleSourceTaskId,
+                allowConcurrentTasks = state.settings.allowConcurrentTasks,
+                currentTaskId = editSourceTaskId ?: rescheduleSourceTaskId,
                 sessionKey = createSessionKey,
                 initialTaskDraft = createTaskDraftOverride ?: defaultCreateTaskDraft(
                     defaultTaskReminder = state.settings.defaultTaskReminder,
+                    allowConcurrentTasks = state.settings.allowConcurrentTasks,
                 ),
                 followUpMode = followUpSourceTaskId != null,
+                editMode = editSourceTaskId != null,
                 rescheduleMode = rescheduleSourceTaskId != null,
                 onBack = {
                     showingCreate = false
                     followUpSourceTaskId = null
+                    editSourceTaskId = null
                     rescheduleSourceTaskId = null
                     createTaskDraftOverride = null
                 },
                 onSaveTask = { draft ->
                     scope.launch {
                         val sourceTaskId = followUpSourceTaskId
+                        val editTaskId = editSourceTaskId
                         val rescheduleTaskId = rescheduleSourceTaskId
                         val result = if (sourceTaskId != null) {
                             viewModel.addFollowUpTask(sourceTaskId, draft)
+                        } else if (editTaskId != null) {
+                            viewModel.editTask(editTaskId, draft)
                         } else if (rescheduleTaskId != null) {
                             viewModel.rescheduleTaskWithUpdate(rescheduleTaskId, draft)
                         } else {
                             viewModel.addTask(draft)
                         }
                         if (result == null) {
-                            snackbarHostState.showSnackbar("Unable to schedule task")
+                            snackbarHostState.showLatestSnackbar("Unable to schedule task")
                             return@launch
                         }
                         if (!result.scheduled) {
-                            snackbarHostState.showSnackbar(
+                            snackbarHostState.showLatestSnackbar(
                                 result.reason ?: if (result.partial) {
                                     "Unable to fully schedule task. Try another time or shorter duration."
                                 } else {
@@ -307,13 +316,15 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         }
                         showingCreate = false
                         followUpSourceTaskId = null
+                        editSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
                         navigateToTab(AppTab.Tasks)
-                        snackbarHostState.showSnackbar(
+                        snackbarHostState.showLatestSnackbar(
                             when {
                                 result.partial -> "Task partially scheduled"
                                 sourceTaskId != null -> "Follow-up task created"
+                                editTaskId != null -> "Task updated"
                                 rescheduleTaskId != null -> "Task rescheduled"
                                 else -> "Task scheduled"
                             },
@@ -347,7 +358,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         viewModel.addReminder(draft)
                         showingReminderCreate = false
                         navigateToTab(AppTab.Reminders)
-                        snackbarHostState.showSnackbar("Reminder saved")
+                        snackbarHostState.showLatestSnackbar("Reminder saved")
                     }
                 },
             )
@@ -380,7 +391,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         timeframeErrorMessage = null
                         showingTimeframeEditor = false
                         timeframeDraftOverride = null
-                        snackbarHostState.showSnackbar("Timeframe saved")
+                        snackbarHostState.showLatestSnackbar("Timeframe saved")
                     }
                 },
                 onDelete = if ((timeframeDraftOverride ?: TimeframeDraft()).id.isNotBlank()) {
@@ -390,7 +401,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             timeframeErrorMessage = null
                             showingTimeframeEditor = false
                             timeframeDraftOverride = null
-                            snackbarHostState.showSnackbar("Timeframe deleted")
+                            snackbarHostState.showLatestSnackbar("Timeframe deleted")
                         }
                     }
                 } else {
@@ -419,7 +430,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         scope.launch {
                             viewModel.dismissReminder(reminder.id)
                             selectedReminderId = null
-                            snackbarHostState.showSnackbar("Reminder dismissed")
+                            snackbarHostState.showLatestSnackbar("Reminder dismissed")
                         }
                     },
                 )
@@ -450,23 +461,34 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         scope.launch {
                             if (reminder == null) {
                                 viewModel.addReminderForTask(task.id)
-                                snackbarHostState.showSnackbar("Reminder added")
+                                snackbarHostState.showLatestSnackbar("Reminder added")
                             } else {
                                 viewModel.dismissReminder(reminder.id)
-                                snackbarHostState.showSnackbar("Reminder dismissed")
+                                snackbarHostState.showLatestSnackbar("Reminder dismissed")
                             }
                         }
                     },
                     onFollowUp = {
                         followUpSourceTaskId = task.id
+                        editSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = task.toFollowUpDraft()
                         createSessionKey += 1
                         selectedTaskId = null
                         showingCreate = true
                     },
+                    onEdit = {
+                        followUpSourceTaskId = null
+                        editSourceTaskId = task.id
+                        rescheduleSourceTaskId = null
+                        createTaskDraftOverride = task.toEditDraft(addReminder = reminder != null)
+                        createSessionKey += 1
+                        selectedTaskId = null
+                        showingCreate = true
+                    },
                     onReschedule = {
                         followUpSourceTaskId = null
+                        editSourceTaskId = null
                         rescheduleSourceTaskId = task.id
                         createTaskDraftOverride = task.toRescheduleDraft()
                         createSessionKey += 1
@@ -477,21 +499,21 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         scope.launch {
                             viewModel.completeTask(task.id)
                             selectedTaskId = null
-                            snackbarHostState.showSnackbar("Task done")
+                            snackbarHostState.showLatestSnackbar("Task done")
                         }
                     },
                     onDoneAllRecurring = {
                         scope.launch {
                             viewModel.completeRecurringSeries(task.id)
                             selectedTaskId = null
-                            snackbarHostState.showSnackbar("Recurring task series done")
+                            snackbarHostState.showLatestSnackbar("Recurring task series done")
                         }
                     },
                     onDelete = {
                         scope.launch {
                             viewModel.deleteTask(task.id)
                             selectedTaskId = null
-                            snackbarHostState.showSnackbar("Task deleted")
+                            snackbarHostState.showLatestSnackbar("Task deleted")
                         }
                     },
                 )
@@ -563,6 +585,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onScrollOffsetChange = { tasksScrollOffset = it },
                     onAddTask = {
                         followUpSourceTaskId = null
+                        editSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
                         createSessionKey += 1
@@ -571,7 +594,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onDeleteTask = { taskId ->
                         scope.launch {
                             viewModel.deleteTask(taskId)
-                            snackbarHostState.showSnackbar("Task deleted")
+                            snackbarHostState.showLatestSnackbar("Task deleted")
                         }
                     },
                     onOpenTask = { selectedTaskId = it },
@@ -586,7 +609,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onRebuild = {
                         scope.launch {
                             viewModel.rebuildSchedule()
-                            snackbarHostState.showSnackbar("Schedule rebuilt")
+                            snackbarHostState.showLatestSnackbar("Schedule rebuilt")
                         }
                     },
                     onAddTimeframe = {
@@ -603,7 +626,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onDeleteTimeframe = { timeframeId ->
                         scope.launch {
                             viewModel.deleteTimeframe(timeframeId)
-                            snackbarHostState.showSnackbar("Timeframe deleted")
+                            snackbarHostState.showLatestSnackbar("Timeframe deleted")
                         }
                     },
                     onToggleLock = { block ->
@@ -612,7 +635,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onMarkDone = { block ->
                         scope.launch {
                             viewModel.completeBlock(block, state.snapshot.tasks)
-                            snackbarHostState.showSnackbar("Task updated")
+                            snackbarHostState.showLatestSnackbar("Task updated")
                         }
                     },
                     onReschedule = { taskId ->
@@ -646,16 +669,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     settings = state.settings,
                     onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
                     onFontSizeScaleChanged = { value -> scope.launch { viewModel.setFontSizeScale(value) } },
-                    onDateFormatPreferenceChanged = { value -> scope.launch { viewModel.setDateFormatPreference(value) } },
-                    onWeekStartChanged = { value -> scope.launch { viewModel.setWeekStart(value) } },
                     onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
-                    onAlignmentChanged = { value -> scope.launch { viewModel.setAlignmentMinutes(value) } },
                     onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
                     onAllowConcurrentTasksChanged = { value -> scope.launch { viewModel.setAllowConcurrentTasks(value) } },
-                    onMaxTaskChunkChanged = { value -> scope.launch { viewModel.setMaxTaskChunkMinutes(value) } },
                     onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
                     onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
-                    onReminderLeadMinutesChanged = { value -> scope.launch { viewModel.setReminderLeadMinutes(value) } },
                     onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
                     isActive = selectedTab == AppTab.Settings,
                 )
@@ -680,6 +698,13 @@ private fun hasCompleteSleepCoverage(tasks: List<ScheduleTask>): Boolean =
             }
         },
     ).size == DayOfWeek.entries.size
+
+private suspend fun SnackbarHostState.showLatestSnackbar(message: String) {
+    val current = currentSnackbarData
+    if (current?.visuals?.message == message) return
+    current?.dismiss()
+    showSnackbar(message)
+}
 
 @Composable
 private fun InitialLoadingScreen() {
