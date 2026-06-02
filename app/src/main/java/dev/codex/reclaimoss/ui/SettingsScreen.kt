@@ -122,6 +122,7 @@ import dev.codex.reclaimoss.settings.HistoryRetention
 import dev.codex.reclaimoss.settings.DateFormatPreference
 import dev.codex.reclaimoss.settings.FontSizeScale
 import dev.codex.reclaimoss.settings.ReminderTimingMode
+import dev.codex.reclaimoss.settings.TasksViewMode
 import dev.codex.reclaimoss.settings.ThemeMode
 import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
@@ -152,6 +153,7 @@ fun SettingsScreen(
     isActive: Boolean = true,
     onThemeModeChanged: (ThemeMode) -> Unit,
     onFontSizeScaleChanged: (FontSizeScale) -> Unit,
+    onTasksViewModeChanged: (TasksViewMode) -> Unit,
     onBreakBufferChanged: (Int) -> Unit,
     onAllowTaskSplittingChanged: (Boolean) -> Unit,
     onAllowConcurrentTasksChanged: (Boolean) -> Unit,
@@ -270,6 +272,21 @@ fun SettingsScreen(
                                         }
                                     },
                                     onSelected = onFontSizeScaleChanged,
+                                )
+                            }
+                            SettingsControlRow(
+                                title = "Tasks view",
+                            ) {
+                                SegmentedEnumRow(
+                                    options = TasksViewMode.entries,
+                                    selected = settings.tasksViewMode,
+                                    labelFor = {
+                                        when (it) {
+                                            TasksViewMode.COLLAPSED -> "Collapsed"
+                                            TasksViewMode.EXPANDED -> "Expanded"
+                                        }
+                                    },
+                                    onSelected = onTasksViewModeChanged,
                                 )
                             }
                         }

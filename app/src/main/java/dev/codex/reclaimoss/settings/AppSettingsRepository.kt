@@ -26,6 +26,11 @@ enum class FontSizeScale(val scaleFactor: Float) {
     EXTRA_LARGE(1.3f),
 }
 
+enum class TasksViewMode {
+    COLLAPSED,
+    EXPANDED,
+}
+
 enum class DateFormatPreference {
     MONTH_DAY_YEAR,
     DAY_MONTH_YEAR,
@@ -60,6 +65,7 @@ enum class HistoryRetention {
 data class AppSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val fontSizeScale: FontSizeScale = FontSizeScale.DEFAULT,
+    val tasksViewMode: TasksViewMode = TasksViewMode.EXPANDED,
     val dateFormatPreference: DateFormatPreference = DateFormatPreference.MONTH_DAY_YEAR,
     val weekStart: WeekStart = WeekStart.SUNDAY,
     val breakBufferMinutes: Int = 0,
@@ -85,6 +91,7 @@ class AppSettingsRepository(
 
     suspend fun setThemeMode(value: ThemeMode) = updateString(THEME_MODE, value.name)
     suspend fun setFontSizeScale(value: FontSizeScale) = updateString(FONT_SIZE_SCALE, value.name)
+    suspend fun setTasksViewMode(value: TasksViewMode) = updateString(TASKS_VIEW_MODE, value.name)
     suspend fun setDateFormatPreference(value: DateFormatPreference) = updateString(DATE_FORMAT_PREFERENCE, value.name)
     suspend fun setWeekStart(value: WeekStart) = updateString(WEEK_START, value.name)
     suspend fun setBreakBufferMinutes(value: Int) = updateInt(BREAK_BUFFER_MINUTES, value.coerceIn(0, 60))
@@ -123,6 +130,7 @@ class AppSettingsRepository(
         AppSettings(
             themeMode = prefs[THEME_MODE].safeEnumOrDefault(AppSettings().themeMode),
             fontSizeScale = prefs[FONT_SIZE_SCALE].safeEnumOrDefault(AppSettings().fontSizeScale),
+            tasksViewMode = prefs[TASKS_VIEW_MODE].safeEnumOrDefault(AppSettings().tasksViewMode),
             dateFormatPreference = prefs[DATE_FORMAT_PREFERENCE].safeEnumOrDefault(AppSettings().dateFormatPreference),
             weekStart = prefs[WEEK_START].safeEnumOrDefault(AppSettings().weekStart),
             breakBufferMinutes = prefs[BREAK_BUFFER_MINUTES] ?: AppSettings().breakBufferMinutes,
@@ -142,6 +150,7 @@ class AppSettingsRepository(
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val FONT_SIZE_SCALE = stringPreferencesKey("font_size_scale")
+        val TASKS_VIEW_MODE = stringPreferencesKey("tasks_view_mode")
         val DATE_FORMAT_PREFERENCE = stringPreferencesKey("date_format_preference")
         val WEEK_START = stringPreferencesKey("week_start")
         val BREAK_BUFFER_MINUTES = intPreferencesKey("break_buffer_minutes")

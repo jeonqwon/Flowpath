@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,8 +45,10 @@ import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,11 +57,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -113,10 +118,12 @@ import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
+import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.scheduling.ScheduleRebuildReason
 import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
+import dev.codex.reclaimoss.settings.TasksViewMode
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -126,65 +133,158 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+internal data class TaskDaySection(
+    val date: LocalDate,
+    val blocks: List<ScheduleBlock>,
+    val tasks: List<ScheduleTask>,
+    val reminders: List<Reminder>,
+    val timeframes: List<Timeframe>,
+    val taskCount: Int,
+    val reminderCount: Int,
+)
+
+internal fun activeTimeframesForDay(
+    timeframes: List<Timeframe>,
+    day: LocalDate,
+): List<Timeframe> = timeframes
+    .filter { !day.isBefore(it.startDate) && !day.isAfter(it.endDate) }
+    .sortedWith(compareBy<Timeframe> { it.startDate }.thenBy { it.endDate }.thenBy { it.name })
+
+internal fun buildTaskDaySection(
+    date: LocalDate,
+    blocks: List<ScheduleBlock>,
+    tasksById: Map<String, ScheduleTask>,
+    reminders: List<Reminder>,
+    timeframes: List<Timeframe>,
+    zoneId: ZoneId,
+): TaskDaySection {
+    val visibleBlocks = visibleBlocksForDay(blocks, date, zoneId)
+        .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+        .sortedBy { it.startAt }
+    val tasks = visibleBlocks
+        .mapNotNull { tasksById[it.taskId] }
+        .distinctBy { it.id }
+    val dayReminders = reminders
+        .filter { it.status != ReminderStatus.COMPLETED }
+        .filter { it.dueAt.atZone(zoneId).toLocalDate() == date }
+        .sortedBy { it.dueAt }
+    val dayTimeframes = activeTimeframesForDay(timeframes, date)
+    return TaskDaySection(
+        date = date,
+        blocks = visibleBlocks,
+        tasks = tasks,
+        reminders = dayReminders,
+        timeframes = dayTimeframes,
+        taskCount = tasks.size,
+        reminderCount = dayReminders.size,
+    )
+}
+
+private const val TaskFeedDayCount = 20001
+private const val TaskFeedCenterIndex = TaskFeedDayCount / 2
+
+private enum class TasksSheetType {
+    ADD_CHOOSER,
+    UPCOMING_REMINDERS,
+    DAY_SUMMARY,
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksScreen(
     padding: PaddingValues,
     state: PlannerUiState,
     settings: AppSettings,
+    isActive: Boolean,
     selectedDate: LocalDate,
-    savedScrollOffset: Int,
-    autoPositionNonce: Int,
     onSelectedDateChange: (LocalDate) -> Unit,
-    onScrollOffsetChange: (Int) -> Unit,
+    onTasksViewModeChanged: (TasksViewMode) -> Unit,
     onAddTask: () -> Unit,
+    onAddReminder: () -> Unit,
     onDeleteTask: (String) -> Unit,
     onOpenTask: (String) -> Unit,
+    onOpenReminder: (Reminder) -> Unit,
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
-    val today = remember { LocalDate.now(zoneId) }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = 0, initialFirstVisibleItemScrollOffset = savedScrollOffset)
+    val today = remember(zoneId) { LocalDate.now(zoneId) }
     val density = LocalDensity.current
-    val blocksToday = remember(state.snapshot.blocks, selectedDate) {
-        visibleBlocksForDay(
+    val scope = rememberCoroutineScope()
+    val collapsedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
+    val expandedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
+    val activeListState = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
+    val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
+    val activeReminders = remember(state.snapshot.reminders) { state.snapshot.reminders.filter { it.status != ReminderStatus.COMPLETED } }
+    val dateFormatter = remember(settings.dateFormatPreference) {
+        when (settings.dateFormatPreference) {
+            dev.codex.reclaimoss.settings.DateFormatPreference.MONTH_DAY_YEAR -> DateTimeFormatter.ofPattern("EEE, MMM d")
+            dev.codex.reclaimoss.settings.DateFormatPreference.DAY_MONTH_YEAR -> DateTimeFormatter.ofPattern("EEE, d MMM")
+        }
+    }
+    val reminderFormatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
+    val hourHeight = 144.dp
+    val currentPinnedDate = remember(activeListState.firstVisibleItemIndex, settings.tasksViewMode) {
+        taskFeedDateForIndex(
+            today = today,
+            index = when (settings.tasksViewMode) {
+                TasksViewMode.COLLAPSED -> activeListState.firstVisibleItemIndex
+                TasksViewMode.EXPANDED -> activeListState.firstVisibleItemIndex
+            },
+        )
+    }
+    val currentPinnedSection = remember(
+        currentPinnedDate,
+        state.snapshot.blocks,
+        state.snapshot.reminders,
+        state.snapshot.timeframes,
+        tasksById,
+    ) {
+        buildTaskDaySection(
+            date = currentPinnedDate,
             blocks = state.snapshot.blocks,
-            day = selectedDate,
+            tasksById = tasksById,
+            reminders = activeReminders,
+            timeframes = state.snapshot.timeframes,
             zoneId = zoneId,
         )
-            .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
     }
-    val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
-    val hourHeight = 144.dp
-    val darkThemeHeader = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val todayHeaderColor = if (darkThemeHeader) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-    }
-    val todayHeaderTextColor = if (darkThemeHeader) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
+    var showingSheet by rememberSaveable { mutableStateOf<TasksSheetType?>(null) }
+    var selectedDaySummaryEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedDaySummary = selectedDaySummaryEpoch?.let { epoch ->
+        buildTaskDaySection(
+            date = LocalDate.ofEpochDay(epoch),
+            blocks = state.snapshot.blocks,
+            tasksById = tasksById,
+            reminders = activeReminders,
+            timeframes = state.snapshot.timeframes,
+            zoneId = zoneId,
+        )
     }
 
-    LaunchedEffect(autoPositionNonce) {
-        val offsetMinutes = if (selectedDate == today) {
-            (minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0)
-        } else {
-            0
+    LaunchedEffect(isActive, settings.tasksViewMode) {
+        if (!isActive) return@LaunchedEffect
+        when (settings.tasksViewMode) {
+            TasksViewMode.COLLAPSED -> {
+                collapsedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
+            }
+            TasksViewMode.EXPANDED -> {
+                expandedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
+            }
         }
-        val offsetPx = with(density) { timelineOffset(offsetMinutes, hourHeight).roundToPx() }
-        listState.scrollToItem(index = 0, scrollOffset = offsetPx)
-        onScrollOffsetChange(offsetPx)
     }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemScrollOffset }
-            .collect { offset -> onScrollOffsetChange(offset) }
+    LaunchedEffect(isActive, settings.tasksViewMode, collapsedListState, expandedListState) {
+        if (!isActive) return@LaunchedEffect
+        val stateToWatch = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
+        snapshotFlow { stateToWatch.firstVisibleItemIndex }
+            .collect { index ->
+                onSelectedDateChange(taskFeedDateForIndex(today, index))
+            }
     }
 
     Column(
@@ -202,57 +302,550 @@ fun TasksScreen(
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                IconButton(onClick = { onSelectedDateChange(selectedDate.minusDays(1)) }) {
-                    Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
-                }
-                Text(
-                    headerDateLabel(selectedDate, settings.dateFormatPreference),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            if (selectedDate == today) {
-                                todayHeaderColor
-                            } else {
-                                Color.Transparent
-                            },
+                IconButton(
+                    onClick = {
+                        onTasksViewModeChanged(
+                            if (settings.tasksViewMode == TasksViewMode.COLLAPSED) TasksViewMode.EXPANDED else TasksViewMode.COLLAPSED,
                         )
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (selectedDate == today) todayHeaderTextColor else MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconButton(onClick = { onSelectedDateChange(selectedDate.plusDays(1)) }) {
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
+                    },
+                ) {
+                    Text(
+                        if (settings.tasksViewMode == TasksViewMode.COLLAPSED) "+" else "-",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val targetDate = today
+                        onSelectedDateChange(targetDate)
+                        val targetIndex = taskFeedIndexForDate(today, targetDate)
+                        val offsetPx = with(density) {
+                            if (settings.tasksViewMode == TasksViewMode.EXPANDED) {
+                                timelineOffset((minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0), hourHeight).roundToPx()
+                            } else {
+                                0
+                            }
+                        }
+                        val listState = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
+                        scope.launch {
+                            listState.animateScrollToItem(targetIndex, offsetPx)
+                        }
+                    },
+                ) {
+                    Icon(Icons.Outlined.Home, contentDescription = "Go to today")
+                }
+                IconButton(onClick = { showingSheet = TasksSheetType.UPCOMING_REMINDERS }) {
+                    Icon(Icons.Outlined.Notifications, contentDescription = "Upcoming reminders")
                 }
             }
             HeaderActionSlot {
-                HeaderActionButton(label = "Add Task", icon = Icons.Outlined.Add, onClick = onAddTask)
+                HeaderActionButton(label = "Add", icon = Icons.Outlined.Add, onClick = { showingSheet = TasksSheetType.ADD_CHOOSER })
             }
         }
 
-        LazyColumn(
-            state = listState,
-            contentPadding = PaddingValues(bottom = 260.dp),
-        ) {
-            item {
-                FullDayTimeline(
-                    blocks = blocksToday,
-                    tasksById = tasksById,
-                    zoneId = zoneId,
-                    day = selectedDate,
-                    hourHeight = hourHeight,
-                    allowConcurrentTasks = settings.allowConcurrentTasks,
-                    onOpenTask = onOpenTask,
-                    onDeleteTask = onDeleteTask,
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (settings.tasksViewMode) {
+                TasksViewMode.COLLAPSED -> {
+                    LazyColumn(
+                        state = collapsedListState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(bottom = 260.dp),
+                    ) {
+                        items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
+                            val date = taskFeedDateForIndex(today, index)
+                            val section = buildTaskDaySection(
+                                date = date,
+                                blocks = state.snapshot.blocks,
+                                tasksById = tasksById,
+                                reminders = activeReminders,
+                                timeframes = state.snapshot.timeframes,
+                                zoneId = zoneId,
+                            )
+                            CollapsedTaskDayRow(
+                                section = section,
+                                formatter = dateFormatter,
+                                today = today,
+                                onClick = {
+                                    selectedDaySummaryEpoch = section.date.toEpochDay()
+                                    showingSheet = TasksSheetType.DAY_SUMMARY
+                                },
+                            )
+                        }
+                    }
+                }
+                TasksViewMode.EXPANDED -> {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            state = expandedListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            contentPadding = PaddingValues(top = 64.dp, bottom = 260.dp),
+                        ) {
+                            items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
+                                val date = taskFeedDateForIndex(today, index)
+                                val section = buildTaskDaySection(
+                                    date = date,
+                                    blocks = state.snapshot.blocks,
+                                    tasksById = tasksById,
+                                    reminders = activeReminders,
+                                    timeframes = state.snapshot.timeframes,
+                                    zoneId = zoneId,
+                                )
+                                ExpandedTaskDaySection(
+                                    section = section,
+                                    tasksById = tasksById,
+                                    zoneId = zoneId,
+                                    hourHeight = hourHeight,
+                                    allowConcurrentTasks = settings.allowConcurrentTasks,
+                                    onOpenTask = onOpenTask,
+                                )
+                            }
+                        }
+                        ExpandedTasksPinnedHeader(
+                            section = currentPinnedSection,
+                            formatter = dateFormatter,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopStart),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    when (showingSheet) {
+        TasksSheetType.ADD_CHOOSER -> {
+            ModalBottomSheet(
+                onDismissRequest = { showingSheet = null },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                TasksSheetActionList(
+                    title = "Add",
+                    actions = listOf(
+                        "Add Task" to onAddTask,
+                        "Add Reminder" to onAddReminder,
+                    ),
+                    onDone = { showingSheet = null },
                 )
             }
         }
+        TasksSheetType.UPCOMING_REMINDERS -> {
+            ModalBottomSheet(
+                onDismissRequest = { showingSheet = null },
+                containerColor = MaterialTheme.colorScheme.surface,
+            ) {
+                UpcomingRemindersSheet(
+                    reminders = activeReminders.sortedBy { it.dueAt },
+                    tasksById = tasksById,
+                    formatter = reminderFormatter,
+                    zoneId = zoneId,
+                    onOpenReminder = { reminder ->
+                        showingSheet = null
+                        val linkedTaskId = reminder.linkedTaskId
+                        if (linkedTaskId != null && tasksById.containsKey(linkedTaskId)) {
+                            onOpenTask(linkedTaskId)
+                        } else {
+                            onOpenReminder(reminder)
+                        }
+                    },
+                )
+            }
+        }
+        TasksSheetType.DAY_SUMMARY -> {
+            val section = selectedDaySummary
+            if (section != null) {
+                ModalBottomSheet(
+                    onDismissRequest = { showingSheet = null },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ) {
+                    DaySummarySheet(
+                        section = section,
+                        formatter = dateFormatter,
+                        reminderFormatter = reminderFormatter,
+                        zoneId = zoneId,
+                        onAddTask = {
+                            showingSheet = null
+                            onAddTask()
+                        },
+                        onAddReminder = {
+                            showingSheet = null
+                            onAddReminder()
+                        },
+                        onExpand = {
+                            showingSheet = null
+                            onSelectedDateChange(section.date)
+                            onTasksViewModeChanged(TasksViewMode.EXPANDED)
+                        },
+                        onOpenTask = {
+                            showingSheet = null
+                            onOpenTask(it)
+                        },
+                        onOpenReminder = { reminder ->
+                            showingSheet = null
+                            onOpenReminder(reminder)
+                        },
+                    )
+                }
+            }
+        }
+        null -> Unit
+    }
+}
+
+private fun taskFeedIndexForDate(today: LocalDate, date: LocalDate): Int =
+    (TaskFeedCenterIndex + ChronoUnit.DAYS.between(today, date).toInt()).coerceIn(0, TaskFeedDayCount - 1)
+
+private fun taskFeedDateForIndex(today: LocalDate, index: Int): LocalDate =
+    today.plusDays((index - TaskFeedCenterIndex).toLong())
+
+@Composable
+private fun CollapsedTaskDayRow(
+    section: TaskDaySection,
+    formatter: DateTimeFormatter,
+    today: LocalDate,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 88.dp)
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TimeframeRailStrip(
+                timeframes = section.timeframes,
+                modifier = Modifier.height(64.dp),
+                compact = true,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    formatter.format(section.date) + if (section.date == today) " · Today" else "",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    collapsedDaySummaryText(section),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (section.timeframes.isNotEmpty()) {
+                    Text(
+                        section.timeframes.joinToString(", ") { it.name },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun collapsedDaySummaryText(section: TaskDaySection): String = buildString {
+    append(if (section.taskCount == 1) "1 task" else "${section.taskCount} tasks")
+    append(" · ")
+    append(if (section.reminderCount == 1) "1 reminder" else "${section.reminderCount} reminders")
+}
+
+@Composable
+private fun ExpandedTaskDaySection(
+    section: TaskDaySection,
+    tasksById: Map<String, ScheduleTask>,
+    zoneId: ZoneId,
+    hourHeight: Dp,
+    allowConcurrentTasks: Boolean,
+    onOpenTask: (String) -> Unit,
+) {
+    val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(timelineHeight),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        TimeframeRailStrip(
+            timeframes = section.timeframes,
+            modifier = Modifier.height(timelineHeight),
+            compact = false,
+        )
+        Box(modifier = Modifier.weight(1f)) {
+            FullDayTimeline(
+                blocks = section.blocks,
+                tasksById = tasksById,
+                zoneId = zoneId,
+                day = section.date,
+                hourHeight = hourHeight,
+                allowConcurrentTasks = allowConcurrentTasks,
+                onOpenTask = onOpenTask,
+                onDeleteTask = {},
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExpandedTasksPinnedHeader(
+    section: TaskDaySection,
+    formatter: DateTimeFormatter,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TimeframeRailStrip(
+                timeframes = section.timeframes,
+                modifier = Modifier.height(56.dp),
+                compact = true,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    formatter.format(section.date),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    collapsedDaySummaryText(section),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimeframeRailStrip(
+    timeframes: List<Timeframe>,
+    modifier: Modifier = Modifier,
+    compact: Boolean,
+) {
+    val visible = if (timeframes.isEmpty()) listOf<Timeframe?>(null) else timeframes.map { it }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        visible.forEach { timeframe ->
+            if (timeframe == null) {
+                Spacer(Modifier.width(if (compact) 18.dp else 28.dp))
+            } else {
+                val color = parseTimeframeColor(timeframe.colorHex)
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(if (compact) 22.dp else 34.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(color.copy(alpha = 0.88f))
+                        .padding(3.dp),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Text(
+                        timeframe.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+                            .padding(horizontal = 4.dp, vertical = 3.dp),
+                        style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        maxLines = if (compact) 3 else 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TasksSheetActionList(
+    title: String,
+    actions: List<Pair<String, () -> Unit>>,
+    onDone: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        actions.forEach { (label, action) ->
+            FilledTonalButton(
+                onClick = action,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(20.dp),
+            ) {
+                Text(label)
+            }
+        }
+        TextButton(onClick = onDone, modifier = Modifier.align(Alignment.End)) {
+            Text("Done")
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun UpcomingRemindersSheet(
+    reminders: List<Reminder>,
+    tasksById: Map<String, ScheduleTask>,
+    formatter: DateTimeFormatter,
+    zoneId: ZoneId,
+    onOpenReminder: (Reminder) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("Upcoming notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        if (reminders.isEmpty()) {
+            Text("No upcoming reminders.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(reminders, key = { it.id }) { reminder ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenReminder(reminder) },
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                reminder.dueDisplayText(formatter, DateTimeFormatter.ofPattern("MMM d"), zoneId),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            tasksById[reminder.linkedTaskId]?.let { linkedTask ->
+                                Text(
+                                    linkedTask.title,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun DaySummarySheet(
+    section: TaskDaySection,
+    formatter: DateTimeFormatter,
+    reminderFormatter: DateTimeFormatter,
+    zoneId: ZoneId,
+    onAddTask: () -> Unit,
+    onAddReminder: () -> Unit,
+    onExpand: () -> Unit,
+    onOpenTask: (String) -> Unit,
+    onOpenReminder: (Reminder) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(formatter.format(section.date), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(collapsedDaySummaryText(section), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (section.timeframes.isNotEmpty()) {
+            Text(
+                section.timeframes.joinToString(", ") { it.name },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (section.tasks.isNotEmpty()) {
+            Text("Tasks", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            section.tasks.forEach { task ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenTask(task.id) },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(task.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(task.status.name.lowercase().replaceFirstChar { it.titlecase(Locale.getDefault()) }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        if (section.reminders.isNotEmpty()) {
+            Text("Reminders", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            section.reminders.forEach { reminder ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenReminder(reminder) },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            reminder.dueDisplayText(reminderFormatter, DateTimeFormatter.ofPattern("MMM d"), zoneId),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+        FilledTonalButton(onClick = onAddTask, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+            Text("Add Task")
+        }
+        FilledTonalButton(onClick = onAddReminder, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+            Text("Add Reminder")
+        }
+        TextButton(onClick = onExpand, modifier = Modifier.align(Alignment.End)) {
+            Text("Expand Day")
+        }
+        Spacer(Modifier.height(16.dp))
     }
 }
 

@@ -128,6 +128,7 @@ import dev.codex.reclaimoss.settings.HistoryRetention
 import dev.codex.reclaimoss.settings.PreferredPeriodFallbackMode
 import dev.codex.reclaimoss.settings.ReminderTimingMode
 import dev.codex.reclaimoss.settings.ThemeMode
+import dev.codex.reclaimoss.settings.TasksViewMode
 import dev.codex.reclaimoss.settings.UrgentRescheduleMode
 import dev.codex.reclaimoss.settings.WeekStart
 import java.time.DayOfWeek
@@ -147,7 +148,6 @@ import kotlinx.coroutines.launch
 
 enum class AppTab(val label: String) {
     Tasks("Tasks"),
-    Reminders("Reminders"),
     Planner("Planner"),
     Settings("Settings"),
 }
@@ -544,6 +544,7 @@ class PlannerViewModel(
 
     suspend fun setThemeMode(value: ThemeMode) = settingsRepository.setThemeMode(value)
     suspend fun setFontSizeScale(value: FontSizeScale) = settingsRepository.setFontSizeScale(value)
+    suspend fun setTasksViewMode(value: TasksViewMode) = settingsRepository.setTasksViewMode(value)
     suspend fun setDateFormatPreference(value: DateFormatPreference) = settingsRepository.setDateFormatPreference(value)
     suspend fun setWeekStart(value: WeekStart) = settingsRepository.setWeekStart(value)
     suspend fun setBreakBufferMinutes(value: Int) = settingsRepository.setBreakBufferMinutes(value)

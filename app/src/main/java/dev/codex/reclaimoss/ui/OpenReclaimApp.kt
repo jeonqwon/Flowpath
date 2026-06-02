@@ -357,7 +357,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     scope.launch {
                         viewModel.addReminder(draft)
                         showingReminderCreate = false
-                        navigateToTab(AppTab.Reminders)
+                        navigateToTab(AppTab.Tasks)
                         snackbarHostState.showLatestSnackbar("Reminder saved")
                     }
                 },
@@ -540,7 +540,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             val icon = when (tab) {
                                 AppTab.Tasks -> Icons.Outlined.Checklist
                                 AppTab.Planner -> Icons.Outlined.CalendarMonth
-                                AppTab.Reminders -> Icons.Outlined.Notifications
                                 AppTab.Settings -> Icons.Outlined.Settings
                             }
                             Icon(icon, contentDescription = tab.label)
@@ -578,11 +577,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     padding = padding,
                     state = state,
                     settings = state.settings,
+                    isActive = selectedTab == AppTab.Tasks,
                     selectedDate = sharedSelectedDate,
-                    savedScrollOffset = tasksScrollOffset,
-                    autoPositionNonce = tasksAutoPositionNonce,
                     onSelectedDateChange = onSharedDateChange,
-                    onScrollOffsetChange = { tasksScrollOffset = it },
+                    onTasksViewModeChanged = { value -> scope.launch { viewModel.setTasksViewMode(value) } },
                     onAddTask = {
                         followUpSourceTaskId = null
                         editSourceTaskId = null
@@ -591,6 +589,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         createSessionKey += 1
                         showingCreate = true
                     },
+                    onAddReminder = {
+                        showingReminderCreate = true
+                    },
                     onDeleteTask = { taskId ->
                         scope.launch {
                             viewModel.deleteTask(taskId)
@@ -598,6 +599,14 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         }
                     },
                     onOpenTask = { selectedTaskId = it },
+                    onOpenReminder = { reminder ->
+                        val linkedTaskId = reminder.linkedTaskId
+                        if (linkedTaskId != null && state.snapshot.tasks.any { it.id == linkedTaskId }) {
+                            selectedTaskId = linkedTaskId
+                        } else {
+                            selectedReminderId = reminder.id
+                        }
+                    },
                 )
 
                 AppTab.Planner -> PlannerScreen(
@@ -644,31 +653,12 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onOpenTask = { selectedTaskId = it },
                 )
 
-                AppTab.Reminders -> RemindersScreen(
-                    padding = padding,
-                    reminders = state.snapshot.reminders,
-                    tasksById = state.snapshot.tasks.associateBy { it.id },
-                    settings = state.settings,
-                    selectedDate = sharedSelectedDate,
-                    onSelectedDateChange = onSharedDateChange,
-                    onAddReminder = {
-                        showingReminderCreate = true
-                    },
-                    onOpenReminder = { reminder ->
-                        val linkedTaskId = reminder.linkedTaskId
-                        if (linkedTaskId != null && state.snapshot.tasks.any { it.id == linkedTaskId }) {
-                            selectedTaskId = linkedTaskId
-                        } else {
-                            selectedReminderId = reminder.id
-                        }
-                    },
-                )
-
                 AppTab.Settings -> SettingsScreen(
                     padding = padding,
                     settings = state.settings,
                     onThemeModeChanged = { value -> scope.launch { viewModel.setThemeMode(value) } },
                     onFontSizeScaleChanged = { value -> scope.launch { viewModel.setFontSizeScale(value) } },
+                    onTasksViewModeChanged = { value -> scope.launch { viewModel.setTasksViewMode(value) } },
                     onBreakBufferChanged = { value -> scope.launch { viewModel.setBreakBufferMinutes(value) } },
                     onAllowTaskSplittingChanged = { value -> scope.launch { viewModel.setAllowTaskSplitting(value) } },
                     onAllowConcurrentTasksChanged = { value -> scope.launch { viewModel.setAllowConcurrentTasks(value) } },
