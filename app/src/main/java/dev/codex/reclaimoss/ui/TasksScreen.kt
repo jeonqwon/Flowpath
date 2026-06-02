@@ -126,6 +126,17 @@ import dev.codex.reclaimoss.domain.service.PlannerCoordinator
 import dev.codex.reclaimoss.domain.service.TaskCreationResult
 import dev.codex.reclaimoss.settings.AppSettings
 import dev.codex.reclaimoss.settings.TasksViewMode
+import dev.codex.reclaimoss.ui.HeaderActionHeight
+import dev.codex.reclaimoss.ui.HeaderActionShape
+import dev.codex.reclaimoss.ui.HeaderActionSlotWidth
+import dev.codex.reclaimoss.ui.HeaderActionWidth
+import dev.codex.reclaimoss.ui.dueDisplayText
+import dev.codex.reclaimoss.ui.formatHourLabel
+import dev.codex.reclaimoss.ui.minutesFromStart
+import dev.codex.reclaimoss.ui.parseTimeframeColor
+import dev.codex.reclaimoss.ui.reminderDateTimeFormatter
+import dev.codex.reclaimoss.ui.timelineBlockHeight
+import dev.codex.reclaimoss.ui.timelineOffset
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -159,6 +170,11 @@ internal data class TimeframeRailMetadata(
     val laneIndex: Int,
     val continuesFromPreviousDay: Boolean,
     val continuesIntoNextDay: Boolean,
+)
+
+internal data class TimeframeHeaderLabel(
+    val name: String,
+    val colorHex: String,
 )
 
 internal fun activeTimeframesForDay(
@@ -219,7 +235,7 @@ internal fun buildTimeframeRailMetadata(
 
 private const val TaskFeedDayCount = 20001
 private const val TaskFeedCenterIndex = TaskFeedDayCount / 2
-private val ExpandedStickyHeaderHeight = 44.dp
+private val ExpandedStickyHeaderMinHeight = 44.dp
 
 private enum class TasksSheetType {
     ADD_CHOOSER,
@@ -337,7 +353,7 @@ fun TasksScreen(
                         }
                         val offsetPx = with(density) {
                             if (settings.tasksViewMode == TasksViewMode.EXPANDED) {
-                                (ExpandedStickyHeaderHeight + timelineOffset((minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0), hourHeight)).roundToPx()
+                                (ExpandedStickyHeaderMinHeight + timelineOffset((minutesFromStart(LocalTime.now(zoneId)) - 60).coerceAtLeast(0), hourHeight)).roundToPx()
                             } else {
                                 0
                             }
@@ -635,43 +651,46 @@ private fun ExpandedTaskDayHeader(
     railMetadata: List<TimeframeRailMetadata>,
     formatter: DateTimeFormatter,
 ) {
-    val timeframeNames = stickyTimeframeHeaderNames(railMetadata)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
+    val timeframeLabels = stickyTimeframeHeaderLabels(railMetadata)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .heightIn(min = ExpandedStickyHeaderMinHeight)
+            .padding(bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Row(
+        TimeframeRailStrip(
+            rails = railMetadata,
             modifier = Modifier
-                .fillMaxWidth()
-                .height(ExpandedStickyHeaderHeight)
-                .padding(bottom = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxHeight()
+                .padding(top = 4.dp),
+            compact = true,
+            segment = TimeframeRailSegment.HEADER,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 100.dp, top = 4.dp, end = 12.dp),
         ) {
-            TimeframeRailStrip(
-                rails = railMetadata,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(top = 2.dp),
-                compact = true,
-                segment = TimeframeRailSegment.HEADER,
-            )
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     formatter.format(section.date),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                if (timeframeNames != null) {
+                timeframeLabels.forEach { label ->
                     Text(
-                        timeframeNames,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = label.name,
+                        modifier = Modifier
+                            .background(
+                                parseTimeframeColor(label.colorHex).copy(alpha = 0.22f),
+                                RoundedCornerShape(10.dp),
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -686,6 +705,10 @@ private enum class TimeframeRailSegment {
     HEADER,
     BODY,
 }
+
+internal fun stickyTimeframeHeaderLabels(rails: List<TimeframeRailMetadata>): List<TimeframeHeaderLabel> =
+    rails.distinctBy { it.id }
+        .map { TimeframeHeaderLabel(name = it.name, colorHex = it.colorHex) }
 
 internal fun stickyTimeframeHeaderNames(rails: List<TimeframeRailMetadata>): String? =
     rails.map { it.name }
@@ -713,7 +736,7 @@ private fun TimeframeRailStrip(
     ) {
         visible.forEach { rail ->
             if (rail == null) {
-                Spacer(Modifier.width(if (compact) 5.dp else 6.dp))
+                Spacer(Modifier.width(if (compact) 4.dp else 5.dp))
             } else {
                 val color = parseTimeframeColor(rail.colorHex)
                 val topConnected = when (segment) {
@@ -735,7 +758,7 @@ private fun TimeframeRailStrip(
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(if (compact) 5.dp else 6.dp)
+                        .width(if (compact) 4.dp else 5.dp)
                         .clip(shape)
                         .background(color.copy(alpha = 0.88f)),
                 )

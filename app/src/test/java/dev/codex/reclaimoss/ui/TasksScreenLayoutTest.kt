@@ -194,6 +194,63 @@ class TasksScreenLayoutTest {
         assertEquals(null, stickyTimeframeHeaderNames(emptyList()))
     }
 
+    @Test
+    fun `sticky timeframe header labels preserve active order with colors`() {
+        val metadata = listOf(
+            TimeframeRailMetadata(
+                id = "tf-1",
+                name = "Sprint",
+                colorHex = "#F4B6D2",
+                laneIndex = 0,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = true,
+            ),
+            TimeframeRailMetadata(
+                id = "tf-2",
+                name = "Finals",
+                colorHex = "#9BCB72",
+                laneIndex = 1,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2"),
+                TimeframeHeaderLabel(name = "Finals", colorHex = "#9BCB72"),
+            ),
+            stickyTimeframeHeaderLabels(metadata),
+        )
+    }
+
+    @Test
+    fun `sticky timeframe header labels de duplicate repeated timeframe ids`() {
+        val metadata = listOf(
+            TimeframeRailMetadata(
+                id = "tf-1",
+                name = "Sprint",
+                colorHex = "#F4B6D2",
+                laneIndex = 0,
+                continuesFromPreviousDay = true,
+                continuesIntoNextDay = true,
+            ),
+            TimeframeRailMetadata(
+                id = "tf-1",
+                name = "Sprint",
+                colorHex = "#F4B6D2",
+                laneIndex = 1,
+                continuesFromPreviousDay = true,
+                continuesIntoNextDay = true,
+            ),
+        )
+
+        assertEquals(
+            listOf(TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2")),
+            stickyTimeframeHeaderLabels(metadata),
+        )
+    }
+
     private fun scheduleBlock(
         id: String = "block-1",
         taskId: String = "task-1",
