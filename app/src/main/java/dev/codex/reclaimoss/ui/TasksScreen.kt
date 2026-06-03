@@ -478,7 +478,6 @@ fun TasksScreen(
                                         Column(modifier = Modifier.fillMaxSize()) {
                                             ExpandedTimelineDayHeader(
                                                 date = date,
-                                                railMetadata = railMetadata,
                                             )
 
                                             FullDayTimeline(
@@ -499,7 +498,7 @@ fun TasksScreen(
                             }
                         }
 
-                        // Pinned floating header — sticky push when next day reaches top
+                        // Pinned floating header — date pushes daily, timeframe pushes only when active set changes
                         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
                         val pinnedHeaderInfo by remember {
                             derivedStateOf {
@@ -518,19 +517,38 @@ fun TasksScreen(
                             }
                         }
                         val pinnedDayIndex = pinnedHeaderInfo.first
-                        val stickyPushOffsetPx = pinnedHeaderInfo.second
+                        val datePushOffsetPx = pinnedHeaderInfo.second
                         val pinnedDate = taskFeedDateForIndex(today, pinnedDayIndex)
                         val pinnedRailMetadata = remember(pinnedDate, state.snapshot.timeframes) {
                             railMetadataForDate(state.snapshot.timeframes, pinnedDate)
                         }
-                        val pinnedStartingRails = pinnedRailMetadata
+                        val pinnedActiveRailIds = remember(pinnedRailMetadata) {
+                            pinnedRailMetadata.map { it.id }.toSet()
+                        }
+                        val timeframePushOffsetPx by remember {
+                            derivedStateOf {
+                                if (pinnedActiveRailIds.isEmpty()) 0
+                                else {
+                                    val infos = expandedListState.layoutInfo.visibleItemsInfo
+                                    val boundary = infos.firstOrNull { item ->
+                                        val itemDate = taskFeedDateForIndex(today, item.index)
+                                        val itemIds = activeRailIdsForDate(state.snapshot.timeframes, itemDate)
+                                        itemIds != pinnedActiveRailIds
+                                    }
+                                    if (boundary != null && boundary.offset < headerHeightPx) {
+                                        (boundary.offset - headerHeightPx).coerceIn(-headerHeightPx, 0)
+                                    } else 0
+                                }
+                            }
+                        }
                         PinnedExpandedTimelineHeader(
                             date = pinnedDate,
-                            startingRails = pinnedStartingRails,
+                            activeRails = pinnedRailMetadata,
+                            datePushOffsetPx = datePushOffsetPx,
+                            timeframePushOffsetPx = timeframePushOffsetPx,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .zIndex(20f)
-                                .offset { IntOffset(0, stickyPushOffsetPx) }
                                 .padding(
                                     start = timelineRailStripWidth(pinnedRailMetadata, compact = false) + TaskTimelineRailGap,
                                     top = 4.dp,
@@ -636,6 +654,12 @@ private fun railMetadataForDate(
     nextDayTimeframes = activeTimeframesForDay(timeframes, date.plusDays(1)),
 )
 
+private fun activeRailIdsForDate(
+    timeframes: List<Timeframe>,
+    date: LocalDate,
+): Set<String> =
+    railMetadataForDate(timeframes, date).map { it.id }.toSet()
+
 @Composable
 private fun CollapsedTaskDayRow(
     section: TaskDaySection,
@@ -693,21 +717,36 @@ private fun collapsedDaySummaryText(section: TaskDaySection): String = buildStri
 }
 
 @Composable
-private fun DateAndStartingTimeframesHeader(
+private fun PinnedExpandedTimelineHeader(
     date: LocalDate,
-    startingRails: List<TimeframeRailMetadata>,
+    activeRails: List<TimeframeRailMetadata>,
+    datePushOffsetPx: Int,
+    timeframePushOffsetPx: Int,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    val density = LocalDensity.current
+    val chipStartPx = with(density) {
+        (TaskTimelineLabelWidth + TaskTimelineContentInset).roundToPx()
+    }
+
+    Box(
         modifier = modifier
-            .animateContentSize()
-            .padding(start = TaskTimelineContentInset),
-        verticalAlignment = Alignment.CenterVertically,
+            .fillMaxWidth()
+            .heightIn(min = ExpandedDayHeaderHeight)
+            .animateContentSize(),
     ) {
-        DateChip(text = compactStickyDateText(date))
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset { IntOffset(0, datePushOffsetPx) },
+        ) {
+            DateChip(text = compactStickyDateText(date))
+        }
 
         AnimatedVisibility(
-            visible = startingRails.isNotEmpty(),
+            visible = activeRails.isNotEmpty(),
+            modifier = Modifier.align(Alignment.CenterStart)
+                .offset { IntOffset(x = chipStartPx, y = timeframePushOffsetPx) },
             enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
             exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
         ) {
@@ -715,7 +754,7 @@ private fun DateAndStartingTimeframesHeader(
                 modifier = Modifier.animateContentSize(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                startingRails.forEach { rail ->
+                activeRails.forEach { rail ->
                     Spacer(Modifier.width(TaskTimelineContentInset))
                     TimeframeNameChip(
                         text = rail.name,
@@ -728,24 +767,9 @@ private fun DateAndStartingTimeframesHeader(
 }
 
 @Composable
-private fun PinnedExpandedTimelineHeader(
-    date: LocalDate,
-    startingRails: List<TimeframeRailMetadata>,
-    modifier: Modifier = Modifier,
-) {
-    DateAndStartingTimeframesHeader(
-        date = date,
-        startingRails = startingRails,
-        modifier = modifier,
-    )
-}
-
-@Composable
 private fun ExpandedTimelineDayHeader(
     date: LocalDate,
-    railMetadata: List<TimeframeRailMetadata>,
 ) {
-    val startingRails = railMetadata
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -753,10 +777,12 @@ private fun ExpandedTimelineDayHeader(
             .zIndex(4f),
         contentAlignment = Alignment.CenterStart,
     ) {
-        DateAndStartingTimeframesHeader(
-            date = date,
-            startingRails = startingRails,
-        )
+        Row(
+            modifier = Modifier.padding(start = TaskTimelineContentInset),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DateChip(text = compactStickyDateText(date))
+        }
     }
 }
 
