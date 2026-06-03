@@ -138,6 +138,25 @@ class TasksScreenLayoutTest {
     }
 
     @Test
+    fun `compact sticky date text uses day slash month`() {
+        assertEquals("2/6", compactStickyDateText(LocalDate.of(2026, 6, 2)))
+    }
+
+    @Test
+    fun `timeline hides both midnight labels when midnight labels are disabled`() {
+        assertEquals(false, shouldShowTimelineHourLabel(0, showMidnightLabel = false))
+        assertEquals(false, shouldShowTimelineHourLabel(24, showMidnightLabel = false))
+        assertEquals(true, shouldShowTimelineHourLabel(1, showMidnightLabel = false))
+    }
+
+    @Test
+    fun `timeline hides both midnight dividers when midnight labels are disabled`() {
+        assertEquals(false, shouldShowTimelineHourDivider(0, showMidnightLabel = false))
+        assertEquals(false, shouldShowTimelineHourDivider(24, showMidnightLabel = false))
+        assertEquals(true, shouldShowTimelineHourDivider(1, showMidnightLabel = false))
+    }
+
+    @Test
     fun `timeframe rail metadata is continuous across day boundaries`() {
         val current = timeframe(id = "tf-1", name = "Sprint", startDate = LocalDate.of(2026, 6, 1), endDate = LocalDate.of(2026, 6, 3))
         val next = timeframe(id = "tf-1", name = "Sprint", startDate = LocalDate.of(2026, 6, 1), endDate = LocalDate.of(2026, 6, 3))
@@ -195,6 +214,79 @@ class TasksScreenLayoutTest {
     }
 
     @Test
+    fun `sticky timeframe card text joins active names in one card`() {
+        val metadata = listOf(
+            TimeframeRailMetadata(
+                id = "tf-1",
+                name = "Sprint",
+                colorHex = "#F4B6D2",
+                laneIndex = 0,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = true,
+            ),
+            TimeframeRailMetadata(
+                id = "tf-2",
+                name = "Finals",
+                colorHex = "#9BCB72",
+                laneIndex = 1,
+                continuesFromPreviousDay = false,
+                continuesIntoNextDay = false,
+            ),
+        )
+
+        assertEquals("Sprint · Finals", stickyTimeframeCardText(metadata))
+    }
+
+    @Test
+    fun `task segment continuity marks overnight joins across midnight`() {
+        val zoneId = ZoneId.of("America/New_York")
+        val block = scheduleBlock(
+            startAt = Instant.parse("2026-06-02T02:00:00Z"),
+            endAt = Instant.parse("2026-06-02T10:00:00Z"),
+        )
+
+        val firstDay = visibleTaskSegmentsForDay(
+            blocks = listOf(block),
+            day = LocalDate.of(2026, 6, 1),
+            zoneId = zoneId,
+        ).single()
+        val secondDay = visibleTaskSegmentsForDay(
+            blocks = listOf(block),
+            day = LocalDate.of(2026, 6, 2),
+            zoneId = zoneId,
+        ).single()
+
+        assertEquals(false, firstDay.continuesFromPreviousDay)
+        assertEquals(true, firstDay.continuesIntoNextDay)
+        assertEquals(true, secondDay.continuesFromPreviousDay)
+        assertEquals(false, secondDay.continuesIntoNextDay)
+    }
+
+    @Test
+    fun `expanded task segments anchor overnight block only on its start day`() {
+        val zoneId = ZoneId.of("America/New_York")
+        val block = scheduleBlock(
+            startAt = Instant.parse("2026-06-02T02:00:00Z"),
+            endAt = Instant.parse("2026-06-02T10:00:00Z"),
+        )
+
+        val firstDay = expandedTaskSegmentsForDay(
+            blocks = listOf(block),
+            day = LocalDate.of(2026, 6, 1),
+            zoneId = zoneId,
+        )
+        val secondDay = expandedTaskSegmentsForDay(
+            blocks = listOf(block),
+            day = LocalDate.of(2026, 6, 2),
+            zoneId = zoneId,
+        )
+
+        assertEquals(1, firstDay.size)
+        assertEquals(true, firstDay.single().continuesIntoNextDay)
+        assertEquals(emptyList<VisibleTaskSegment>(), secondDay)
+    }
+
+    @Test
     fun `sticky timeframe header labels preserve active order with colors`() {
         val metadata = listOf(
             TimeframeRailMetadata(
@@ -249,23 +341,6 @@ class TasksScreenLayoutTest {
             listOf(TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2")),
             stickyTimeframeHeaderLabels(metadata),
         )
-    }
-
-    @Test
-    fun `timeframe dropdown label uses timeframe name when only one is active`() {
-        val labels = listOf(TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2"))
-
-        assertEquals("Sprint", timeframeDropdownLabel(labels))
-    }
-
-    @Test
-    fun `timeframe dropdown label uses count when multiple are active`() {
-        val labels = listOf(
-            TimeframeHeaderLabel(name = "Sprint", colorHex = "#F4B6D2"),
-            TimeframeHeaderLabel(name = "Finals", colorHex = "#9BCB72"),
-        )
-
-        assertEquals("2 timeframes", timeframeDropdownLabel(labels))
     }
 
     private fun scheduleBlock(

@@ -286,6 +286,7 @@ fun SleepOnboardingScreen(
                         canDisable = false,
                         startTime = draft.windowStart,
                         endTime = draft.windowEnd,
+                        endsNextDay = draft.windowEnd <= draft.windowStart,
                         minimumWindowMinutes = draft.durationMinutes,
                         onWindowEnabledChanged = {},
                         onWindowChanged = { startTime, endTime, _ ->

@@ -908,6 +908,7 @@ fun TaskWindowEditor(
         canDisable = true,
         startTime = draft.fixedStartAt.toLocalTime(),
         endTime = draft.fixedEndAt.toLocalTime(),
+        endsNextDay = draft.fixedEndAt.toLocalDate().isAfter(draft.fixedStartAt.toLocalDate()),
         minimumWindowMinutes = draft.estimatedMinutes,
         onWindowEnabledChanged = { enabled ->
             onDraftChange(
@@ -953,6 +954,7 @@ fun DailyWindowConfigurator(
     canDisable: Boolean,
     startTime: LocalTime,
     endTime: LocalTime,
+    endsNextDay: Boolean,
     minimumWindowMinutes: Int = 15,
     onWindowEnabledChanged: (Boolean) -> Unit,
     onWindowChanged: (LocalTime, LocalTime, Boolean) -> Unit,
@@ -976,9 +978,7 @@ fun DailyWindowConfigurator(
     }
 
     if (hasWindow) {
-        val overnight = remember(startTime, endTime) {
-            endTime <= startTime
-        }
+        val overnight = endsNextDay
         val sliderState = remember(startTime, endTime, overnight) {
             windowSliderState(
                 start = startTime,
