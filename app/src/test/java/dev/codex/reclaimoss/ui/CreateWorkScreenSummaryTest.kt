@@ -176,6 +176,61 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
+    fun `applyWindowEditor trusts editor hasWindow toggle when disabled`() {
+        val base = TaskDraft(
+            title = "Sleep",
+            hasWindow = true,
+            fixedStartAt = LocalDateTime.of(2026, 6, 6, 22, 0),
+            fixedEndAt = LocalDateTime.of(2026, 6, 7, 6, 0),
+        )
+        val editor = TaskDraft(
+            hasWindow = false,
+            fixedStartAt = base.fixedStartAt,
+            fixedEndAt = base.fixedEndAt,
+        )
+
+        val updated = base.applyWindowEditor(editor)
+
+        assertEquals(false, updated.hasWindow)
+    }
+
+    @Test
+    fun `window duration non overnight returns end minus start`() {
+        assertEquals(
+            180,
+            windowDurationMinutes(
+                start = LocalTime.of(18, 0),
+                end = LocalTime.of(21, 0),
+                overnight = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `window duration overnight wraps around midnight`() {
+        assertEquals(
+            240,
+            windowDurationMinutes(
+                start = LocalTime.of(22, 0),
+                end = LocalTime.of(2, 0),
+                overnight = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `window duration overnight two hours to midnight`() {
+        assertEquals(
+            120,
+            windowDurationMinutes(
+                start = LocalTime.of(22, 0),
+                end = LocalTime.of(0, 0),
+                overnight = true,
+            ),
+        )
+    }
+
+    @Test
     fun `window slider state keeps overnight as a separate flag on a 24 hour range`() {
         val state = windowSliderState(
             start = LocalTime.of(22, 0),

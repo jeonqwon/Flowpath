@@ -1013,42 +1013,37 @@ fun DailyWindowConfigurator(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                RangeSlider(
-                    value = sliderState.startMinutes..sliderState.endMinutes,
-                    onValueChange = { range ->
-                        val (updatedStart, updatedEnd) = sliderTimesFromRange(
-                            startMinutes = range.start,
-                            endMinutes = range.endInclusive,
-                        )
-                        if (windowSupportsDuration(updatedStart, updatedEnd, overnight, minimumWindowMinutes)) {
-                            onWindowChanged(updatedStart, updatedEnd, overnight)
-                        }
-                    },
-                    valueRange = 0f..(24 * 60f),
-                    steps = 95,
-                    colors = androidx.compose.material3.SliderDefaults.colors(
-                        activeTrackColor = if (overnight) {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.primary
+                if (overnight) {
+                    val durationMinutes = windowDurationMinutes(startTime, endTime, overnight = true)
+                    val startLabel = startTime.formatHourLabel()
+                    val endLabel = endTime.formatHourLabel()
+                    Text(
+                        "$startLabel – $endLabel · ${durationMinutes / 60}h ${durationMinutes % 60}m",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    RangeSlider(
+                        value = sliderState.startMinutes..sliderState.endMinutes,
+                        onValueChange = { range ->
+                            val (updatedStart, updatedEnd) = sliderTimesFromRange(
+                                startMinutes = range.start,
+                                endMinutes = range.endInclusive,
+                            )
+                            if (windowSupportsDuration(updatedStart, updatedEnd, overnight, minimumWindowMinutes)) {
+                                onWindowChanged(updatedStart, updatedEnd, overnight)
+                            }
                         },
-                        inactiveTrackColor = if (overnight) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        activeTickColor = if (overnight) {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                        inactiveTickColor = if (overnight) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                    ),
-                )
+                        valueRange = 0f..(24 * 60f),
+                        steps = 95,
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            activeTickColor = MaterialTheme.colorScheme.primary,
+                            inactiveTickColor = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                    )
+                }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     labels.forEach { label ->
                         Text(
@@ -2155,7 +2150,7 @@ fun TaskDraft.applyScheduleEditor(editorDraft: TaskDraft): TaskDraft =
 
 fun TaskDraft.applyWindowEditor(editorDraft: TaskDraft): TaskDraft =
     copy(
-        hasWindow = editorDraft.hasWindow || editorDraft.fixedStartAt != fixedStartAt || editorDraft.fixedEndAt != fixedEndAt,
+        hasWindow = editorDraft.hasWindow,
         fixedStartAt = editorDraft.fixedStartAt,
         fixedEndAt = editorDraft.fixedEndAt,
         timeframeId = editorDraft.timeframeId,
@@ -2546,25 +2541,23 @@ private fun TaskDraft.withWindowTimes(
     )
 }
 
+fun windowDurationMinutes(start: LocalTime, end: LocalTime, overnight: Boolean): Int {
+    val startMinutes = minutesFromStart(start)
+    val endMinutes = minutesFromStart(end)
+    return if (overnight) {
+        ((24 * 60) - startMinutes) + endMinutes
+    } else {
+        endMinutes - startMinutes
+    }
+}
+
 fun windowSupportsDuration(
     startTime: LocalTime,
     endTime: LocalTime,
     overnight: Boolean,
     minimumWindowMinutes: Int,
 ): Boolean {
-    val startMinutes = minutesFromStart(startTime)
-    val endMinutes = minutesFromStart(endTime)
-    val selectedSpanMinutes = if (endMinutes >= startMinutes) {
-        endMinutes - startMinutes
-    } else {
-        (24 * 60 - startMinutes) + endMinutes
-    }
-    val availableMinutes = if (overnight) {
-        (24 * 60) - selectedSpanMinutes
-    } else {
-        selectedSpanMinutes
-    }
-    return availableMinutes >= minimumWindowMinutes
+    return windowDurationMinutes(startTime, endTime, overnight) >= minimumWindowMinutes
 }
 
 private fun sliderMinutesToLocalTime(totalMinutes: Int): LocalTime =

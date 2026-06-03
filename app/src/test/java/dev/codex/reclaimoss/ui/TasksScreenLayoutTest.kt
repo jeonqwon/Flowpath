@@ -143,17 +143,28 @@ class TasksScreenLayoutTest {
     }
 
     @Test
-    fun `timeline hides both midnight labels when midnight labels are disabled`() {
-        assertEquals(false, shouldShowTimelineHourLabel(0, showMidnightLabel = false))
-        assertEquals(false, shouldShowTimelineHourLabel(24, showMidnightLabel = false))
-        assertEquals(true, shouldShowTimelineHourLabel(1, showMidnightLabel = false))
+    fun `timeline shows hour 0 label`() {
+        assertEquals(true, shouldShowTimelineHourLabel(0))
     }
 
     @Test
-    fun `timeline hides both midnight dividers when midnight labels are disabled`() {
-        assertEquals(false, shouldShowTimelineHourDivider(0, showMidnightLabel = false))
-        assertEquals(false, shouldShowTimelineHourDivider(24, showMidnightLabel = false))
-        assertEquals(true, shouldShowTimelineHourDivider(1, showMidnightLabel = false))
+    fun `timeline hides hour 24 label`() {
+        assertEquals(false, shouldShowTimelineHourLabel(24))
+    }
+
+    @Test
+    fun `timeline shows hour 1 label`() {
+        assertEquals(true, shouldShowTimelineHourLabel(1))
+    }
+
+    @Test
+    fun `timeline dividers always show for hours 0 through 24`() {
+        assertEquals(true, shouldShowTimelineHourDivider(0))
+        assertEquals(true, shouldShowTimelineHourDivider(24))
+        assertEquals(true, shouldShowTimelineHourDivider(1))
+        assertEquals(true, shouldShowTimelineHourDivider(12))
+        assertEquals(false, shouldShowTimelineHourDivider(-1))
+        assertEquals(false, shouldShowTimelineHourDivider(25))
     }
 
     @Test

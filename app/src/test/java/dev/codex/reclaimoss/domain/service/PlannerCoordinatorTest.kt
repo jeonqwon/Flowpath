@@ -16,6 +16,7 @@ import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.SchedulingIssue
+import dev.codex.reclaimoss.domain.model.SchedulingIssueType
 import dev.codex.reclaimoss.domain.model.Timeframe
 import dev.codex.reclaimoss.domain.model.TaskContinuationMode
 import dev.codex.reclaimoss.domain.model.TaskOverlapPolicy
@@ -1675,6 +1676,88 @@ class PlannerCoordinatorTest {
         assertEquals("No valid slot is available before the deadline.", result.reason)
         assertTrue(repository.getTasks().none { it.id == result.taskId })
         assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+    }
+
+    @Test
+    fun `delete task removes blocks reminders and scheduling issues`() = runTest {
+        val repository = FakePlannerRepository(periods = mutableListOf())
+        val coordinator = coordinator(repository)
+        val taskId = "test-task"
+        val reminderId = "test-reminder"
+        repository.upsertTask(
+            task(id = taskId, dueAt = now().plusSeconds(7200), recurrenceRule = RecurrenceRule())
+        )
+        repository.upsertReminder(
+            Reminder(id = reminderId, title = "Test", dueAt = now().plusSeconds(3600), linkedTaskId = taskId)
+        )
+        repository.replaceSchedulingIssuesForTask(
+            taskId,
+            listOf(
+                SchedulingIssue(
+                    taskId = taskId,
+                    type = SchedulingIssueType.PARTIAL,
+                    unscheduledMinutes = 30,
+                    reason = "test",
+                )
+            )
+        )
+        repository.replaceFlexibleBlocks(
+            taskId,
+            listOf(
+                block(taskId, "test-block", now(), now().plusSeconds(3600))
+            )
+        )
+
+        coordinator.deleteTask(taskId)
+
+        assertTrue(repository.getTasks().none { it.id == taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == taskId })
+        assertTrue(repository.getReminders().none { it.linkedTaskId == taskId })
+        assertTrue(repository.getSchedulingIssues().none { it.taskId == taskId })
+    }
+
+    @Test
+    fun `delete task cleanup after failed creation removes issues and reminders`() = runTest {
+        val repository = FakePlannerRepository(periods = mutableListOf())
+        val coordinator = coordinator(repository)
+        val blockerStart = now()
+        val blockerEnd = now().plusSeconds(86400)
+        val blocker = task(
+            id = "blocking-task",
+            dueAt = blockerEnd,
+            recurrenceRule = RecurrenceRule(),
+        ).copy(
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = blockerStart,
+            fixedEndAt = blockerEnd,
+        )
+        repository.upsertTask(blocker)
+        repository.replaceFlexibleBlocks(
+            blocker.id,
+            listOf(
+                block(blocker.id, "blocker-block", blockerStart, blockerEnd).copy(
+                    source = BlockSource.MANUAL,
+                    lockState = BlockLockState.LOCKED,
+                )
+            )
+        )
+
+        val result = coordinator.createTask(
+            title = "Will fail",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = blockerEnd,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = true,
+        )
+
+        assertTrue(!result.scheduled)
+        assertTrue(repository.getTasks().none { it.id == result.taskId })
+        assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
+        assertTrue(repository.getSchedulingIssues().none { it.taskId == result.taskId })
+        assertTrue(repository.getReminders().none { it.linkedTaskId == result.taskId })
     }
 
     private fun coordinator(repository: PlannerRepository) = PlannerCoordinator(

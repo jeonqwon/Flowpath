@@ -178,9 +178,6 @@ class PlannerCoordinator(
         val result = taskResultFor(primaryTaskId)
         val failedToFullySchedule = !result.scheduled
         if (failedToFullySchedule && recurrenceRule.type == RecurrenceType.NONE) {
-            repository.getReminders()
-                .filter { it.linkedTaskId == primaryTaskId }
-                .forEach { repository.deleteReminder(it.id) }
             deleteTask(primaryTaskId)
         }
         return result
@@ -655,7 +652,7 @@ class PlannerCoordinator(
     }
 
     suspend fun deleteTask(taskId: String) {
-        repository.deleteTask(taskId)
+        deleteTaskArtifacts(taskId)
     }
 
     suspend fun upsertTimePeriod(period: TimePeriod) {
@@ -1443,7 +1440,7 @@ class PlannerCoordinator(
 
     private fun schedulingPolicy(settings: AppSettings) = SchedulingPolicy(
         minBlockMinutes = 30,
-        maxBlockMinutes = DEFAULT_MAX_TASK_CHUNK_MINUTES,
+        maxBlockMinutes = settings.maxTaskChunkMinutes,
         breakBetweenBlocksMinutes = settings.breakBufferMinutes,
         priorityWeight = 1.5,
         deadlineUrgencyWeight = 2.0,
