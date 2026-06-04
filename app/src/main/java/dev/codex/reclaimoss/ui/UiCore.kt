@@ -559,6 +559,7 @@ class PlannerViewModel(
     suspend fun setReminderLeadMinutes(value: Int) = settingsRepository.setReminderLeadMinutes(value)
     suspend fun setHistoryRetention(value: HistoryRetention) = settingsRepository.setHistoryRetention(value)
     suspend fun setHasCompletedOnboarding(value: Boolean) = settingsRepository.setHasCompletedOnboarding(value)
+    suspend fun setTaskHourHeightDp(value: Int) = settingsRepository.setTaskHourHeightDp(value)
 }
 
 private fun TaskDraft.taskDueAtInstant(): Instant =

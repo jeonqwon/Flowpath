@@ -665,6 +665,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     onDefaultTaskReminderChanged = { value -> scope.launch { viewModel.setDefaultTaskReminder(value) } },
                     onReminderTimingModeChanged = { value -> scope.launch { viewModel.setReminderTimingMode(value) } },
                     onHistoryRetentionChanged = { value -> scope.launch { viewModel.setHistoryRetention(value) } },
+                    onTaskHourHeightDpChanged = { value -> scope.launch { viewModel.setTaskHourHeightDp(value) } },
                     isActive = selectedTab == AppTab.Settings,
                 )
             }

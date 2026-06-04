@@ -135,6 +135,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -160,6 +161,7 @@ fun SettingsScreen(
     onDefaultTaskReminderChanged: (Boolean) -> Unit,
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
     onHistoryRetentionChanged: (HistoryRetention) -> Unit,
+    onTaskHourHeightDpChanged: (Int) -> Unit = {},
 ) {
     val isDarkSettings = MaterialTheme.colorScheme.background.luminance() < 0.5f
     var section by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
@@ -287,6 +289,14 @@ fun SettingsScreen(
                                         }
                                     },
                                     onSelected = onTasksViewModeChanged,
+                                )
+                            }
+                            SettingsControlRow(
+                                title = "Hour spacing",
+                            ) {
+                                HourSpacingSlider(
+                                    valueDp = settings.taskHourHeightDp,
+                                    onValueChanged = onTaskHourHeightDpChanged,
                                 )
                             }
                         }
@@ -553,6 +563,38 @@ fun EmptyCard(message: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = settingsSecondaryTextColor(isDarkSettings),
         )
+    }
+}
+
+@Composable
+private fun HourSpacingSlider(
+    valueDp: Int,
+    onValueChanged: (Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "${valueDp}dp per hour",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Slider(
+            value = valueDp.toFloat(),
+            onValueChange = { raw ->
+                val snapped = ((raw / 12f).roundToInt() * 12).coerceIn(72, 240)
+                onValueChanged(snapped)
+            },
+            valueRange = 72f..240f,
+            steps = 13,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Compact", style = MaterialTheme.typography.labelSmall)
+            Text("Spacious", style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 

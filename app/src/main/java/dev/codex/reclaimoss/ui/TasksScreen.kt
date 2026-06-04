@@ -300,7 +300,7 @@ fun TasksScreen(
         }
     }
     val reminderFormatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
-    val hourHeight = 144.dp
+    val hourHeight = settings.taskHourHeightDp.dp
     var showingSheet by rememberSaveable { mutableStateOf<TasksSheetType?>(null) }
     var selectedDaySummaryEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedDaySummary = selectedDaySummaryEpoch?.let { epoch ->
