@@ -57,6 +57,7 @@ data class SleepOnboardingEntryDraft(
     val weekdays: Set<DayOfWeek> = emptySet(),
     val windowStart: LocalTime = LocalTime.of(22, 0),
     val windowEnd: LocalTime = LocalTime.of(8, 0),
+    val endsNextDay: Boolean = true,
     val durationMinutes: Int = 8 * 60,
 )
 
@@ -64,6 +65,7 @@ private fun encodeSleepOnboardingEntry(entry: SleepOnboardingEntryDraft): String
     entry.weekdays.sortedBy { it.value }.joinToString(",") { it.value.toString() },
     entry.windowStart.toSecondOfDay().toString(),
     entry.windowEnd.toSecondOfDay().toString(),
+    entry.endsNextDay.toString(),
     entry.durationMinutes.toString(),
 ).joinToString("|")
 
@@ -77,11 +79,21 @@ private fun decodeSleepOnboardingEntry(encoded: String): SleepOnboardingEntryDra
         .toSet()
     val windowStart = LocalTime.ofSecondOfDay(parts.getOrNull(1)?.toLongOrNull() ?: LocalTime.of(22, 0).toSecondOfDay().toLong())
     val windowEnd = LocalTime.ofSecondOfDay(parts.getOrNull(2)?.toLongOrNull() ?: LocalTime.of(8, 0).toSecondOfDay().toLong())
-    val durationMinutes = parts.getOrNull(3)?.toIntOrNull() ?: 8 * 60
+    val endsNextDay = if (parts.size >= 4) {
+        parts[3].toBooleanStrictOrNull() ?: (windowEnd <= windowStart)
+    } else {
+        windowEnd <= windowStart
+    }
+    val durationMinutes = if (parts.size >= 5) {
+        parts[4].toIntOrNull() ?: 8 * 60
+    } else {
+        parts.getOrNull(3)?.toIntOrNull() ?: 8 * 60
+    }
     return SleepOnboardingEntryDraft(
         weekdays = weekdays,
         windowStart = windowStart,
         windowEnd = windowEnd,
+        endsNextDay = endsNextDay,
         durationMinutes = durationMinutes,
     )
 }
@@ -112,15 +124,8 @@ fun unavailableSleepWeekdays(
         .flatMapTo(linkedSetOf()) { it.weekdays }
         .minus(selectedDays)
 
-private fun availableWindowMinutes(entry: SleepOnboardingEntryDraft): Int {
-    val startMinutes = minutesFromStart(entry.windowStart)
-    val endMinutes = minutesFromStart(entry.windowEnd)
-    return if (endMinutes > startMinutes) {
-        endMinutes - startMinutes
-    } else {
-        (24 * 60) - startMinutes + endMinutes
-    }
-}
+private fun availableWindowMinutes(entry: SleepOnboardingEntryDraft): Int =
+    windowDurationMinutes(entry.windowStart, entry.windowEnd, entry.endsNextDay)
 
 private fun weekdaySummary(weekdays: Set<DayOfWeek>): String =
     weekdays.sortedBy { it.value }.joinToString(", ") {
@@ -286,13 +291,14 @@ fun SleepOnboardingScreen(
                         canDisable = false,
                         startTime = draft.windowStart,
                         endTime = draft.windowEnd,
-                        endsNextDay = draft.windowEnd <= draft.windowStart,
+                        endsNextDay = draft.endsNextDay,
                         minimumWindowMinutes = draft.durationMinutes,
                         onWindowEnabledChanged = {},
-                        onWindowChanged = { startTime, endTime, _ ->
+                        onWindowChanged = { startTime, endTime, endsNextDay ->
                             draft = draft.copy(
                                 windowStart = startTime,
                                 windowEnd = endTime,
+                                endsNextDay = endsNextDay,
                             )
                             localError = null
                         },

@@ -985,14 +985,16 @@ fun DailyWindowConfigurator(
 
     if (hasWindow) {
         val overnight = endsNextDay
-        val sliderState = remember(startTime, endTime, overnight) {
-            windowSliderState(
-                start = startTime,
-                end = endTime,
-                overnight = overnight,
-            )
-        }
-        val labels = listOf("12a", "6a", "12p", "6p", "12a")
+        val durationMinutes = windowDurationMinutes(startTime, endTime, overnight)
+        val startLabel = startTime.formatHourLabel()
+        val endLabel = endTime.formatHourLabel()
+
+        Text(
+            "$startLabel – $endLabel${if (overnight) " next day" else ""} · ${durationMinutes / 60}h ${durationMinutes % 60}m",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1003,64 +1005,42 @@ fun DailyWindowConfigurator(
             Switch(
                 checked = overnight,
                 onCheckedChange = { enabled ->
-                    if (windowSupportsDuration(startTime, endTime, enabled, minimumWindowMinutes)) {
-                        onWindowChanged(startTime, endTime, enabled)
-                    }
+                    val (newStart, newEnd) = adjustedWindowForOvernightToggle(
+                        startTime = startTime,
+                        endTime = endTime,
+                        enableOvernight = enabled,
+                        minimumWindowMinutes = minimumWindowMinutes,
+                    )
+                    onWindowChanged(newStart, newEnd, enabled)
                 },
             )
         }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
-        ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (overnight) {
-                    val durationMinutes = windowDurationMinutes(startTime, endTime, overnight = true)
-                    val startLabel = startTime.formatHourLabel()
-                    val endLabel = endTime.formatHourLabel()
-                    Text(
-                        "$startLabel – $endLabel · ${durationMinutes / 60}h ${durationMinutes % 60}m",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+        TimeOfDaySliderRow(
+            title = "Start",
+            time = startTime,
+            onTimeChanged = { newStart ->
+                val adjustedEnd = if (!overnight && newStart >= endTime) {
+                    newStart.plusMinutes(minimumWindowMinutes.toLong())
                 } else {
-                    RangeSlider(
-                        value = sliderState.startMinutes..sliderState.endMinutes,
-                        onValueChange = { range ->
-                            val (updatedStart, updatedEnd) = sliderTimesFromRange(
-                                startMinutes = range.start,
-                                endMinutes = range.endInclusive,
-                            )
-                            if (windowSupportsDuration(updatedStart, updatedEnd, overnight, minimumWindowMinutes)) {
-                                onWindowChanged(updatedStart, updatedEnd, overnight)
-                            }
-                        },
-                        valueRange = 0f..(24 * 60f),
-                        steps = 95,
-                        colors = androidx.compose.material3.SliderDefaults.colors(
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-                            activeTickColor = MaterialTheme.colorScheme.primary,
-                            inactiveTickColor = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
-                    )
+                    endTime
                 }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    labels.forEach { label ->
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                if (windowSupportsDuration(newStart, adjustedEnd, overnight, minimumWindowMinutes)) {
+                    onWindowChanged(newStart, adjustedEnd, overnight)
                 }
-            }
-        }
+            },
+        )
+
+        TimeOfDaySliderRow(
+            title = "End",
+            time = endTime,
+            onTimeChanged = { newEnd ->
+                if (windowSupportsDuration(startTime, newEnd, overnight, minimumWindowMinutes)) {
+                    onWindowChanged(startTime, newEnd, overnight)
+                }
+            },
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1070,7 +1050,14 @@ fun DailyWindowConfigurator(
                 time = startTime,
                 modifier = Modifier.weight(1f),
                 onTimeChanged = { selectedTime ->
-                    onWindowChanged(selectedTime, endTime, overnight)
+                    val adjustedEnd = if (!overnight && selectedTime >= endTime) {
+                        selectedTime.plusMinutes(minimumWindowMinutes.toLong())
+                    } else {
+                        endTime
+                    }
+                    if (windowSupportsDuration(selectedTime, adjustedEnd, overnight, minimumWindowMinutes)) {
+                        onWindowChanged(selectedTime, adjustedEnd, overnight)
+                    }
                 },
                 context = context,
             )
@@ -1079,13 +1066,81 @@ fun DailyWindowConfigurator(
                 time = endTime,
                 modifier = Modifier.weight(1f),
                 onTimeChanged = { selectedTime ->
-                    onWindowChanged(startTime, selectedTime, overnight)
+                    if (windowSupportsDuration(startTime, selectedTime, overnight, minimumWindowMinutes)) {
+                        onWindowChanged(startTime, selectedTime, overnight)
+                    }
                 },
                 context = context,
             )
         }
     }
     footerContent()
+}
+
+@Composable
+private fun TimeOfDaySliderRow(
+    title: String,
+    time: LocalTime,
+    onTimeChanged: (LocalTime) -> Unit,
+) {
+    val minutes = minutesFromStart(time)
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(title, style = MaterialTheme.typography.bodySmall)
+            Text(time.formatHourLabel(), style = MaterialTheme.typography.bodyMedium)
+        }
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Slider(
+                    value = minutes.toFloat(),
+                    onValueChange = { raw ->
+                        val snapped = snapToStep(raw.toInt(), 15).coerceIn(0, 24 * 60 - 15)
+                        onTimeChanged(minutesToLocalTime(snapped))
+                    },
+                    valueRange = 0f..((24 * 60) - 15).toFloat(),
+                    steps = ((24 * 60) / 15 - 2).coerceAtLeast(0),
+                )
+                val labels = listOf("12a", "6a", "12p", "6p", "12a")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    labels.forEach { label ->
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun adjustedWindowForOvernightToggle(
+    startTime: LocalTime,
+    endTime: LocalTime,
+    enableOvernight: Boolean,
+    minimumWindowMinutes: Int,
+): Pair<LocalTime, LocalTime> {
+    if (windowSupportsDuration(startTime, endTime, enableOvernight, minimumWindowMinutes)) {
+        return startTime to endTime
+    }
+    return if (!enableOvernight && endTime <= startTime) {
+        val fallbackEnd = startTime.plusMinutes(minimumWindowMinutes.toLong())
+        if (fallbackEnd.isAfter(startTime) && !fallbackEnd.isAfter(LocalTime.of(23, 59))) {
+            startTime to fallbackEnd
+        } else {
+            startTime to LocalTime.of(23, 59)
+        }
+    } else {
+        startTime to endTime
+    }
 }
 
 @Composable

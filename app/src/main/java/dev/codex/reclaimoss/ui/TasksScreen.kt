@@ -390,7 +390,7 @@ fun TasksScreen(
                             with(density) {
                                 val nowMinutes = minutesFromStart(LocalTime.now(zoneId))
                                 val scrollMinutes = (nowMinutes - 60).coerceAtLeast(0)
-                                (ExpandedDayHeaderHeight + timelineOffset(scrollMinutes, hourHeight)).roundToPx()
+                                timelineOffset(scrollMinutes, hourHeight).roundToPx()
                             }
                         } else 0
                         val listState = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
@@ -454,7 +454,7 @@ fun TasksScreen(
                     }
                     TasksViewMode.EXPANDED -> {
                         val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
-                        val dayHeightDp = ExpandedDayHeaderHeight + timelineHeight
+                        val dayHeightDp = timelineHeight
 
                     Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         // Pinned header calculations — computed before LazyColumn items for access
@@ -554,25 +554,32 @@ fun TasksScreen(
                                                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                         )
 
-                                        Column(modifier = Modifier.fillMaxSize()) {
-                                            ExpandedTimelineDayHeader(
-                                                date = date,
-                                                hideDateChip = index == pinnedDayIndex,
-                                            )
-
-                                            FullDayTimeline(
-                                                segments = section.segments,
-                                                tasksById = tasksById,
-                                                zoneId = zoneId,
+                                        FullDayTimeline(
+                                            segments = expandedTaskSegmentsForDay(
+                                                blocks = state.snapshot.blocks,
                                                 day = date,
-                                                hourHeight = hourHeight,
-                                                allowConcurrentTasks = settings.allowConcurrentTasks,
-                                                showTaskCards = true,
-                                                drawVerticalDivider = false,
-                                                onOpenTask = onOpenTask,
-                                                onDeleteTask = onDeleteTask,
-                                            )
-                                        }
+                                                zoneId = zoneId,
+                                            ).filter {
+                                                it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED
+                                            }.sortedBy { it.block.startAt },
+                                            tasksById = tasksById,
+                                            zoneId = zoneId,
+                                            day = date,
+                                            hourHeight = hourHeight,
+                                            allowConcurrentTasks = settings.allowConcurrentTasks,
+                                            showTaskCards = true,
+                                            drawVerticalDivider = false,
+                                            onOpenTask = onOpenTask,
+                                            onDeleteTask = onDeleteTask,
+                                        )
+
+                                        ExpandedTimelineDayHeader(
+                                            date = date,
+                                            hideDateChip = index == pinnedDayIndex,
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .zIndex(4f),
+                                        )
                                     }
                                 }
                             }
@@ -844,12 +851,12 @@ private fun PinnedExpandedTimelineHeader(
 private fun ExpandedTimelineDayHeader(
     date: LocalDate,
     hideDateChip: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .height(ExpandedDayHeaderHeight)
-            .zIndex(4f),
+            .height(ExpandedDayHeaderHeight),
         contentAlignment = Alignment.CenterStart,
     ) {
         if (!hideDateChip) {
@@ -1428,8 +1435,8 @@ fun FullDayTaskBlock(
 ) {
     val block = positionedBlock.segment.block
     val start = block.startAt.atZone(zoneId).toLocalTime()
-    val topExtension = if (positionedBlock.segment.continuesFromPreviousDay) ExpandedDayHeaderHeight + TaskTimelineBoundaryOverlap else 0.dp
-    val bottomExtension = if (positionedBlock.segment.continuesIntoNextDay) ExpandedDayHeaderHeight + TaskTimelineBoundaryOverlap else 0.dp
+    val topExtension = if (positionedBlock.segment.continuesFromPreviousDay) TaskTimelineBoundaryOverlap else 0.dp
+    val bottomExtension = if (positionedBlock.segment.continuesIntoNextDay) TaskTimelineBoundaryOverlap else 0.dp
     val computedTop = timelineOffset(minutes = minutesFromStart(start), hourHeight = hourHeight) - topExtension
     val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
     val computedHeight = timelineBlockHeight(minutes = durationMinutes, hourHeight = hourHeight, minHeight = 64.dp) + topExtension + bottomExtension
