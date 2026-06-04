@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -520,15 +521,16 @@ fun TasksScreen(
                         ) {
                             items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
                                 val date = taskFeedDateForIndex(today, index)
-                                val section = buildTaskDaySection(
-                                    date = date,
-                                    blocks = state.snapshot.blocks,
-                                    tasksById = tasksById,
-                                    reminders = activeReminders,
-                                    timeframes = state.snapshot.timeframes,
-                                    zoneId = zoneId,
-                                )
                                 val railMetadata = railMetadataForDate(state.snapshot.timeframes, date)
+                                val expandedSegments = remember(date, state.snapshot.blocks, zoneId) {
+                                    expandedTaskSegmentsForDay(
+                                        blocks = state.snapshot.blocks,
+                                        day = date,
+                                        zoneId = zoneId,
+                                    ).filter {
+                                        it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED
+                                    }.sortedBy { it.block.startAt }
+                                }
 
                                 Row(
                                     modifier = Modifier
@@ -555,13 +557,14 @@ fun TasksScreen(
                                         )
 
                                         FullDayTimeline(
-                                            segments = section.segments,
+                                            segments = expandedSegments,
                                             tasksById = tasksById,
                                             zoneId = zoneId,
                                             day = date,
                                             hourHeight = hourHeight,
                                             allowConcurrentTasks = settings.allowConcurrentTasks,
-                                            showTaskCards = true,
+                                            showTaskCards = false,
+                                            showMidnightLabel = false,
                                             drawVerticalDivider = false,
                                             onOpenTask = onOpenTask,
                                             onDeleteTask = onDeleteTask,
@@ -578,6 +581,21 @@ fun TasksScreen(
                                 }
                             }
                         }
+
+                        ExpandedTaskOverlay(
+                            listState = expandedListState,
+                            blocks = state.snapshot.blocks,
+                            tasksById = tasksById,
+                            today = today,
+                            zoneId = zoneId,
+                            hourHeight = hourHeight,
+                            allowConcurrentTasks = settings.allowConcurrentTasks,
+                            onOpenTask = onOpenTask,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .fillMaxSize()
+                                .zIndex(10f),
+                        )
 
                         PinnedExpandedTimelineHeader(
                             date = pinnedDate,
@@ -780,6 +798,81 @@ private fun TimelineDateChipSlot(
         contentAlignment = Alignment.Center,
     ) {
         DateChip(text = compactStickyDateText(date))
+    }
+}
+
+private data class OverlayCardData(
+    val positionedBlock: PositionedTaskBlock,
+    val task: ScheduleTask?,
+    val positionPx: Int,
+    val heightPx: Int,
+)
+
+@Composable
+private fun ExpandedTaskOverlay(
+    listState: LazyListState,
+    blocks: List<ScheduleBlock>,
+    tasksById: Map<String, ScheduleTask>,
+    today: LocalDate,
+    zoneId: ZoneId,
+    hourHeight: Dp,
+    allowConcurrentTasks: Boolean,
+    onOpenTask: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val contentStart = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap +
+        TaskTimelineLabelWidth + TaskTimelineContentInset
+
+    BoxWithConstraints(
+        modifier = modifier,
+    ) {
+        val contentWidth = maxWidth - contentStart
+        val visibleItemsInfo = listState.layoutInfo.visibleItemsInfo
+
+        val blockList: List<OverlayCardData> = visibleItemsInfo.flatMap { itemInfo ->
+            val date = taskFeedDateForIndex(today, itemInfo.index)
+            val segments = expandedTaskSegmentsForDay(blocks, date, zoneId)
+                .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+                .sortedBy { it.block.startAt }
+
+            val positionedBlocks = if (allowConcurrentTasks) {
+                computeTaskBlockLayout(segments)
+            } else {
+                segments.sortedBy { it.block.startAt }
+                    .map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
+            }
+
+            positionedBlocks.map { positioned ->
+                val block = positioned.segment.block
+                val startTime = block.startAt.atZone(zoneId).toLocalTime()
+                val startMinutes = minutesFromStart(startTime)
+                val startOffsetPx = with(density) { timelineOffset(startMinutes, hourHeight).roundToPx() }
+                val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
+                val blockHeightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
+                val topPx = itemInfo.offset + startOffsetPx
+                OverlayCardData(
+                    positionedBlock = positioned,
+                    task = tasksById[block.taskId],
+                    positionPx = topPx,
+                    heightPx = blockHeightPx,
+                )
+            }
+        }
+
+        blockList.forEach { cardData ->
+            FullDayTaskBlock(
+                positionedBlock = cardData.positionedBlock,
+                task = cardData.task,
+                zoneId = zoneId,
+                contentStart = contentStart,
+                contentWidth = contentWidth,
+                hourHeight = hourHeight,
+                onOpen = { onOpenTask(cardData.positionedBlock.segment.block.taskId) },
+                absoluteY = with(density) { cardData.positionPx.toDp() },
+                absoluteHeight = with(density) { cardData.heightPx.toDp() },
+            )
+        }
     }
 }
 
@@ -1211,6 +1304,7 @@ fun FullDayTimeline(
     hourHeight: Dp,
     allowConcurrentTasks: Boolean = false,
     showTaskCards: Boolean = true,
+    showMidnightLabel: Boolean = true,
     drawVerticalDivider: Boolean = true,
     onOpenTask: (String) -> Unit,
     onDeleteTask: (String) -> Unit,
@@ -1238,7 +1332,7 @@ fun FullDayTimeline(
         val contentWidth = maxWidth - contentStart
         for (hour in 0..24) {
             val top = timelineOffset(minutes = hour * 60, hourHeight = hourHeight)
-            if (shouldShowTimelineHourLabel(hour)) {
+            if (shouldShowTimelineHourLabel(hour) && (hour != 0 || showMidnightLabel)) {
                 Text(
                     LocalTime.of(hour, 0).formatHourLabel(),
                     modifier = Modifier
