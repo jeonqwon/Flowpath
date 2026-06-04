@@ -15,7 +15,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +35,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
@@ -112,6 +115,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -170,6 +174,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 internal data class TaskDaySection(
     val date: LocalDate,
@@ -458,7 +463,6 @@ fun TasksScreen(
                         val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
                         val dayHeightDp = timelineHeight
 
-                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         // Pinned header calculations — computed before LazyColumn items for access
                         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
                         val snapThresholdPx = 2
@@ -514,6 +518,24 @@ fun TasksScreen(
                             }
                         }
 
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            PinnedExpandedTimelineHeader(
+                                date = pinnedDate,
+                                activeRails = pinnedActiveRails,
+                                datePushOffsetPx = datePushOffsetPx,
+                                timeframePushOffsetsById = timeframePushOffsetsById,
+                                modifier = Modifier.padding(
+                                    start = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap,
+                                    bottom = 4.dp,
+                                ),
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .clipToBounds(),
+                            ) {
                         LazyColumn(
                             state = expandedListState,
                             modifier = Modifier.fillMaxSize(),
@@ -556,7 +578,7 @@ fun TasksScreen(
                                             hourHeight = hourHeight,
                                             allowConcurrentTasks = settings.allowConcurrentTasks,
                                             showTaskCards = false,
-                                            showMidnightLabel = false,
+                                            showMidnightLabel = true,
                                             drawVerticalDivider = false,
                                             onOpenTask = onOpenTask,
                                             onDeleteTask = onDeleteTask,
@@ -564,7 +586,6 @@ fun TasksScreen(
 
                                         ExpandedTimelineDayHeader(
                                             date = date,
-                                            hideDateChip = index == pinnedDayIndex,
                                             modifier = Modifier
                                                 .align(Alignment.TopStart)
                                                 .zIndex(4f),
@@ -590,20 +611,8 @@ fun TasksScreen(
                                 .zIndex(10f),
                         )
 
-                        PinnedExpandedTimelineHeader(
-                            date = pinnedDate,
-                            activeRails = pinnedActiveRails,
-                            datePushOffsetPx = datePushOffsetPx,
-                            timeframePushOffsetsById = timeframePushOffsetsById,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .zIndex(20f)
-                                .padding(
-                                    start = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap,
-                                    top = 4.dp,
-                                ),
-                        )
-                    }
+                            }
+                        }
                     }
                 }
             }
@@ -815,6 +824,7 @@ private fun ExpandedTaskOverlay(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val boundaryOverlapPx = with(density) { TaskTimelineBoundaryOverlap.roundToPx() }
     val contentStart = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap +
         TaskTimelineLabelWidth + TaskTimelineContentInset
     val isScrolling = listState.isScrollInProgress
@@ -832,41 +842,63 @@ private fun ExpandedTaskOverlay(
         val firstVisible = visibleItems.first()
         val firstIndex = firstVisible.index
         val firstOffsetPx = firstVisible.offset
-        val dayHeightPx = with(density) { dayHeight.roundToPx() }
+        val firstVisibleDate = taskFeedDateForIndex(today, firstIndex)
+        val firstVisibleDayStart = firstVisibleDate.atStartOfDay(zoneId)
 
         val viewportStartPx = layoutInfo.viewportStartOffset
         val viewportEndPx = layoutInfo.viewportEndOffset
+        val viewportHeightPx = (viewportEndPx - viewportStartPx).coerceAtLeast(0)
+        val visibleTimelineTopPx = (-firstOffsetPx).coerceAtLeast(0)
+        val visibleTimelineBottomPx = visibleTimelineTopPx + viewportHeightPx
 
         // Scan a wider window around visible items to catch overnight tasks
         val scanStart = (firstIndex - 3).coerceAtLeast(0)
         val scanEnd = (firstIndex + visibleItems.size + 1).coerceAtMost(TaskFeedDayCount - 1)
 
-        val candidateSegments = mutableListOf<VisibleTaskSegment>()
-        for (i in scanStart..scanEnd) {
-            val date = taskFeedDateForIndex(today, i)
-            candidateSegments.addAll(
-                expandedTaskSegmentsForDay(blocks, date, zoneId)
-                    .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
-            )
+        val candidateSegments = remember(blocks, zoneId, scanStart, scanEnd) {
+            buildList {
+                for (i in scanStart..scanEnd) {
+                    val date = taskFeedDateForIndex(today, i)
+                    addAll(
+                        expandedTaskSegmentsForDay(blocks, date, zoneId)
+                            .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+                    )
+                }
+            }.sortedBy { it.block.startAt }
         }
-        candidateSegments.sortBy { it.block.startAt }
 
-        val positioned = if (allowConcurrentTasks) {
-            computeTaskBlockLayout(candidateSegments)
-        } else {
-            candidateSegments.map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
+        val positioned = remember(candidateSegments, allowConcurrentTasks) {
+            if (allowConcurrentTasks) {
+                computeTaskBlockLayout(candidateSegments)
+            } else {
+                candidateSegments.map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
+            }
         }
 
         positioned.forEach { positionedBlock ->
             val block = positionedBlock.segment.block
-            val startDate = block.startAt.atZone(zoneId).toLocalDate()
-            val startIndex = taskFeedIndexForDate(today, startDate)
-            val dayOffsetPx = firstOffsetPx + ((startIndex - firstIndex) * dayHeightPx)
-            val startMinutes = minutesFromStart(block.startAt.atZone(zoneId).toLocalTime())
-            val blockTopPx = with(density) { timelineOffset(startMinutes, hourHeight).roundToPx() }
-            val absoluteYPx = dayOffsetPx + blockTopPx
+            val startMinutesFromFirstVisibleDay = ChronoUnit.MINUTES.between(
+                firstVisibleDayStart,
+                block.startAt.atZone(zoneId),
+            ).toInt()
             val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
-            val heightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
+            val blockTopPx = with(density) { timelineOffset(startMinutesFromFirstVisibleDay, hourHeight).roundToPx() }
+            val blockHeightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
+            val blockBottomPx = blockTopPx + blockHeightPx
+            val visibleTopPx = blockTopPx.coerceAtLeast(visibleTimelineTopPx)
+            val visibleBottomPx = blockBottomPx.coerceAtMost(visibleTimelineBottomPx)
+            if (visibleBottomPx <= visibleTopPx) return@forEach
+
+            val continuesAboveViewport = visibleTopPx > blockTopPx
+            val continuesBelowViewport = visibleBottomPx < blockBottomPx
+            val renderContinuesFromPrevious =
+                positionedBlock.segment.continuesFromPreviousDay || continuesAboveViewport
+            val renderContinuesIntoNext =
+                positionedBlock.segment.continuesIntoNextDay || continuesBelowViewport
+            val topExtensionPx = if (renderContinuesFromPrevious) boundaryOverlapPx else 0
+            val bottomExtensionPx = if (renderContinuesIntoNext) boundaryOverlapPx else 0
+            val absoluteYPx = firstOffsetPx + visibleTopPx - topExtensionPx
+            val heightPx = (visibleBottomPx - visibleTopPx) + topExtensionPx + bottomExtensionPx
 
             if (absoluteYPx + heightPx > viewportStartPx && absoluteYPx < viewportEndPx) {
                 FullDayTaskBlock(
@@ -879,8 +911,11 @@ private fun ExpandedTaskOverlay(
                     onOpen = { onOpenState(block.taskId) },
                     absoluteY = with(density) { absoluteYPx.toDp() },
                     absoluteHeight = with(density) { heightPx.toDp() },
+                    renderContinuesFromPrevious = renderContinuesFromPrevious,
+                    renderContinuesIntoNext = renderContinuesIntoNext,
                     useTapGesture = true,
                     isScrollInProgress = scrollingState,
+                    onDragBy = { deltaY -> listState.dispatchRawDelta(-deltaY) },
                 )
             }
         }
@@ -948,7 +983,6 @@ private fun PinnedExpandedTimelineHeader(
 @Composable
 private fun ExpandedTimelineDayHeader(
     date: LocalDate,
-    hideDateChip: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -957,9 +991,10 @@ private fun ExpandedTimelineDayHeader(
             .height(ExpandedDayHeaderHeight),
         contentAlignment = Alignment.TopStart,
     ) {
-        if (!hideDateChip) {
-            TimelineDateChipSlot(date = date)
-        }
+        TimelineDateChipSlot(
+            date = date,
+            modifier = Modifier.offset(y = (-30).dp),
+        )
     }
 }
 
@@ -1530,13 +1565,17 @@ fun FullDayTaskBlock(
     onOpen: () -> Unit,
     absoluteY: Dp? = null,
     absoluteHeight: Dp? = null,
+    renderContinuesFromPrevious: Boolean = positionedBlock.segment.continuesFromPreviousDay,
+    renderContinuesIntoNext: Boolean = positionedBlock.segment.continuesIntoNextDay,
     useTapGesture: Boolean = false,
     isScrollInProgress: Boolean = false,
+    onDragBy: ((Float) -> Unit)? = null,
 ) {
     val block = positionedBlock.segment.block
+    val density = LocalDensity.current
     val start = block.startAt.atZone(zoneId).toLocalTime()
-    val topExtension = if (positionedBlock.segment.continuesFromPreviousDay) TaskTimelineBoundaryOverlap else 0.dp
-    val bottomExtension = if (positionedBlock.segment.continuesIntoNextDay) TaskTimelineBoundaryOverlap else 0.dp
+    val topExtension = if (renderContinuesFromPrevious) TaskTimelineBoundaryOverlap else 0.dp
+    val bottomExtension = if (renderContinuesIntoNext) TaskTimelineBoundaryOverlap else 0.dp
     val computedTop = timelineOffset(minutes = minutesFromStart(start), hourHeight = hourHeight) - topExtension
     val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
     val computedHeight = timelineBlockHeight(minutes = durationMinutes, hourHeight = hourHeight, minHeight = 64.dp) + topExtension + bottomExtension
@@ -1547,26 +1586,54 @@ fun FullDayTaskBlock(
     val laneWidth = (contentWidth - laneGap * (laneCount - 1)) / laneCount
     val xOffset = contentStart + (laneWidth + laneGap) * positionedBlock.laneIndex
     val shape = RoundedCornerShape(
-        topStart = if (positionedBlock.segment.continuesFromPreviousDay) 0.dp else 22.dp,
-        topEnd = if (positionedBlock.segment.continuesFromPreviousDay) 0.dp else 22.dp,
-        bottomStart = if (positionedBlock.segment.continuesIntoNextDay) 0.dp else 22.dp,
-        bottomEnd = if (positionedBlock.segment.continuesIntoNextDay) 0.dp else 22.dp,
+        topStart = if (renderContinuesFromPrevious) 0.dp else 22.dp,
+        topEnd = if (renderContinuesFromPrevious) 0.dp else 22.dp,
+        bottomStart = if (renderContinuesIntoNext) 0.dp else 22.dp,
+        bottomEnd = if (renderContinuesIntoNext) 0.dp else 22.dp,
     )
     val showsBoundaryContinuation =
-        positionedBlock.segment.continuesFromPreviousDay || positionedBlock.segment.continuesIntoNextDay
+        renderContinuesFromPrevious || renderContinuesIntoNext
     val cardModifier = Modifier
-        .width(laneWidth)
-        .height(height)
+        .requiredWidth(laneWidth)
+        .requiredHeight(height)
         .offset(x = xOffset, y = top)
         .zIndex(1f)
     val scrolling by rememberUpdatedState(isScrollInProgress)
     val tapCallback by rememberUpdatedState(onOpen)
+    val dragCallback by rememberUpdatedState(onDragBy)
+    val dragStartThresholdPx = with(density) { 2.dp.toPx() }
+    val tapSlopPx = with(density) { 5.dp.toPx() }
     val positionedModifier = if (useTapGesture) {
         cardModifier.then(
-            Modifier.pointerInput(Unit) {
-                detectTapGestures(onTap = {
-                    if (!scrolling) tapCallback()
-                })
+            Modifier.pointerInput(dragStartThresholdPx, tapSlopPx, scrolling, dragCallback) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val startPosition = down.position
+                    var previousPosition = down.position
+                    var dragging = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        val currentPosition = change.position
+                        val deltaY = currentPosition.y - previousPosition.y
+                        val distance = (currentPosition - startPosition).getDistance()
+                        val deltaFromStartY = currentPosition.y - startPosition.y
+                        if (!dragging && (abs(deltaFromStartY) >= dragStartThresholdPx || distance >= tapSlopPx)) {
+                            dragging = true
+                        }
+                        if (dragging) {
+                            dragCallback?.invoke(deltaY)
+                            change.consume()
+                        }
+                        previousPosition = currentPosition
+                        if (change.changedToUpIgnoreConsumed()) {
+                            if (!dragging && distance < tapSlopPx && !scrolling) {
+                                tapCallback()
+                            }
+                            break
+                        }
+                    }
+                }
             }
         )
     } else {
