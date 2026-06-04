@@ -418,8 +418,6 @@ fun TasksScreen(
                             CollapsedTaskDayRow(
                                 section = section,
                                 railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
-                                formatter = dateFormatter,
-                                today = today,
                                 onClick = {
                                     selectedDaySummaryEpoch = section.date.toEpochDay()
                                     showingSheet = TasksSheetType.DAY_SUMMARY
@@ -677,61 +675,56 @@ private fun activeRailIdsForDate(
 private fun CollapsedTaskDayRow(
     section: TaskDaySection,
     railMetadata: List<TimeframeRailMetadata>,
-    formatter: DateTimeFormatter,
-    today: LocalDate,
     onClick: () -> Unit,
 ) {
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            .heightIn(min = 76.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        // LEFT COLUMN — timeline label area (matches expanded layout)
+        // Timeframe rails — same max-5 lane logic as expanded
+        TimeframeRailStrip(
+            rails = railMetadata,
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 72.dp)
-                .padding(vertical = 10.dp, horizontal = 0.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .width(timelineRailStripWidth(railMetadata, compact = true))
+                .height(40.dp),
+            compact = true,
+            segment = TimeframeRailSegment.COMPACT,
+        )
+
+        Spacer(Modifier.width(TaskTimelineRailGap))
+
+        // Date chip outside the card — same slot as expanded pinned header
+        TimelineDateChipSlot(date = section.date)
+
+        // Vertical divider — same position as expanded
+        Box(
+            modifier = Modifier
+                .width(TaskTimelineDividerWidth)
+                .height(32.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        )
+
+        Spacer(Modifier.width(10.dp))
+
+        // RIGHT COLUMN — card with task/reminder summary only (no date)
+        Card(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onClick),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
-            // Timeframe rails — same max-5 lane logic as expanded
-            TimeframeRailStrip(
-                rails = railMetadata,
-                modifier = Modifier
-                    .width(timelineRailStripWidth(railMetadata, compact = true))
-                    .height(40.dp),
-                compact = true,
-                segment = TimeframeRailSegment.COMPACT,
-            )
-
-            Spacer(Modifier.width(TaskTimelineRailGap))
-
-            // Date chip — same TaskTimelineLabelWidth slot as expanded
-            TimelineDateChipSlot(date = section.date)
-
-            // Vertical divider — same position as expanded
-            Box(
-                modifier = Modifier
-                    .width(TaskTimelineDividerWidth)
-                    .height(32.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-            )
-
-            Spacer(Modifier.width(12.dp))
-
-            // Content
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    formatter.format(section.date) + if (section.date == today) " · Today" else "",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
                 Text(
                     collapsedDaySummaryText(section),
                     style = MaterialTheme.typography.bodyMedium,
@@ -758,8 +751,6 @@ private fun CollapsedTaskDayRow(
                     }
                 }
             }
-
-            Spacer(Modifier.width(12.dp))
         }
     }
 }
