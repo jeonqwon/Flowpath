@@ -99,6 +99,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -817,6 +818,8 @@ private fun ExpandedTaskOverlay(
     val contentStart = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap +
         TaskTimelineLabelWidth + TaskTimelineContentInset
     val isScrolling = listState.isScrollInProgress
+    val scrollingState by rememberUpdatedState(isScrolling)
+    val onOpenState by rememberUpdatedState(onOpenTask)
 
     BoxWithConstraints(
         modifier = modifier,
@@ -831,16 +834,15 @@ private fun ExpandedTaskOverlay(
         val firstOffsetPx = firstVisible.offset
         val dayHeightPx = with(density) { dayHeight.roundToPx() }
 
-        // Compute the visible window in absolute pixel space
         val viewportStartPx = layoutInfo.viewportStartOffset
         val viewportEndPx = layoutInfo.viewportEndOffset
 
-        // Scan ALL non-completed blocks and compute absolute position
-        val visibleStartIndex = (firstIndex - 1).coerceAtLeast(0)
-        val visibleEndIndex = (firstIndex + visibleItems.size).coerceAtMost(TaskFeedDayCount - 1)
+        // Scan a wider window around visible items to catch overnight tasks
+        val scanStart = (firstIndex - 3).coerceAtLeast(0)
+        val scanEnd = (firstIndex + visibleItems.size + 1).coerceAtMost(TaskFeedDayCount - 1)
 
         val candidateSegments = mutableListOf<VisibleTaskSegment>()
-        for (i in visibleStartIndex..visibleEndIndex) {
+        for (i in scanStart..scanEnd) {
             val date = taskFeedDateForIndex(today, i)
             candidateSegments.addAll(
                 expandedTaskSegmentsForDay(blocks, date, zoneId)
@@ -866,7 +868,6 @@ private fun ExpandedTaskOverlay(
             val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
             val heightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
 
-            // Only draw if at least partially visible
             if (absoluteYPx + heightPx > viewportStartPx && absoluteYPx < viewportEndPx) {
                 FullDayTaskBlock(
                     positionedBlock = positionedBlock,
@@ -875,11 +876,11 @@ private fun ExpandedTaskOverlay(
                     contentStart = contentStart,
                     contentWidth = contentWidth,
                     hourHeight = hourHeight,
-                    onOpen = { onOpenTask(block.taskId) },
+                    onOpen = { onOpenState(block.taskId) },
                     absoluteY = with(density) { absoluteYPx.toDp() },
                     absoluteHeight = with(density) { heightPx.toDp() },
                     useTapGesture = true,
-                    isScrollInProgress = isScrolling,
+                    isScrollInProgress = scrollingState,
                 )
             }
         }
@@ -1558,17 +1559,20 @@ fun FullDayTaskBlock(
         .height(height)
         .offset(x = xOffset, y = top)
         .zIndex(1f)
-    val safeOpen = { if (!isScrollInProgress) onOpen() }
+    val scrolling by rememberUpdatedState(isScrollInProgress)
+    val tapCallback by rememberUpdatedState(onOpen)
     val positionedModifier = if (useTapGesture) {
         cardModifier.then(
             Modifier.pointerInput(Unit) {
-                detectTapGestures(onTap = { safeOpen() })
+                detectTapGestures(onTap = {
+                    if (!scrolling) tapCallback()
+                })
             }
         )
     } else {
         cardModifier.clickable(
-            enabled = !isScrollInProgress,
-            onClick = { if (!isScrollInProgress) onOpen() },
+            enabled = !scrolling,
+            onClick = { if (!scrolling) tapCallback() },
         )
     }
     Card(
