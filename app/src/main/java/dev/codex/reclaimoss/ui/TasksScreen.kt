@@ -427,72 +427,7 @@ fun TasksScreen(
                     val dayHeightDp = ExpandedDayHeaderHeight + timelineHeight
 
                     Box(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            state = expandedListState,
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(0.dp),
-                            contentPadding = PaddingValues(bottom = 260.dp),
-                        ) {
-                            items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
-                                val date = taskFeedDateForIndex(today, index)
-                                val section = buildTaskDaySection(
-                                    date = date,
-                                    blocks = state.snapshot.blocks,
-                                    tasksById = tasksById,
-                                    reminders = activeReminders,
-                                    timeframes = state.snapshot.timeframes,
-                                    zoneId = zoneId,
-                                )
-                                val railMetadata = railMetadataForDate(state.snapshot.timeframes, date)
-
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(dayHeightDp),
-                                    horizontalArrangement = Arrangement.spacedBy(TaskTimelineRailGap),
-                                ) {
-                                    TimeframeRailStrip(
-                                        rails = railMetadata,
-                                        modifier = Modifier
-                                            .width(timelineRailStripWidth(railMetadata, compact = false))
-                                            .fillMaxHeight(),
-                                        compact = false,
-                                        segment = TimeframeRailSegment.BODY,
-                                    )
-
-                                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .offset(x = TaskTimelineLabelWidth - TaskTimelineDividerWidth)
-                                                .width(TaskTimelineDividerWidth)
-                                                .fillMaxHeight()
-                                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-                                        )
-
-                                        Column(modifier = Modifier.fillMaxSize()) {
-                                            ExpandedTimelineDayHeader(
-                                                date = date,
-                                            )
-
-                                            FullDayTimeline(
-                                                segments = section.segments,
-                                                tasksById = tasksById,
-                                                zoneId = zoneId,
-                                                day = date,
-                                                hourHeight = hourHeight,
-                                                allowConcurrentTasks = settings.allowConcurrentTasks,
-                                                showTaskCards = true,
-                                                drawVerticalDivider = false,
-                                                onOpenTask = onOpenTask,
-                                                onDeleteTask = onDeleteTask,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Pinned floating header — date pushes daily, timeframe pushes only when active set changes
+                        // Pinned header calculations — computed before LazyColumn items for access
                         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
                         val pinnedHeaderInfo by remember {
                             derivedStateOf {
@@ -538,6 +473,73 @@ fun TasksScreen(
                                 }
                             }
                         }
+
+                        LazyColumn(
+                            state = expandedListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
+                            contentPadding = PaddingValues(bottom = 260.dp),
+                        ) {
+                            items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
+                                val date = taskFeedDateForIndex(today, index)
+                                val section = buildTaskDaySection(
+                                    date = date,
+                                    blocks = state.snapshot.blocks,
+                                    tasksById = tasksById,
+                                    reminders = activeReminders,
+                                    timeframes = state.snapshot.timeframes,
+                                    zoneId = zoneId,
+                                )
+                                val railMetadata = railMetadataForDate(state.snapshot.timeframes, date)
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(dayHeightDp),
+                                    horizontalArrangement = Arrangement.spacedBy(TaskTimelineRailGap),
+                                ) {
+                                    TimeframeRailStrip(
+                                        rails = railMetadata,
+                                        modifier = Modifier
+                                            .width(timelineRailStripWidth(railMetadata, compact = false))
+                                            .fillMaxHeight(),
+                                        compact = false,
+                                        segment = TimeframeRailSegment.BODY,
+                                    )
+
+                                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .offset(x = TaskTimelineLabelWidth - TaskTimelineDividerWidth)
+                                                .width(TaskTimelineDividerWidth)
+                                                .fillMaxHeight()
+                                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                                        )
+
+                                        Column(modifier = Modifier.fillMaxSize()) {
+                                            ExpandedTimelineDayHeader(
+                                                date = date,
+                                                hideDateChip = index == pinnedDayIndex,
+                                            )
+
+                                            FullDayTimeline(
+                                                segments = section.segments,
+                                                tasksById = tasksById,
+                                                zoneId = zoneId,
+                                                day = date,
+                                                hourHeight = hourHeight,
+                                                allowConcurrentTasks = settings.allowConcurrentTasks,
+                                                showTaskCards = true,
+                                                drawVerticalDivider = false,
+                                                onOpenTask = onOpenTask,
+                                                onDeleteTask = onDeleteTask,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         PinnedExpandedTimelineHeader(
                             date = pinnedDate,
                             activeRails = pinnedActiveRails,
@@ -761,6 +763,7 @@ private fun PinnedExpandedTimelineHeader(
 @Composable
 private fun ExpandedTimelineDayHeader(
     date: LocalDate,
+    hideDateChip: Boolean = false,
 ) {
     Box(
         modifier = Modifier
@@ -769,11 +772,13 @@ private fun ExpandedTimelineDayHeader(
             .zIndex(4f),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Row(
-            modifier = Modifier.padding(start = TaskTimelineContentInset),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DateChip(text = compactStickyDateText(date))
+        if (!hideDateChip) {
+            Row(
+                modifier = Modifier.padding(start = TaskTimelineContentInset),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DateChip(text = compactStickyDateText(date))
+            }
         }
     }
 }
