@@ -1193,14 +1193,13 @@ fun TaskRulesEditor(
             }
         }
     }
-    TaskSectionTitle("Allow splitting")
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Allow this task to be split",
+            "Allow splitting",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
