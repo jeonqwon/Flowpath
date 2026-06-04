@@ -555,13 +555,7 @@ fun TasksScreen(
                                         )
 
                                         FullDayTimeline(
-                                            segments = expandedTaskSegmentsForDay(
-                                                blocks = state.snapshot.blocks,
-                                                day = date,
-                                                zoneId = zoneId,
-                                            ).filter {
-                                                it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED
-                                            }.sortedBy { it.block.startAt },
+                                            segments = section.segments,
                                             tasksById = tasksById,
                                             zoneId = zoneId,
                                             day = date,
@@ -857,7 +851,7 @@ private fun ExpandedTimelineDayHeader(
         modifier = modifier
             .fillMaxWidth()
             .height(ExpandedDayHeaderHeight),
-        contentAlignment = Alignment.CenterStart,
+        contentAlignment = Alignment.TopStart,
     ) {
         if (!hideDateChip) {
             TimelineDateChipSlot(date = date)
