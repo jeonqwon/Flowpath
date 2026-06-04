@@ -904,12 +904,7 @@ internal fun stickyTimeframeHeaderText(rails: List<TimeframeRailMetadata>): Stri
 
 private fun timelineRailStripWidth(rails: List<TimeframeRailMetadata>, compact: Boolean): Dp {
     val railWidth = if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth
-    val laneCount = if (compact) {
-        rails.size.coerceIn(1, MaxOverlappingTimeframeRails)
-    } else {
-        MaxOverlappingTimeframeRails
-    }
-    return railWidth * laneCount
+    return railWidth * MaxOverlappingTimeframeRails
 }
 
 private fun maxTimelineRailStripWidth(compact: Boolean): Dp {
@@ -942,7 +937,7 @@ private fun TimeframeRailStrip(
     val orderedRails = orderedTimeframeRailsForDisplay(rails)
     val visible: List<TimeframeRailMetadata?> =
         if (orderedRails.isEmpty()) {
-            List(if (compact) 1 else MaxOverlappingTimeframeRails) { null }
+            List(MaxOverlappingTimeframeRails) { null }
         } else {
             val blanks = List((MaxOverlappingTimeframeRails - orderedRails.size).coerceAtLeast(0)) { null }
             blanks + orderedRails
