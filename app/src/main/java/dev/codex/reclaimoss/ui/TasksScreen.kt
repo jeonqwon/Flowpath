@@ -685,31 +685,50 @@ private fun CollapsedTaskDayRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 88.dp)
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                .heightIn(min = 72.dp)
+                .padding(vertical = 10.dp, horizontal = 0.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Timeframe rails — same max-5 lane logic as expanded
             TimeframeRailStrip(
                 rails = railMetadata,
-                modifier = Modifier.height(68.dp),
+                modifier = Modifier
+                    .width(timelineRailStripWidth(railMetadata, compact = true))
+                    .height(40.dp),
                 compact = true,
                 segment = TimeframeRailSegment.COMPACT,
             )
+
+            Spacer(Modifier.width(TaskTimelineRailGap))
+
+            // Date chip — same TaskTimelineLabelWidth slot as expanded
+            TimelineDateChipSlot(date = section.date)
+
+            // Vertical divider — same position as expanded
+            Box(
+                modifier = Modifier
+                    .width(TaskTimelineDividerWidth)
+                    .height(32.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            // Content
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    formatter.format(section.date) + if (section.date == today) " Â· Today" else "",
+                    formatter.format(section.date) + if (section.date == today) " · Today" else "",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -718,7 +737,29 @@ private fun CollapsedTaskDayRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (section.timeframes.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        section.timeframes.forEach { tf ->
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(parseTimeframeColor(tf.colorHex).copy(alpha = 0.88f)),
+                            )
+                        }
+                        Text(
+                            section.timeframes.joinToString(", ") { it.name },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
+
+            Spacer(Modifier.width(12.dp))
         }
     }
 }
