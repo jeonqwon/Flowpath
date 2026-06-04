@@ -429,7 +429,7 @@ fun TasksScreen(
                     val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
                     val dayHeightDp = ExpandedDayHeaderHeight + timelineHeight
 
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         // Pinned header calculations — computed before LazyColumn items for access
                         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
                         val pinnedHeaderInfo by remember {
@@ -455,9 +455,7 @@ fun TasksScreen(
                             railMetadataForDate(state.snapshot.timeframes, pinnedDate)
                         }
                         val pinnedActiveRails = remember(pinnedRailMetadata) {
-                            pinnedRailMetadata
-                                .distinctBy { it.id }
-                                .sortedBy { it.name }
+                            orderedTimeframeRailsForDisplay(pinnedRailMetadata)
                         }
                         val pinnedActiveRailIds = pinnedActiveRails.map { it.id }.toSet()
                         val timeframePushOffsetPx by remember(pinnedActiveRailIds, headerHeightPx) {
@@ -719,6 +717,19 @@ private fun collapsedDaySummaryText(section: TaskDaySection): String = buildStri
 }
 
 @Composable
+private fun TimelineDateChipSlot(
+    date: LocalDate,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.width(TaskTimelineLabelWidth),
+        contentAlignment = Alignment.Center,
+    ) {
+        DateChip(text = compactStickyDateText(date))
+    }
+}
+
+@Composable
 private fun PinnedExpandedTimelineHeader(
     date: LocalDate,
     activeRails: List<TimeframeRailMetadata>,
@@ -736,15 +747,12 @@ private fun PinnedExpandedTimelineHeader(
             .fillMaxWidth()
             .heightIn(min = ExpandedDayHeaderHeight),
     ) {
-        Box(
+        TimelineDateChipSlot(
+            date = date,
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .offset { IntOffset(0, datePushOffsetPx) }
-                .width(TaskTimelineLabelWidth),
-            contentAlignment = Alignment.Center,
-        ) {
-            DateChip(text = compactStickyDateText(date))
-        }
+                .offset { IntOffset(0, datePushOffsetPx) },
+        )
 
         if (activeRails.isNotEmpty()) {
             Row(
@@ -778,15 +786,7 @@ private fun ExpandedTimelineDayHeader(
         contentAlignment = Alignment.CenterStart,
     ) {
         if (!hideDateChip) {
-            Row(
-                modifier = Modifier
-                    .padding(start = TaskTimelineContentInset)
-                    .width(TaskTimelineLabelWidth),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DateChip(text = compactStickyDateText(date))
-            }
+            TimelineDateChipSlot(date = date)
         }
     }
 }
