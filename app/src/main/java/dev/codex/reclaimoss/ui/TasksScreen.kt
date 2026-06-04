@@ -2,12 +2,6 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -522,10 +516,13 @@ fun TasksScreen(
                         val pinnedRailMetadata = remember(pinnedDate, state.snapshot.timeframes) {
                             railMetadataForDate(state.snapshot.timeframes, pinnedDate)
                         }
-                        val pinnedActiveRailIds = remember(pinnedRailMetadata) {
-                            pinnedRailMetadata.map { it.id }.toSet()
+                        val pinnedActiveRails = remember(pinnedRailMetadata) {
+                            pinnedRailMetadata
+                                .distinctBy { it.id }
+                                .sortedBy { it.name }
                         }
-                        val timeframePushOffsetPx by remember {
+                        val pinnedActiveRailIds = pinnedActiveRails.map { it.id }.toSet()
+                        val timeframePushOffsetPx by remember(pinnedActiveRailIds, headerHeightPx) {
                             derivedStateOf {
                                 if (pinnedActiveRailIds.isEmpty()) 0
                                 else {
@@ -543,7 +540,7 @@ fun TasksScreen(
                         }
                         PinnedExpandedTimelineHeader(
                             date = pinnedDate,
-                            activeRails = pinnedRailMetadata,
+                            activeRails = pinnedActiveRails,
                             datePushOffsetPx = datePushOffsetPx,
                             timeframePushOffsetPx = timeframePushOffsetPx,
                             modifier = Modifier
@@ -732,8 +729,7 @@ private fun PinnedExpandedTimelineHeader(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = ExpandedDayHeaderHeight)
-            .animateContentSize(),
+            .heightIn(min = ExpandedDayHeaderHeight),
     ) {
         Box(
             modifier = Modifier
@@ -743,19 +739,15 @@ private fun PinnedExpandedTimelineHeader(
             DateChip(text = compactStickyDateText(date))
         }
 
-        AnimatedVisibility(
-            visible = activeRails.isNotEmpty(),
-            modifier = Modifier.align(Alignment.CenterStart)
-                .offset { IntOffset(x = chipStartPx, y = timeframePushOffsetPx) },
-            enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
-            exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
-        ) {
+        if (activeRails.isNotEmpty()) {
             Row(
-                modifier = Modifier.animateContentSize(),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset { IntOffset(x = chipStartPx, y = timeframePushOffsetPx) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                activeRails.forEach { rail ->
-                    Spacer(Modifier.width(TaskTimelineContentInset))
+                activeRails.forEachIndexed { index, rail ->
+                    if (index > 0) Spacer(Modifier.width(TaskTimelineContentInset))
                     TimeframeNameChip(
                         text = rail.name,
                         borderColor = parseTimeframeColor(rail.colorHex),
@@ -807,7 +799,6 @@ private fun DateChip(text: String) {
 private fun TimeframeNameChip(text: String, borderColor: Color) {
     Box(
         modifier = Modifier
-            .animateContentSize()
             .clip(RoundedCornerShape(10.dp))
             .border(
                 width = 1.dp,
