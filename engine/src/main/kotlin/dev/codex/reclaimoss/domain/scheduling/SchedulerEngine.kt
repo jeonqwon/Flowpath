@@ -447,6 +447,7 @@ class SchedulerEngine {
                     }
                 }
             }
+            val effectiveAllowSplitting = policy.allowTaskSplitting && task.allowSplitting
             if (allowConcurrentForTask) {
                 val preferredCandidate = preferredSegments.bestConcurrentBlock(
                     remainingMinutes = remainingMinutes,
@@ -454,7 +455,7 @@ class SchedulerEngine {
                     minBlockMinutes = policy.minBlockMinutes,
                     zoneId = zoneId,
                     alignmentMinutes = policy.alignmentMinutes,
-                    allowTaskSplitting = policy.allowTaskSplitting,
+                    allowTaskSplitting = effectiveAllowSplitting,
                     softOccupied = softOccupied,
                     workHours = if (hasWindowConstraint) workHours else null,
                 )
@@ -465,7 +466,7 @@ class SchedulerEngine {
                         minBlockMinutes = policy.minBlockMinutes,
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = policy.allowTaskSplitting,
+                        allowTaskSplitting = effectiveAllowSplitting,
                         softOccupied = softOccupied,
                         workHours = if (hasWindowConstraint) workHours else null,
                     )
@@ -484,7 +485,7 @@ class SchedulerEngine {
                         minBlockMinutes = policy.minBlockMinutes,
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = policy.allowTaskSplitting,
+                        allowTaskSplitting = effectiveAllowSplitting,
                         workHours = workHours,
                     )
                 } else {
@@ -494,7 +495,7 @@ class SchedulerEngine {
                         minBlockMinutes = policy.minBlockMinutes,
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = policy.allowTaskSplitting,
+                        allowTaskSplitting = effectiveAllowSplitting,
                     )
                 }
                 preferredCandidate?.let { return it }
@@ -507,7 +508,7 @@ class SchedulerEngine {
                         minBlockMinutes = policy.minBlockMinutes,
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = policy.allowTaskSplitting,
+                        allowTaskSplitting = effectiveAllowSplitting,
                         workHours = workHours,
                     )
                 } else {
@@ -517,7 +518,7 @@ class SchedulerEngine {
                         minBlockMinutes = policy.minBlockMinutes,
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = policy.allowTaskSplitting,
+                        allowTaskSplitting = effectiveAllowSplitting,
                     )
                 }
             }

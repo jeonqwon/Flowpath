@@ -275,6 +275,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 initialTaskDraft = createTaskDraftOverride ?: defaultCreateTaskDraft(
                     defaultTaskReminder = state.settings.defaultTaskReminder,
                     allowConcurrentTasks = state.settings.allowConcurrentTasks,
+                    defaultTaskSplitting = state.settings.defaultTaskSplitting,
                 ),
                 followUpMode = followUpSourceTaskId != null,
                 editMode = editSourceTaskId != null,

@@ -1193,6 +1193,24 @@ fun TaskRulesEditor(
             }
         }
     }
+    TaskSectionTitle("Allow splitting")
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Allow this task to be split",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Switch(
+            checked = draft.allowSplitting,
+            onCheckedChange = { onDraftChange(draft.copy(allowSplitting = it)) },
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+
     if (showReminderToggle) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2130,9 +2148,11 @@ fun defaultCreateTaskDraft(defaultTaskReminder: Boolean = false): TaskDraft =
 fun defaultCreateTaskDraft(
     defaultTaskReminder: Boolean = false,
     allowConcurrentTasks: Boolean,
+    defaultTaskSplitting: Boolean = true,
 ): TaskDraft =
     defaultCreateTaskDraft(defaultTaskReminder).copy(
         overlapPolicy = if (allowConcurrentTasks) TaskOverlapPolicy.ALLOW else TaskOverlapPolicy.DISALLOW,
+        allowSplitting = defaultTaskSplitting,
     )
 
 fun TaskDraft.applyScheduleEditor(editorDraft: TaskDraft): TaskDraft =
@@ -2395,6 +2415,7 @@ fun taskRulesSummary(taskDraft: TaskDraft, allowConcurrentTasks: Boolean): Strin
         if (allowConcurrentTasks && taskDraft.overlapPolicy == TaskOverlapPolicy.DISALLOW) {
             add("No overlap")
         }
+        if (!taskDraft.allowSplitting) add("No split")
         if (taskDraft.addReminder) add("Reminder")
         if (taskDraft.priority == TaskPriority.URGENT) add("Urgent")
     }

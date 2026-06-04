@@ -181,6 +181,7 @@ data class TaskDraft(
     val continuationParentTaskId: String? = null,
     val continuationMode: TaskContinuationMode? = null,
     val overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
+    val allowSplitting: Boolean = true,
     val deadline: LocalDateTime = LocalDateTime.now().plusDays(1).withHour(17).withMinute(0),
     val schedulingMode: TaskSchedulingMode = TaskSchedulingMode.FLEXIBLE,
     val hasWindow: Boolean = false,
@@ -238,6 +239,7 @@ fun ScheduleTask.toFollowUpDraft(zoneId: ZoneId = ZoneId.systemDefault()): TaskD
         continuationParentTaskId = null,
         continuationMode = null,
         overlapPolicy = TaskOverlapPolicy.INHERIT,
+        allowSplitting = allowSplitting,
         schedulingMode = TaskSchedulingMode.FLEXIBLE,
         hasWindow = false,
         startDate = null,
@@ -270,6 +272,7 @@ fun ScheduleTask.toRescheduleDraft(zoneId: ZoneId = ZoneId.systemDefault()): Tas
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
         overlapPolicy = overlapPolicy,
+        allowSplitting = allowSplitting,
         deadline = localDueAt,
         schedulingMode = if (schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) TaskSchedulingMode.FLEXIBLE else schedulingMode,
         hasWindow = schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW || (schedulingMode != TaskSchedulingMode.FIXED_EXACT && fixedEndAt != null),
@@ -324,6 +327,7 @@ class PlannerViewModel(
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
             overlapPolicy = draft.overlapPolicy,
+            allowSplitting = draft.allowSplitting,
             dueAt = draft.taskDueAtInstant(),
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
@@ -386,6 +390,7 @@ class PlannerViewModel(
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
             overlapPolicy = draft.overlapPolicy,
+            allowSplitting = draft.allowSplitting,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -415,6 +420,7 @@ class PlannerViewModel(
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
             overlapPolicy = draft.overlapPolicy,
+            allowSplitting = draft.allowSplitting,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -443,6 +449,7 @@ class PlannerViewModel(
             continuationParentTaskId = draft.continuationParentTaskId,
             continuationMode = draft.continuationMode,
             overlapPolicy = draft.overlapPolicy,
+            allowSplitting = draft.allowSplitting,
             recurrenceRule = RecurrenceRule(
                 type = draft.recurrenceType,
                 interval = draft.recurrenceInterval,
@@ -550,6 +557,7 @@ class PlannerViewModel(
     suspend fun setBreakBufferMinutes(value: Int) = settingsRepository.setBreakBufferMinutes(value)
     suspend fun setAlignmentMinutes(value: Int) = settingsRepository.setAlignmentMinutes(value)
     suspend fun setAllowTaskSplitting(value: Boolean) = settingsRepository.setAllowTaskSplitting(value)
+    suspend fun setDefaultTaskSplitting(value: Boolean) = settingsRepository.setDefaultTaskSplitting(value)
     suspend fun setAllowConcurrentTasks(value: Boolean) = settingsRepository.setAllowConcurrentTasks(value)
     suspend fun setMaxTaskChunkMinutes(value: Int) = settingsRepository.setMaxTaskChunkMinutes(value)
     suspend fun setPreferredPeriodFallbackMode(value: PreferredPeriodFallbackMode) = settingsRepository.setPreferredPeriodFallbackMode(value)
@@ -735,6 +743,7 @@ fun ScheduleTask.toEditDraft(
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
         overlapPolicy = overlapPolicy,
+        allowSplitting = allowSplitting,
         deadline = localDueAt,
         schedulingMode = if (schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) TaskSchedulingMode.FLEXIBLE else schedulingMode,
         hasWindow = schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW || (schedulingMode != TaskSchedulingMode.FIXED_EXACT && fixedEndAt != null),
