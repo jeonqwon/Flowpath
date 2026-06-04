@@ -563,7 +563,7 @@ class PlannerCoordinator(
         }
         val existing = repository.getTimeframes()
         if (wouldExceedTimeframeLayerCap(existing, startDate, endDate, timeframeId)) {
-            return TimeframeSaveResult(saved = false, errorMessage = "You can stack up to 4 overlapping timeframes.")
+            return TimeframeSaveResult(saved = false, errorMessage = "You can stack up to 5 overlapping timeframes.")
         }
         val now = now()
         val original = timeframeId?.let { id -> existing.firstOrNull { it.id == id } }

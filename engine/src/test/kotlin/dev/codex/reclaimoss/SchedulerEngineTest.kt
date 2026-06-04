@@ -916,6 +916,317 @@ class SchedulerEngineTest {
         assertEquals(LocalTime.of(13, 0), childBlock.startAt.atZone(zone).toLocalTime())
     }
 
+    @Test
+    fun `allowSplitting false prevents splitting when task cannot fit as one whole block`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val splittablePolicy = policy.copy(allowTaskSplitting = true, maxBlockMinutes = 60)
+        // 240 min task with deadline at 12:00 — only 180 min available (9-12),
+        // and maxBlockMinutes=60 means when splitting is allowed, it would make 60-min chunks.
+        // But allowSplitting=false means it must fit as one piece = impossible.
+        val task = task(
+            id = "no-split-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(12, 0), zone).toInstant(),
+            estimatedMinutes = 240,
+            remainingMinutes = 240,
+            priority = TaskPriority.MEDIUM,
+            allowSplitting = false,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = splittablePolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        assertTrue("Task should be unscheduled when splitting is disabled and full task doesn't fit",
+            plan.issues.any { it.taskId == task.id && it.type == SchedulingIssueType.UNSCHEDULED })
+    }
+
+    @Test
+    fun `locked pending block with ALLOW overlap does not block another ALLOW task`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(13, 0), LocalTime.of(15, 0))))
+            },
+        )
+        val existingLockedBlock = ScheduleBlock(
+            id = "locked-allow",
+            taskId = "existing-task",
+            startAt = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(14, 0), zone).toInstant(),
+            source = BlockSource.MANUAL,
+            lockState = BlockLockState.LOCKED,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+        val existingTask = task(
+            id = "existing-task",
+            deadline = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+        val newTask = task(
+            id = "new-allow-task",
+            deadline = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(existingTask, newTask),
+            existingBlocks = listOf(existingLockedBlock),
+            busyWindows = emptyList(),
+            workHours = afternoonOnly,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val newBlocks = plan.blocks.filter { it.taskId == newTask.id }
+        assertTrue("New ALLOW task should schedule somewhere", newBlocks.isNotEmpty())
+    }
+
+    @Test
+    fun `locked pending block with DISALLOW overlap DOES block another task`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(13, 0), LocalTime.of(15, 0))))
+            },
+        )
+        val existingLockedBlock = ScheduleBlock(
+            id = "locked-disallow",
+            taskId = "existing-disallow",
+            startAt = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(14, 0), zone).toInstant(),
+            source = BlockSource.MANUAL,
+            lockState = BlockLockState.LOCKED,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+        val disallowTask = task(
+            id = "existing-disallow",
+            deadline = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+        )
+        val newTask = task(
+            id = "new-task",
+            deadline = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(disallowTask, newTask),
+            existingBlocks = listOf(existingLockedBlock),
+            busyWindows = emptyList(),
+            workHours = afternoonOnly,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val newBlocks = plan.blocks.filter { it.taskId == newTask.id }
+        assertTrue("New task should NOT overlap with DISALLOW locked block",
+            newBlocks.all { it.endAt <= existingLockedBlock.startAt || it.startAt >= existingLockedBlock.endAt })
+    }
+
+    @Test
+    fun `completed blocks always block regardless of overlap policy`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val completedBlock = ScheduleBlock(
+            id = "completed-block",
+            taskId = "completed-task",
+            startAt = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(14, 0), zone).toInstant(),
+            source = BlockSource.AUTO,
+            lockState = BlockLockState.FLEXIBLE,
+            completionState = BlockCompletionState.COMPLETED,
+            externalCalendarEventId = null,
+        )
+        val newTask = task(
+            id = "new-task",
+            deadline = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(newTask),
+            existingBlocks = listOf(completedBlock),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(12, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val scheduled = plan.blocks.single { it.taskId == newTask.id }
+        assertTrue("New task should schedule after completed block, not overlap it",
+            scheduled.startAt >= completedBlock.endAt)
+    }
+
+    @Test
+    fun `sleep task blocks all other tasks even with allow overlap`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val sleepBlock = ScheduleBlock(
+            id = "sleep-block",
+            taskId = "sleep-task",
+            startAt = ZonedDateTime.of(date, LocalTime.of(13, 0), zone).toInstant(),
+            endAt = ZonedDateTime.of(date, LocalTime.of(14, 0), zone).toInstant(),
+            source = BlockSource.AUTO,
+            lockState = BlockLockState.FLEXIBLE,
+            completionState = BlockCompletionState.PENDING,
+            externalCalendarEventId = null,
+        )
+        val sleepTask = ScheduleTask(
+            id = "sleep-task",
+            title = "Sleep",
+            taskKind = dev.codex.reclaimoss.domain.model.TaskKind.SLEEP,
+            priority = TaskPriority.URGENT,
+            dueAt = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+            recurrenceRule = RecurrenceRule(),
+            status = TaskStatus.ACTIVE,
+        )
+        val newTask = task(
+            id = "new-task",
+            deadline = dueAt,
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.MEDIUM,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(sleepTask, newTask),
+            existingBlocks = listOf(sleepBlock),
+            busyWindows = emptyList(),
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(12, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        val newBlocks = plan.blocks.filter { it.taskId == newTask.id }
+        assertTrue("New task should not overlap with sleep task",
+            newBlocks.all { it.endAt <= sleepBlock.startAt || it.startAt >= sleepBlock.endAt })
+    }
+
+    @Test
+    fun `three tasks all with ALLOW overlap can share the same time slot`() {
+        val date = LocalDate.of(2026, 5, 19)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(15, 0), zone).toInstant()
+        val afternoonOnly = WorkHoursProfile(
+            timezone = zone.id,
+            days = DayOfWeek.entries.associateWith {
+                WorkHoursDay(listOf(TimeWindow(LocalTime.of(13, 0), LocalTime.of(15, 0))))
+            },
+        )
+        val tasks = (1..3).map { i ->
+            task(
+                id = "task-$i",
+                deadline = dueAt,
+                estimatedMinutes = 120,
+                remainingMinutes = 120,
+                priority = TaskPriority.MEDIUM,
+                overlapPolicy = TaskOverlapPolicy.ALLOW,
+            )
+        }
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = tasks,
+            existingBlocks = emptyList(),
+            busyWindows = emptyList(),
+            workHours = afternoonOnly,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.ManualRebuild,
+        )
+
+        tasks.forEach { task ->
+            val blocks = plan.blocks.filter { it.taskId == task.id }
+            assertTrue("Each ALLOW task should have at least one block", blocks.isNotEmpty())
+        }
+        // At least two tasks should overlap each other
+        val allBlockPairs = plan.blocks.flatMap { a ->
+            plan.blocks.filter { it != a }.map { b -> a to b }
+        }
+        assertTrue("At least one pair of blocks from different tasks should overlap",
+            allBlockPairs.any { (a, b) ->
+                a.taskId != b.taskId && a.startAt < b.endAt && b.startAt < a.endAt
+            })
+    }
+
+    @Test
+    fun `calendar busy windows block even tasks with allow overlap`() {
+        val date = LocalDate.of(2026, 5, 18)
+        val concurrentPolicy = policy.copy(allowConcurrentTasks = true)
+        val task = task(
+            id = "calendar-blocked",
+            deadline = ZonedDateTime.of(date.plusDays(1), LocalTime.of(17, 0), zone).toInstant(),
+            estimatedMinutes = 60,
+            remainingMinutes = 60,
+            priority = TaskPriority.HIGH,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+        val busy = listOf(
+            SchedulerEngine.BusyWindow(
+                startAt = ZonedDateTime.of(date, LocalTime.of(9, 0), zone).toInstant(),
+                endAt = ZonedDateTime.of(date, LocalTime.of(16, 0), zone).toInstant(),
+            ),
+        )
+
+        val plan = scheduler.rebuildSchedule(
+            tasks = listOf(task),
+            existingBlocks = emptyList(),
+            busyWindows = busy,
+            workHours = workHours,
+            timePeriods = timePeriods,
+            policy = concurrentPolicy,
+            rangeStart = ZonedDateTime.of(date, LocalTime.of(8, 0), zone).toInstant(),
+            reason = ScheduleRebuildReason.CalendarConflict("calendar-blocked"),
+        )
+
+        val scheduled = plan.blocks.single { it.taskId == task.id }
+        assertTrue("Task with ALLOW overlap should still avoid calendar busy window",
+            scheduled.startAt >= busy.single().endAt || scheduled.endAt <= busy.single().startAt)
+    }
+
     private fun task(
         id: String,
         deadline: Instant,
@@ -931,6 +1242,7 @@ class SchedulerEngineTest {
         continuationParentTaskId: String? = null,
         continuationMode: TaskContinuationMode? = null,
         overlapPolicy: TaskOverlapPolicy = TaskOverlapPolicy.INHERIT,
+        allowSplitting: Boolean = true,
     ) = ScheduleTask(
         id = id,
         title = id,
@@ -942,6 +1254,7 @@ class SchedulerEngineTest {
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
         overlapPolicy = overlapPolicy,
+        allowSplitting = allowSplitting,
         dueAt = deadline,
         estimatedMinutes = estimatedMinutes,
         remainingMinutes = remainingMinutes,

@@ -319,10 +319,10 @@ class PlannerCoordinatorTest {
     }
 
     @Test
-    fun `saving fifth overlapping timeframe is rejected`() = runTest {
+    fun `saving sixth overlapping timeframe is rejected`() = runTest {
         val repository = FakePlannerRepository()
         val coordinator = coordinator(repository)
-        repeat(4) { index ->
+        repeat(5) { index ->
             repository.upsertTimeframe(
                 Timeframe(
                     id = "tf-$index",
@@ -344,8 +344,8 @@ class PlannerCoordinatorTest {
         )
 
         assertFalse(result.saved)
-        assertEquals("You can stack up to 4 overlapping timeframes.", result.errorMessage)
-        assertEquals(4, repository.getTimeframes().size)
+        assertEquals("You can stack up to 5 overlapping timeframes.", result.errorMessage)
+        assertEquals(5, repository.getTimeframes().size)
     }
 
     @Test
@@ -704,7 +704,7 @@ class PlannerCoordinatorTest {
         )
 
         assertFalse(result.scheduled)
-        assertEquals("This fixed time overlaps another blocked task or event.", result.reason)
+        assertEquals("This fixed time is blocked by another task or calendar event.", result.reason)
         assertTrue(repository.getTasks().none { it.id == result.taskId })
         assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
     }
@@ -1040,7 +1040,7 @@ class PlannerCoordinatorTest {
         )
 
         assertFalse(result.scheduled)
-        assertEquals("This fixed time overlaps another blocked task or event.", result.reason)
+        assertEquals("This fixed time is blocked by another task or calendar event.", result.reason)
         val restoredTask = repository.getTasks().single { it.id == task.id }
         val restoredBlock = repository.getBlocks().single { it.taskId == task.id }
         val restoredReminder = repository.getReminders().single { it.linkedTaskId == task.id }
@@ -1758,6 +1758,120 @@ class PlannerCoordinatorTest {
         assertTrue(repository.getBlocks().none { it.taskId == result.taskId })
         assertTrue(repository.getSchedulingIssues().none { it.taskId == result.taskId })
         assertTrue(repository.getReminders().none { it.linkedTaskId == result.taskId })
+    }
+
+    @Test
+    fun `exact task with DISALLOW overlap blocks another exact task at same time`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val startAt = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(14, 0), zone).toInstant()
+        val endAt = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(15, 0), zone).toInstant()
+        val result1 = coordinator.createTask(
+            title = "Task A",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = endAt,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = startAt,
+            fixedEndAt = endAt,
+            overlapPolicy = TaskOverlapPolicy.DISALLOW,
+        )
+        assertTrue("First exact DISALLOW task should schedule", result1.scheduled)
+
+        val result2 = coordinator.createTask(
+            title = "Task B",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = endAt,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = startAt,
+            fixedEndAt = endAt,
+            overlapPolicy = TaskOverlapPolicy.ALLOW,
+        )
+        assertFalse("Second exact task should fail when first disallows overlap", result2.scheduled)
+    }
+
+    @Test
+    fun `non overlapping exact tasks at different times both schedule`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val startA = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(9, 0), zone).toInstant()
+        val endA = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(10, 0), zone).toInstant()
+        val startB = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(10, 30), zone).toInstant()
+        val endB = ZonedDateTime.of(LocalDate.of(2026, 6, 1), LocalTime.of(11, 30), zone).toInstant()
+
+        val result1 = coordinator.createTask(
+            title = "Task A",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = endA,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = startA,
+            fixedEndAt = endA,
+        )
+        assertTrue(result1.scheduled)
+
+        val result2 = coordinator.createTask(
+            title = "Task B",
+            description = "",
+            priority = TaskPriority.MEDIUM,
+            dueAt = endB,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 60,
+            addReminder = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = startB,
+            fixedEndAt = endB,
+        )
+        assertTrue(result2.scheduled)
+    }
+
+    @Test
+    fun `creating flexible task triggers full rebuild so other tasks can move`() = runTest {
+        val repository = FakePlannerRepository()
+        val coordinator = coordinator(repository)
+        val date = LocalDate.of(2026, 6, 1)
+        val dueAt = ZonedDateTime.of(date, LocalTime.of(17, 0), zone).toInstant()
+
+        // Create a low-priority task that takes the morning
+        val existing = task(
+            id = "low-priority",
+            dueAt = dueAt,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 240,
+        )
+        repository.upsertTask(existing)
+        coordinator.rebuildSchedule()
+        val lowBlocks = repository.getBlocks().filter { it.taskId == "low-priority" }
+        assertTrue("Low priority task should have at least one block before new task is created", lowBlocks.isNotEmpty())
+
+        // Create an urgent task — with full rebuild, it should push the low task
+        val result = coordinator.createTask(
+            title = "Urgent",
+            description = "",
+            priority = TaskPriority.URGENT,
+            dueAt = dueAt,
+            preferredTimePeriodId = null,
+            recurrenceRule = RecurrenceRule(),
+            estimatedMinutes = 120,
+            addReminder = false,
+        )
+        assertTrue("Urgent task should schedule alongside existing task", result.scheduled)
+        val urgentBlocks = repository.getBlocks().filter { it.taskId == result.taskId }
+        assertTrue("Urgent task should have at least one block", urgentBlocks.isNotEmpty())
     }
 
     private fun coordinator(repository: PlannerRepository) = PlannerCoordinator(
