@@ -522,15 +522,6 @@ fun TasksScreen(
                             items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
                                 val date = taskFeedDateForIndex(today, index)
                                 val railMetadata = railMetadataForDate(state.snapshot.timeframes, date)
-                                val expandedSegments = remember(date, state.snapshot.blocks, zoneId) {
-                                    expandedTaskSegmentsForDay(
-                                        blocks = state.snapshot.blocks,
-                                        day = date,
-                                        zoneId = zoneId,
-                                    ).filter {
-                                        it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED
-                                    }.sortedBy { it.block.startAt }
-                                }
 
                                 Row(
                                     modifier = Modifier
@@ -557,7 +548,7 @@ fun TasksScreen(
                                         )
 
                                         FullDayTimeline(
-                                            segments = expandedSegments,
+                                            segments = emptyList(),
                                             tasksById = tasksById,
                                             zoneId = zoneId,
                                             day = date,
@@ -589,6 +580,7 @@ fun TasksScreen(
                             today = today,
                             zoneId = zoneId,
                             hourHeight = hourHeight,
+                            dayHeight = dayHeightDp,
                             allowConcurrentTasks = settings.allowConcurrentTasks,
                             onOpenTask = onOpenTask,
                             modifier = Modifier
@@ -816,6 +808,7 @@ private fun ExpandedTaskOverlay(
     today: LocalDate,
     zoneId: ZoneId,
     hourHeight: Dp,
+    dayHeight: Dp,
     allowConcurrentTasks: Boolean,
     onOpenTask: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -823,55 +816,72 @@ private fun ExpandedTaskOverlay(
     val density = LocalDensity.current
     val contentStart = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap +
         TaskTimelineLabelWidth + TaskTimelineContentInset
+    val isScrolling = listState.isScrollInProgress
 
     BoxWithConstraints(
         modifier = modifier,
     ) {
         val contentWidth = maxWidth - contentStart
-        val visibleItemsInfo = listState.layoutInfo.visibleItemsInfo
+        val layoutInfo = listState.layoutInfo
+        val visibleItems = layoutInfo.visibleItemsInfo
+        if (visibleItems.isEmpty()) return@BoxWithConstraints
 
-        val blockList: List<OverlayCardData> = visibleItemsInfo.flatMap { itemInfo ->
-            val date = taskFeedDateForIndex(today, itemInfo.index)
-            val segments = expandedTaskSegmentsForDay(blocks, date, zoneId)
-                .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
-                .sortedBy { it.block.startAt }
+        val firstVisible = visibleItems.first()
+        val firstIndex = firstVisible.index
+        val firstOffsetPx = firstVisible.offset
+        val dayHeightPx = with(density) { dayHeight.roundToPx() }
 
-            val positionedBlocks = if (allowConcurrentTasks) {
-                computeTaskBlockLayout(segments)
-            } else {
-                segments.sortedBy { it.block.startAt }
-                    .map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
-            }
+        // Compute the visible window in absolute pixel space
+        val viewportStartPx = layoutInfo.viewportStartOffset
+        val viewportEndPx = layoutInfo.viewportEndOffset
 
-            positionedBlocks.map { positioned ->
-                val block = positioned.segment.block
-                val startTime = block.startAt.atZone(zoneId).toLocalTime()
-                val startMinutes = minutesFromStart(startTime)
-                val startOffsetPx = with(density) { timelineOffset(startMinutes, hourHeight).roundToPx() }
-                val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
-                val blockHeightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
-                val topPx = itemInfo.offset + startOffsetPx
-                OverlayCardData(
-                    positionedBlock = positioned,
-                    task = tasksById[block.taskId],
-                    positionPx = topPx,
-                    heightPx = blockHeightPx,
-                )
-            }
+        // Scan ALL non-completed blocks and compute absolute position
+        val visibleStartIndex = (firstIndex - 1).coerceAtLeast(0)
+        val visibleEndIndex = (firstIndex + visibleItems.size).coerceAtMost(TaskFeedDayCount - 1)
+
+        val candidateSegments = mutableListOf<VisibleTaskSegment>()
+        for (i in visibleStartIndex..visibleEndIndex) {
+            val date = taskFeedDateForIndex(today, i)
+            candidateSegments.addAll(
+                expandedTaskSegmentsForDay(blocks, date, zoneId)
+                    .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+            )
+        }
+        candidateSegments.sortBy { it.block.startAt }
+
+        val positioned = if (allowConcurrentTasks) {
+            computeTaskBlockLayout(candidateSegments)
+        } else {
+            candidateSegments.map { PositionedTaskBlock(it, laneIndex = 0, totalLanes = 1) }
         }
 
-        blockList.forEach { cardData ->
-            FullDayTaskBlock(
-                positionedBlock = cardData.positionedBlock,
-                task = cardData.task,
-                zoneId = zoneId,
-                contentStart = contentStart,
-                contentWidth = contentWidth,
-                hourHeight = hourHeight,
-                onOpen = { onOpenTask(cardData.positionedBlock.segment.block.taskId) },
-                absoluteY = with(density) { cardData.positionPx.toDp() },
-                absoluteHeight = with(density) { cardData.heightPx.toDp() },
-            )
+        positioned.forEach { positionedBlock ->
+            val block = positionedBlock.segment.block
+            val startDate = block.startAt.atZone(zoneId).toLocalDate()
+            val startIndex = taskFeedIndexForDate(today, startDate)
+            val dayOffsetPx = firstOffsetPx + ((startIndex - firstIndex) * dayHeightPx)
+            val startMinutes = minutesFromStart(block.startAt.atZone(zoneId).toLocalTime())
+            val blockTopPx = with(density) { timelineOffset(startMinutes, hourHeight).roundToPx() }
+            val absoluteYPx = dayOffsetPx + blockTopPx
+            val durationMinutes = java.time.Duration.between(block.startAt, block.endAt).toMinutes().toInt().coerceAtLeast(30)
+            val heightPx = with(density) { timelineBlockHeight(durationMinutes, hourHeight, minHeight = 64.dp).roundToPx() }
+
+            // Only draw if at least partially visible
+            if (absoluteYPx + heightPx > viewportStartPx && absoluteYPx < viewportEndPx) {
+                FullDayTaskBlock(
+                    positionedBlock = positionedBlock,
+                    task = tasksById[block.taskId],
+                    zoneId = zoneId,
+                    contentStart = contentStart,
+                    contentWidth = contentWidth,
+                    hourHeight = hourHeight,
+                    onOpen = { onOpenTask(block.taskId) },
+                    absoluteY = with(density) { absoluteYPx.toDp() },
+                    absoluteHeight = with(density) { heightPx.toDp() },
+                    useTapGesture = true,
+                    isScrollInProgress = isScrolling,
+                )
+            }
         }
     }
 }
@@ -1520,6 +1530,7 @@ fun FullDayTaskBlock(
     absoluteY: Dp? = null,
     absoluteHeight: Dp? = null,
     useTapGesture: Boolean = false,
+    isScrollInProgress: Boolean = false,
 ) {
     val block = positionedBlock.segment.block
     val start = block.startAt.atZone(zoneId).toLocalTime()
@@ -1547,14 +1558,18 @@ fun FullDayTaskBlock(
         .height(height)
         .offset(x = xOffset, y = top)
         .zIndex(1f)
+    val safeOpen = { if (!isScrollInProgress) onOpen() }
     val positionedModifier = if (useTapGesture) {
         cardModifier.then(
             Modifier.pointerInput(Unit) {
-                detectTapGestures(onTap = { onOpen() })
+                detectTapGestures(onTap = { safeOpen() })
             }
         )
     } else {
-        cardModifier.clickable(onClick = onOpen)
+        cardModifier.clickable(
+            enabled = !isScrollInProgress,
+            onClick = { if (!isScrollInProgress) onOpen() },
+        )
     }
     Card(
         modifier = positionedModifier,
