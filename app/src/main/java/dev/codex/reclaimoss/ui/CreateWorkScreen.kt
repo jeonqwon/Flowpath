@@ -564,7 +564,7 @@ fun CreateWorkScreen(
                     onDraftChange = { rulesDraft = it },
                     continuationTasks = continuationTasks,
                     showReminderToggle = !followUpMode && !rescheduleMode,
-                    showOverlapControls = allowConcurrentTasks,
+                    globalAllowConcurrentTasks = allowConcurrentTasks,
                 )
             }
         }
@@ -1153,7 +1153,7 @@ fun TaskRulesEditor(
     onDraftChange: (TaskDraft) -> Unit,
     continuationTasks: List<ScheduleTask>,
     showReminderToggle: Boolean,
-    showOverlapControls: Boolean,
+    globalAllowConcurrentTasks: Boolean = true,
 ) {
     TaskSectionTitle("Priority")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1181,22 +1181,29 @@ fun TaskRulesEditor(
             onModeSelected = { mode -> onDraftChange(draft.copy(continuationMode = mode)) },
         )
     }
-    if (showOverlapControls) {
-        TaskSectionTitle("Overlap")
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf(
-                TaskOverlapPolicy.ALLOW to "Allow",
-                TaskOverlapPolicy.DISALLOW to "No overlap",
-            ).forEach { (policy, label) ->
-                FilterChip(
-                    selected = draft.overlapPolicy == policy,
-                    onClick = { onDraftChange(draft.copy(overlapPolicy = policy)) },
-                    label = { Text(label) },
-                )
-            }
+    TaskSectionTitle("Overlap")
+    if (!globalAllowConcurrentTasks) {
+        Text(
+            "Concurrent tasks are disabled globally. Enable in Settings to allow overlap.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        listOf(
+            TaskOverlapPolicy.INHERIT to "Inherit",
+            TaskOverlapPolicy.ALLOW to "Allow",
+            TaskOverlapPolicy.DISALLOW to "No overlap",
+        ).forEach { (policy, label) ->
+            FilterChip(
+                selected = draft.overlapPolicy == policy,
+                onClick = { onDraftChange(draft.copy(overlapPolicy = policy)) },
+                label = { Text(label) },
+            )
         }
     }
     Row(

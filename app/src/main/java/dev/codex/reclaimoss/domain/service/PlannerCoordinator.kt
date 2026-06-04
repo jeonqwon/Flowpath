@@ -392,6 +392,7 @@ class PlannerCoordinator(
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
             overlapPolicy = overlapPolicy,
+            allowSplitting = allowSplitting,
             schedulingMode = schedulingMode,
             notBeforeAt = notBeforeAt,
             fixedStartAt = fixedStartAt,
@@ -407,7 +408,7 @@ class PlannerCoordinator(
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             placeExactTask(taskId)
         } else {
-            rebuildSchedule(ScheduleRebuildReason.ManualRebuild, taskId)
+            rebuildSchedule()
         }
         val result = taskResultFor(taskId)
         if (!result.scheduled) {
@@ -465,6 +466,7 @@ class PlannerCoordinator(
                 continuationParentTaskId = continuationParentTaskId,
                 continuationMode = continuationMode,
                 overlapPolicy = overlapPolicy,
+                allowSplitting = allowSplitting,
                 recurrenceRule = recurrenceRule,
                 estimatedMinutes = estimatedMinutes,
                 addReminder = addReminder,
@@ -486,6 +488,7 @@ class PlannerCoordinator(
                 continuationParentTaskId = continuationParentTaskId,
                 continuationMode = continuationMode,
                 overlapPolicy = overlapPolicy,
+                allowSplitting = allowSplitting,
                 recurrenceRule = recurrenceRule,
                 estimatedMinutes = estimatedMinutes,
                 addReminder = addReminder,
@@ -790,6 +793,7 @@ class PlannerCoordinator(
         continuationParentTaskId: String?,
         continuationMode: TaskContinuationMode?,
         overlapPolicy: TaskOverlapPolicy,
+        allowSplitting: Boolean,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -812,6 +816,7 @@ class PlannerCoordinator(
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
             overlapPolicy = overlapPolicy,
+            allowSplitting = allowSplitting,
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             schedulingMode = schedulingMode,
@@ -824,7 +829,7 @@ class PlannerCoordinator(
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             placeExactTask(existingTask.id)
         } else {
-            rebuildSchedule(ScheduleRebuildReason.ManualRebuild, existingTask.id)
+            rebuildSchedule()
         }
         val result = taskResultFor(existingTask.id)
         if (!result.scheduled) {
@@ -847,6 +852,7 @@ class PlannerCoordinator(
         continuationParentTaskId: String?,
         continuationMode: TaskContinuationMode?,
         overlapPolicy: TaskOverlapPolicy,
+        allowSplitting: Boolean = existingTask.allowSplitting,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         addReminder: Boolean,
@@ -880,6 +886,7 @@ class PlannerCoordinator(
             continuationParentTaskId = continuationParentTaskId,
             continuationMode = continuationMode,
             overlapPolicy = overlapPolicy,
+            allowSplitting = allowSplitting,
             recurrenceRule = recurrenceRule,
             estimatedMinutes = estimatedMinutes,
             schedulingMode = schedulingMode,
@@ -948,6 +955,7 @@ class PlannerCoordinator(
         continuationParentTaskId: String?,
         continuationMode: TaskContinuationMode?,
         overlapPolicy: TaskOverlapPolicy,
+        allowSplitting: Boolean = existingTask.allowSplitting,
         recurrenceRule: RecurrenceRule,
         estimatedMinutes: Int,
         schedulingMode: TaskSchedulingMode,
@@ -965,6 +973,7 @@ class PlannerCoordinator(
         continuationParentTaskId = continuationParentTaskId,
         continuationMode = continuationMode,
         overlapPolicy = overlapPolicy,
+        allowSplitting = allowSplitting,
         schedulingMode = schedulingMode,
         notBeforeAt = notBeforeAt,
         fixedStartAt = fixedStartAt,
@@ -1066,26 +1075,25 @@ class PlannerCoordinator(
         }
         val rangeStart = startAt.minus(1, ChronoUnit.DAYS)
         val rangeEnd = endAt.plus(1, ChronoUnit.DAYS)
-        val hardBusyWindows = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) +
-            repository.getBlocks()
-                .filter { it.taskId != taskId }
-                .filter { it.lockState == BlockLockState.LOCKED || it.completionState == BlockCompletionState.COMPLETED }
-                .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
         val allowConcurrent = getSettings().allowConcurrentTasks
         val otherTasksById = repository.getTasks()
             .filter { it.id != taskId }
             .associateBy { it.id }
-        val otherTaskBusyWindows = repository.getBlocks()
-            .filter { it.taskId != taskId }
-            .filter { it.lockState != BlockLockState.LOCKED && it.completionState != BlockCompletionState.COMPLETED }
-            .filter { block ->
-                val otherTask = otherTasksById[block.taskId]
-                otherTask == null || !tasksCanOverlap(task, otherTask, allowConcurrent)
-            }
-            .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
+        val hardBusyWindows = calendarGateway.syncBusyEvents(rangeStart, rangeEnd) +
+            repository.getBlocks()
+                .filter { it.taskId != taskId }
+                .filter { it.completionState == BlockCompletionState.COMPLETED }
+                .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) } +
+            repository.getBlocks()
+                .filter { it.taskId != taskId }
+                .filter { it.completionState == BlockCompletionState.PENDING }
+                .filter { block ->
+                    val otherTask = otherTasksById[block.taskId]
+                    otherTask == null || !tasksCanOverlap(task, otherTask, allowConcurrent)
+                }
+                .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
         val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
-        val overlapsOtherTask = otherTaskBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
-        if (overlapsHardBlock || overlapsOtherTask) {
+        if (overlapsHardBlock) {
             repository.replaceSchedulingIssuesForTask(
                 taskId,
                 listOf(
@@ -1093,10 +1101,7 @@ class PlannerCoordinator(
                         taskId = taskId,
                         type = SchedulingIssueType.UNSCHEDULED,
                         unscheduledMinutes = task.remainingMinutes,
-                        reason = when {
-                            overlapsHardBlock -> "This fixed time overlaps another blocked task or event."
-                            else -> "This fixed time overlaps another task."
-                        },
+                        reason = "This fixed time is blocked by another task or calendar event.",
                     ),
                 ),
             )

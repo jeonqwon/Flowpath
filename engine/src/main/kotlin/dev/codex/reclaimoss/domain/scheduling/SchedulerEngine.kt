@@ -89,22 +89,25 @@ class SchedulerEngine {
         val allTasksById = tasks.associateBy { it.id }
         val timeframesById = timeframes.associateBy { it.id }
         val tasksToSchedule = orderTasksWithDependencies(baseTasksToSchedule, activeTasksById)
-        val lockedOrCompleted = existingBlocks.filter { block ->
-            block.lockState == BlockLockState.LOCKED ||
-                block.completionState == BlockCompletionState.COMPLETED
+        val completedBlocks = existingBlocks.filter {
+            it.completionState == BlockCompletionState.COMPLETED
         }
+        val lockedPendingBlocks = existingBlocks.filter {
+            it.completionState == BlockCompletionState.PENDING &&
+                it.lockState == BlockLockState.LOCKED
+        }
+        val hardBusyWindows = (
+            busyWindows +
+                completedBlocks.map { BusyWindow(it.startAt, it.endAt) }
+            )
+            .sortedBy { it.startAt }
         val pendingBlocks = if (preserveExistingPendingBlocks) {
             existingBlocks.filter { it.completionState == BlockCompletionState.PENDING }
         } else {
             emptyList()
         }
-        val hardBusyWindows = (
-            busyWindows +
-                lockedOrCompleted.map { BusyWindow(it.startAt, it.endAt) }
-            )
-            .sortedBy { it.startAt }
         val pendingBlocksPool = pendingBlocks.toMutableList()
-        val results = lockedOrCompleted.sortedBy { it.startAt }.toMutableList()
+        val results = (completedBlocks + lockedPendingBlocks).sortedBy { it.startAt }.toMutableList()
         val unscheduled = mutableListOf<String>()
         val issues = mutableListOf<SchedulingIssue>()
 
