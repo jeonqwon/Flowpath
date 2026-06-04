@@ -2,8 +2,15 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -397,38 +404,51 @@ fun TasksScreen(
             }
         }
         Box(modifier = Modifier.fillMaxSize()) {
-            when (settings.tasksViewMode) {
-                TasksViewMode.COLLAPSED -> {
-                    LazyColumn(
-                        state = collapsedListState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(0.dp),
-                        contentPadding = PaddingValues(bottom = 260.dp),
-                    ) {
-                        items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
-                            val date = taskFeedDateForIndex(today, index)
-                            val section = buildTaskDaySection(
-                                date = date,
-                                blocks = state.snapshot.blocks,
-                                tasksById = tasksById,
-                                reminders = activeReminders,
-                                timeframes = state.snapshot.timeframes,
-                                zoneId = zoneId,
-                            )
-                            CollapsedTaskDayRow(
-                                section = section,
-                                railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
-                                onClick = {
-                                    selectedDaySummaryEpoch = section.date.toEpochDay()
-                                    showingSheet = TasksSheetType.DAY_SUMMARY
-                                },
-                            )
+            AnimatedContent(
+                targetState = settings.tasksViewMode,
+                transitionSpec = {
+                    if (targetState == TasksViewMode.EXPANDED) {
+                        (fadeIn(tween(300)) + expandVertically(tween(300), expandFrom = Alignment.Top))
+                            .togetherWith(fadeOut(tween(200)) + shrinkVertically(tween(200), shrinkTowards = Alignment.Top))
+                    } else {
+                        (fadeIn(tween(300)) + expandVertically(tween(300), expandFrom = Alignment.Bottom))
+                            .togetherWith(fadeOut(tween(200)) + shrinkVertically(tween(200), shrinkTowards = Alignment.Bottom))
+                    }
+                },
+                label = "tasks-view-mode",
+            ) { mode ->
+                when (mode) {
+                    TasksViewMode.COLLAPSED -> {
+                        LazyColumn(
+                            state = collapsedListState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
+                            contentPadding = PaddingValues(bottom = 260.dp),
+                        ) {
+                            items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
+                                val date = taskFeedDateForIndex(today, index)
+                                val section = buildTaskDaySection(
+                                    date = date,
+                                    blocks = state.snapshot.blocks,
+                                    tasksById = tasksById,
+                                    reminders = activeReminders,
+                                    timeframes = state.snapshot.timeframes,
+                                    zoneId = zoneId,
+                                )
+                                CollapsedTaskDayRow(
+                                    section = section,
+                                    railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
+                                    onClick = {
+                                        selectedDaySummaryEpoch = section.date.toEpochDay()
+                                        showingSheet = TasksSheetType.DAY_SUMMARY
+                                    },
+                                )
+                            }
                         }
                     }
-                }
-                TasksViewMode.EXPANDED -> {
-                    val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
-                    val dayHeightDp = ExpandedDayHeaderHeight + timelineHeight
+                    TasksViewMode.EXPANDED -> {
+                        val timelineHeight = timelineOffset(minutes = 24 * 60, hourHeight = hourHeight)
+                        val dayHeightDp = ExpandedDayHeaderHeight + timelineHeight
 
                     Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         // Pinned header calculations — computed before LazyColumn items for access
@@ -565,6 +585,7 @@ fun TasksScreen(
                                     top = 4.dp,
                                 ),
                         )
+                    }
                     }
                 }
             }
