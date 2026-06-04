@@ -621,14 +621,6 @@ fun TasksScreen(
                         formatter = dateFormatter,
                         reminderFormatter = reminderFormatter,
                         zoneId = zoneId,
-                        onAddTask = {
-                            showingSheet = null
-                            onAddTask()
-                        },
-                        onAddReminder = {
-                            showingSheet = null
-                            onAddReminder()
-                        },
                         onExpand = {
                             showingSheet = null
                             onSelectedDateChange(section.date)
@@ -678,129 +670,72 @@ private fun collapsedDaySummaryText(section: TaskDaySection): String = buildStri
 }
 
 @Composable
-private fun CollapsedDaySummaryCard(
-    section: TaskDaySection,
-    railMetadata: List<TimeframeRailMetadata>,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Card(
-        modifier = modifier
-            .fillMaxHeight()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = collapsedDaySummaryText(section),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-
-            val rails = orderedTimeframeRailsForDisplay(railMetadata)
-
-            if (rails.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    rails.take(3).forEach { rail ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(parseTimeframeColor(rail.colorHex).copy(alpha = 0.88f)),
-                            )
-
-                            Text(
-                                text = rail.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-
-                    val remaining = rails.size - 3
-                    if (remaining > 0) {
-                        Text(
-                            text = "+$remaining",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun CollapsedTaskDayRow(
     section: TaskDaySection,
     railMetadata: List<TimeframeRailMetadata>,
     onClick: () -> Unit,
 ) {
-    val rowHeight = 96.dp
+    val rowHeight = 88.dp
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(rowHeight),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // LEFT: timeframe rails — full-height, same logic as expanded
-        TimeframeRailStrip(
-            rails = railMetadata,
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .width(timelineRailStripWidth(railMetadata, compact = true))
-                .fillMaxHeight(),
-            compact = true,
-            segment = TimeframeRailSegment.COMPACT,
-        )
+                .fillMaxWidth()
+                .height(rowHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Timeframe rails — same max-5 lane logic, same x-position as expanded
+            TimeframeRailStrip(
+                rails = railMetadata,
+                modifier = Modifier
+                    .width(timelineRailStripWidth(railMetadata, compact = true))
+                    .fillMaxHeight(),
+                compact = true,
+                segment = TimeframeRailSegment.COMPACT,
+            )
 
-        Spacer(Modifier.width(TaskTimelineRailGap))
+            Spacer(Modifier.width(TaskTimelineRailGap))
 
-        // DATE CHIP — in the label column, outside the card
-        TimelineDateChipSlot(
-            date = section.date,
-            modifier = Modifier.fillMaxHeight(),
-        )
+            // Date chip — centered in the label column, same slot as expanded
+            TimelineDateChipSlot(
+                date = section.date,
+                modifier = Modifier.fillMaxHeight(),
+            )
 
-        // VERTICAL DIVIDER — continuous across rows
+            // Vertical divider — continuous across rows (same x, flush rows)
+            Box(
+                modifier = Modifier
+                    .width(TaskTimelineDividerWidth)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            )
+
+            Spacer(Modifier.width(12.dp))
+
+            // Content — clickable, no card wrapper
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = collapsedDaySummaryText(section),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+
+        // Horizontal divider between days
         Box(
             modifier = Modifier
-                .width(TaskTimelineDividerWidth)
-                .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        )
-
-        Spacer(Modifier.width(12.dp))
-
-        // RIGHT: summary card with padding
-        CollapsedDaySummaryCard(
-            section = section,
-            railMetadata = railMetadata,
-            modifier = Modifier
-                .weight(1f)
-                .padding(vertical = 8.dp),
-            onClick = onClick,
+                .fillMaxWidth()
+                .height(TaskTimelineDividerWidth)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         )
     }
 }
@@ -1138,8 +1073,6 @@ private fun DaySummarySheet(
     formatter: DateTimeFormatter,
     reminderFormatter: DateTimeFormatter,
     zoneId: ZoneId,
-    onAddTask: () -> Unit,
-    onAddReminder: () -> Unit,
     onExpand: () -> Unit,
     onOpenTask: (String) -> Unit,
     onOpenReminder: (Reminder) -> Unit,
@@ -1197,12 +1130,6 @@ private fun DaySummarySheet(
                     }
                 }
             }
-        }
-        FilledTonalButton(onClick = onAddTask, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-            Text("Add Task")
-        }
-        FilledTonalButton(onClick = onAddReminder, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-            Text("Add Reminder")
         }
         TextButton(onClick = onExpand, modifier = Modifier.align(Alignment.End)) {
             Text("Expand Day")
