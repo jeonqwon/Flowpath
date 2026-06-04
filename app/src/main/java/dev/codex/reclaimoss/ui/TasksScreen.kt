@@ -173,6 +173,7 @@ internal data class TimeframeRailMetadata(
     val id: String,
     val name: String,
     val colorHex: String,
+    val startDate: LocalDate,
     val laneIndex: Int,
     val continuesFromPreviousDay: Boolean,
     val continuesIntoNextDay: Boolean,
@@ -238,6 +239,7 @@ internal fun buildTimeframeRailMetadata(
             id = timeframe.id,
             name = timeframe.name,
             colorHex = timeframe.colorHex,
+            startDate = timeframe.startDate,
             laneIndex = index,
             continuesFromPreviousDay = timeframe.id in previousIds,
             continuesIntoNextDay = timeframe.id in nextIds,
@@ -247,6 +249,7 @@ internal fun buildTimeframeRailMetadata(
 
 private const val TaskFeedDayCount = 20001
 private const val TaskFeedCenterIndex = TaskFeedDayCount / 2
+private const val MaxOverlappingTimeframeRails = 5
 private val ExpandedStickyHeaderMinHeight = 26.dp
 private val ExpandedDayHeaderHeight = 44.dp
 private val TaskTimelineLabelWidth = 52.dp
@@ -549,7 +552,7 @@ fun TasksScreen(
                                 .align(Alignment.TopStart)
                                 .zIndex(20f)
                                 .padding(
-                                    start = timelineRailStripWidth(pinnedRailMetadata, compact = false) + TaskTimelineRailGap,
+                                    start = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap,
                                     top = 4.dp,
                                 ),
                         )
@@ -736,7 +739,9 @@ private fun PinnedExpandedTimelineHeader(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .offset { IntOffset(0, datePushOffsetPx) },
+                .offset { IntOffset(0, datePushOffsetPx) }
+                .width(TaskTimelineLabelWidth),
+            contentAlignment = Alignment.Center,
         ) {
             DateChip(text = compactStickyDateText(date))
         }
@@ -774,7 +779,10 @@ private fun ExpandedTimelineDayHeader(
     ) {
         if (!hideDateChip) {
             Row(
-                modifier = Modifier.padding(start = TaskTimelineContentInset),
+                modifier = Modifier
+                    .padding(start = TaskTimelineContentInset)
+                    .width(TaskTimelineLabelWidth),
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DateChip(text = compactStickyDateText(date))
@@ -858,7 +866,31 @@ internal fun stickyTimeframeHeaderText(rails: List<TimeframeRailMetadata>): Stri
 
 private fun timelineRailStripWidth(rails: List<TimeframeRailMetadata>, compact: Boolean): Dp {
     val railWidth = if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth
-    return railWidth * rails.size.coerceAtLeast(1)
+    val laneCount = if (compact) {
+        rails.size.coerceIn(1, MaxOverlappingTimeframeRails)
+    } else {
+        MaxOverlappingTimeframeRails
+    }
+    return railWidth * laneCount
+}
+
+private fun maxTimelineRailStripWidth(compact: Boolean): Dp {
+    val railWidth = if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth
+    return railWidth * MaxOverlappingTimeframeRails
+}
+
+private fun orderedTimeframeRailsForDisplay(
+    rails: List<TimeframeRailMetadata>,
+): List<TimeframeRailMetadata> {
+    return rails
+        .distinctBy { it.id }
+        .sortedWith(
+            compareBy<TimeframeRailMetadata> { it.startDate }
+                .thenBy { it.name }
+                .thenBy { it.id }
+        )
+        .take(MaxOverlappingTimeframeRails)
+        .asReversed()
 }
 
 @Composable
@@ -868,14 +900,22 @@ private fun TimeframeRailStrip(
     compact: Boolean,
     segment: TimeframeRailSegment = TimeframeRailSegment.COMPACT,
 ) {
-    val visible = if (rails.isEmpty()) listOf<TimeframeRailMetadata?>(null) else rails.map { it }
+    val railWidth = if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth
+    val orderedRails = orderedTimeframeRailsForDisplay(rails)
+    val visible: List<TimeframeRailMetadata?> =
+        if (orderedRails.isEmpty()) {
+            List(if (compact) 1 else MaxOverlappingTimeframeRails) { null }
+        } else {
+            val blanks = List((MaxOverlappingTimeframeRails - orderedRails.size).coerceAtLeast(0)) { null }
+            blanks + orderedRails
+        }
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         visible.forEach { rail ->
             if (rail == null) {
-                Spacer(Modifier.width(if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth))
+                Spacer(Modifier.width(railWidth))
             } else {
                 val color = parseTimeframeColor(rail.colorHex)
                 val topConnected = when (segment) {
@@ -897,7 +937,7 @@ private fun TimeframeRailStrip(
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .width(if (compact) TaskTimelineCompactRailWidth else TaskTimelineExpandedRailWidth)
+                        .width(railWidth)
                         .clip(shape)
                         .background(color.copy(alpha = 0.88f)),
                 )
