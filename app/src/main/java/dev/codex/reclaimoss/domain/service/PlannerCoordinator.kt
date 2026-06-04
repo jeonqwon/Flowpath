@@ -74,6 +74,7 @@ private data class TaskEditSnapshot(
 )
 
 private const val DEFAULT_MAX_TASK_CHUNK_MINUTES = 120
+private const val MaxOverlappingTimeframes = 5
 
 class PlannerCoordinator(
     private val repository: PlannerRepository,
@@ -170,8 +171,6 @@ class PlannerCoordinator(
             createdTaskIds.forEach { taskId ->
                 placeExactTask(taskId)
             }
-        } else if (createdTaskIds.size == 1) {
-            scheduleTask(createdTaskIds.first())
         } else {
             rebuildSchedule()
         }
@@ -1381,7 +1380,7 @@ class PlannerCoordinator(
                     !date.isBefore(timeframe.startDate) &&
                     !date.isAfter(timeframe.endDate)
             }
-            if (overlapCount >= 4) return true
+            if (overlapCount >= MaxOverlappingTimeframes) return true
             date = date.plusDays(1)
         }
         return false

@@ -185,6 +185,7 @@ fun CreateWorkScreen(
     timeframes: List<Timeframe>,
     availableTasks: List<ScheduleTask>,
     allowConcurrentTasks: Boolean,
+    defaultTaskSplitting: Boolean = true,
     currentTaskId: String? = null,
     sessionKey: Int,
     initialTaskDraft: TaskDraft? = null,
@@ -209,6 +210,7 @@ fun CreateWorkScreen(
                     it.continuationParentTaskId ?: "",
                     it.continuationMode?.name ?: "",
                     it.overlapPolicy.name,
+                    it.allowSplitting,
                     it.deadline.toString(),
                     it.schedulingMode.name,
                     it.hasWindow,
@@ -235,19 +237,20 @@ fun CreateWorkScreen(
                     continuationParentTaskId = (saved[6] as String).ifBlank { null },
                     continuationMode = (saved[7] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
                     overlapPolicy = TaskOverlapPolicy.valueOf(saved[8] as String),
-                    deadline = LocalDateTime.parse(saved[9] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[10] as String),
-                    hasWindow = saved[11] as Boolean,
-                    startDate = (saved[12] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[13] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[14] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[15] as String),
-                    repeatsForever = saved[16] as Boolean,
-                    estimatedMinutes = saved[17] as Int,
-                    addReminder = saved[18] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[19] as String),
-                    recurrenceInterval = saved[20] as Int,
-                    recurrenceDays = (saved[21] as String)
+                    allowSplitting = saved[9] as Boolean,
+                    deadline = LocalDateTime.parse(saved[10] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[11] as String),
+                    hasWindow = saved[12] as Boolean,
+                    startDate = (saved[13] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[14] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[15] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[16] as String),
+                    repeatsForever = saved[17] as Boolean,
+                    estimatedMinutes = saved[18] as Int,
+                    addReminder = saved[19] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[20] as String),
+                    recurrenceInterval = saved[21] as Int,
+                    recurrenceDays = (saved[22] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -258,7 +261,10 @@ fun CreateWorkScreen(
         ),
     ) {
         mutableStateOf(
-            (initialTaskDraft ?: defaultCreateTaskDraft(allowConcurrentTasks = allowConcurrentTasks))
+            (initialTaskDraft ?: defaultCreateTaskDraft(
+                    allowConcurrentTasks = allowConcurrentTasks,
+                    defaultTaskSplitting = defaultTaskSplitting,
+                ))
                 .resolvedOverlapPolicy(allowConcurrentTasks),
         )
     }

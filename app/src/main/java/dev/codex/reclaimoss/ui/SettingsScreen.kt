@@ -157,6 +157,7 @@ fun SettingsScreen(
     onTasksViewModeChanged: (TasksViewMode) -> Unit,
     onBreakBufferChanged: (Int) -> Unit,
     onAllowTaskSplittingChanged: (Boolean) -> Unit,
+    onDefaultTaskSplittingChanged: (Boolean) -> Unit = {},
     onAllowConcurrentTasksChanged: (Boolean) -> Unit,
     onDefaultTaskReminderChanged: (Boolean) -> Unit,
     onReminderTimingModeChanged: (ReminderTimingMode) -> Unit,
@@ -316,6 +317,11 @@ fun SettingsScreen(
                                 title = "Allow task splitting",
                                 checked = settings.allowTaskSplitting,
                                 onCheckedChange = onAllowTaskSplittingChanged,
+                            )
+                            SettingsInlineSwitchRow(
+                                title = "Default task splitting",
+                                checked = settings.defaultTaskSplitting,
+                                onCheckedChange = onDefaultTaskSplittingChanged,
                             )
                             SettingsInlineSwitchRow(
                                 title = "Allow concurrent tasks",

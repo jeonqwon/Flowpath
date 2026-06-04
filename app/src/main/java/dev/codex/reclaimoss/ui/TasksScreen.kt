@@ -365,6 +365,12 @@ fun TasksScreen(
             ) {
                 IconButton(
                     onClick = {
+                        val visibleIndex = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) {
+                            collapsedListState.firstVisibleItemIndex
+                        } else {
+                            expandedListState.firstVisibleItemIndex
+                        }
+                        onSelectedDateChange(taskFeedDateForIndex(today, visibleIndex))
                         onTasksViewModeChanged(
                             if (settings.tasksViewMode == TasksViewMode.COLLAPSED) TasksViewMode.EXPANDED else TasksViewMode.COLLAPSED,
                         )
@@ -698,11 +704,12 @@ private fun CollapsedTaskDayRow(
 ) {
     val rowHeight = 88.dp
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(rowHeight),
+                .height(rowHeight)
+                .clickable(onClick = onClick),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Timeframe rails — same max-5 lane logic, same x-position as expanded
@@ -733,14 +740,13 @@ private fun CollapsedTaskDayRow(
 
             Spacer(Modifier.width(12.dp))
 
-            // Content — clickable, no card wrapper
-            Column(
+            // Content — no card wrapper, just text
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clickable(onClick = onClick)
                     .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.Center,
+                contentAlignment = Alignment.CenterStart,
             ) {
                 Text(
                     text = collapsedDaySummaryText(section),
@@ -751,10 +757,12 @@ private fun CollapsedTaskDayRow(
             }
         }
 
-        // Horizontal divider between days
+        // Horizontal divider — only in content area to preserve continuous timeline
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .align(Alignment.BottomEnd)
+                .widthIn(min = 0.dp)
+                .fillMaxWidth(1f)
                 .height(TaskTimelineDividerWidth)
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         )
