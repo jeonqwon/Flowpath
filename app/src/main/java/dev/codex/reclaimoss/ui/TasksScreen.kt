@@ -402,7 +402,7 @@ fun TasksScreen(
                     LazyColumn(
                         state = collapsedListState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
                         contentPadding = PaddingValues(bottom = 260.dp),
                     ) {
                         items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
@@ -671,80 +671,76 @@ private fun activeRailIdsForDate(
 ): Set<String> =
     railMetadataForDate(timeframes, date).map { it.id }.toSet()
 
+private fun collapsedDaySummaryText(section: TaskDaySection): String = buildString {
+    append(if (section.taskCount == 1) "1 task" else "${section.taskCount} tasks")
+    append(" · ")
+    append(if (section.reminderCount == 1) "1 reminder" else "${section.reminderCount} reminders")
+}
+
 @Composable
-private fun CollapsedTaskDayRow(
+private fun CollapsedDaySummaryCard(
     section: TaskDaySection,
     railMetadata: List<TimeframeRailMetadata>,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 76.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Card(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        // LEFT COLUMN — timeline label area (matches expanded layout)
-        // Timeframe rails — same max-5 lane logic as expanded
-        TimeframeRailStrip(
-            rails = railMetadata,
+        Column(
             modifier = Modifier
-                .width(timelineRailStripWidth(railMetadata, compact = true))
-                .height(40.dp),
-            compact = true,
-            segment = TimeframeRailSegment.COMPACT,
-        )
-
-        Spacer(Modifier.width(TaskTimelineRailGap))
-
-        // Date chip outside the card — same slot as expanded pinned header
-        TimelineDateChipSlot(date = section.date)
-
-        // Vertical divider — same position as expanded
-        Box(
-            modifier = Modifier
-                .width(TaskTimelineDividerWidth)
-                .height(32.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        )
-
-        Spacer(Modifier.width(10.dp))
-
-        // RIGHT COLUMN — card with task/reminder summary only (no date)
-        Card(
-            modifier = Modifier
-                .weight(1f)
-                .clickable(onClick = onClick),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.Center,
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    collapsedDaySummaryText(section),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (section.timeframes.isNotEmpty()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        section.timeframes.forEach { tf ->
+            Text(
+                text = collapsedDaySummaryText(section),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+
+            val rails = orderedTimeframeRailsForDisplay(railMetadata)
+
+            if (rails.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    rails.take(3).forEach { rail ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(parseTimeframeColor(tf.colorHex).copy(alpha = 0.88f)),
+                                    .size(7.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(parseTimeframeColor(rail.colorHex).copy(alpha = 0.88f)),
+                            )
+
+                            Text(
+                                text = rail.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    }
+
+                    val remaining = rails.size - 3
+                    if (remaining > 0) {
                         Text(
-                            section.timeframes.joinToString(", ") { it.name },
+                            text = "+$remaining",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -755,10 +751,58 @@ private fun CollapsedTaskDayRow(
     }
 }
 
-private fun collapsedDaySummaryText(section: TaskDaySection): String = buildString {
-    append(if (section.taskCount == 1) "1 task" else "${section.taskCount} tasks")
-    append(" Â· ")
-    append(if (section.reminderCount == 1) "1 reminder" else "${section.reminderCount} reminders")
+@Composable
+private fun CollapsedTaskDayRow(
+    section: TaskDaySection,
+    railMetadata: List<TimeframeRailMetadata>,
+    onClick: () -> Unit,
+) {
+    val rowHeight = 96.dp
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(rowHeight),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // LEFT: timeframe rails — full-height, same logic as expanded
+        TimeframeRailStrip(
+            rails = railMetadata,
+            modifier = Modifier
+                .width(timelineRailStripWidth(railMetadata, compact = true))
+                .fillMaxHeight(),
+            compact = true,
+            segment = TimeframeRailSegment.COMPACT,
+        )
+
+        Spacer(Modifier.width(TaskTimelineRailGap))
+
+        // DATE CHIP — in the label column, outside the card
+        TimelineDateChipSlot(
+            date = section.date,
+            modifier = Modifier.fillMaxHeight(),
+        )
+
+        // VERTICAL DIVIDER — continuous across rows
+        Box(
+            modifier = Modifier
+                .width(TaskTimelineDividerWidth)
+                .fillMaxHeight()
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        )
+
+        Spacer(Modifier.width(12.dp))
+
+        // RIGHT: summary card with padding
+        CollapsedDaySummaryCard(
+            section = section,
+            railMetadata = railMetadata,
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 8.dp),
+            onClick = onClick,
+        )
+    }
 }
 
 @Composable
