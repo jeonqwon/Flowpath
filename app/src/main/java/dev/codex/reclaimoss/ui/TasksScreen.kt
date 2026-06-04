@@ -2,6 +2,8 @@ package dev.codex.reclaimoss.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -85,6 +87,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -432,6 +435,7 @@ fun TasksScreen(
                     Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         // Pinned header calculations — computed before LazyColumn items for access
                         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
+                        val snapThresholdPx = 2
                         val pinnedHeaderInfo by remember {
                             derivedStateOf {
                                 val infos = expandedListState.layoutInfo.visibleItemsInfo
@@ -441,10 +445,18 @@ fun TasksScreen(
                                     val first = infos.first()
                                     val currentIndex = first.index.coerceIn(0, TaskFeedDayCount - 1)
                                     val next = infos.firstOrNull { it.index > currentIndex }
-                                    val pushPx = if (next != null && next.offset < headerHeightPx) {
-                                        (next.offset - headerHeightPx).coerceIn(-headerHeightPx, 0)
-                                    } else 0
-                                    currentIndex to pushPx
+                                    if (next != null && next.offset <= snapThresholdPx) {
+                                        next.index.coerceIn(0, TaskFeedDayCount - 1) to 0
+                                    } else if (next != null && next.offset < headerHeightPx) {
+                                        val raw = next.offset - headerHeightPx
+                                        if (raw <= -headerHeightPx + snapThresholdPx) {
+                                            next.index.coerceIn(0, TaskFeedDayCount - 1) to 0
+                                        } else {
+                                            currentIndex to raw
+                                        }
+                                    } else {
+                                        currentIndex to 0
+                                    }
                                 }
                             }
                         }
@@ -457,20 +469,21 @@ fun TasksScreen(
                         val pinnedActiveRails = remember(pinnedRailMetadata) {
                             orderedTimeframeRailsForDisplay(pinnedRailMetadata)
                         }
-                        val pinnedActiveRailIds = pinnedActiveRails.map { it.id }.toSet()
-                        val timeframePushOffsetPx by remember(pinnedActiveRailIds, headerHeightPx) {
+                        val timeframePushOffsetsById by remember(
+                            expandedListState, state.snapshot.timeframes, pinnedActiveRails, headerHeightPx, today,
+                        ) {
                             derivedStateOf {
-                                if (pinnedActiveRailIds.isEmpty()) 0
-                                else {
+                                pinnedActiveRails.associate { rail ->
                                     val infos = expandedListState.layoutInfo.visibleItemsInfo
                                     val boundary = infos.firstOrNull { item ->
                                         val itemDate = taskFeedDateForIndex(today, item.index)
-                                        val itemIds = activeRailIdsForDate(state.snapshot.timeframes, itemDate)
-                                        itemIds != pinnedActiveRailIds
+                                        val ids = activeRailIdsForDate(state.snapshot.timeframes, itemDate)
+                                        rail.id !in ids
                                     }
-                                    if (boundary != null && boundary.offset < headerHeightPx) {
+                                    val pushPx = if (boundary != null && boundary.offset < headerHeightPx) {
                                         (boundary.offset - headerHeightPx).coerceIn(-headerHeightPx, 0)
                                     } else 0
+                                    rail.id to pushPx
                                 }
                             }
                         }
@@ -545,7 +558,7 @@ fun TasksScreen(
                             date = pinnedDate,
                             activeRails = pinnedActiveRails,
                             datePushOffsetPx = datePushOffsetPx,
-                            timeframePushOffsetPx = timeframePushOffsetPx,
+                            timeframePushOffsetsById = timeframePushOffsetsById,
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .zIndex(20f)
@@ -734,7 +747,7 @@ private fun PinnedExpandedTimelineHeader(
     date: LocalDate,
     activeRails: List<TimeframeRailMetadata>,
     datePushOffsetPx: Int,
-    timeframePushOffsetPx: Int,
+    timeframePushOffsetsById: Map<String, Int>,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -745,7 +758,7 @@ private fun PinnedExpandedTimelineHeader(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = ExpandedDayHeaderHeight),
+            .height(ExpandedDayHeaderHeight),
     ) {
         TimelineDateChipSlot(
             date = date,
@@ -754,19 +767,33 @@ private fun PinnedExpandedTimelineHeader(
                 .offset { IntOffset(0, datePushOffsetPx) },
         )
 
-        if (activeRails.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset { IntOffset(x = chipStartPx, y = timeframePushOffsetPx) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                activeRails.forEachIndexed { index, rail ->
-                    if (index > 0) Spacer(Modifier.width(TaskTimelineContentInset))
-                    TimeframeNameChip(
-                        text = rail.name,
-                        borderColor = parseTimeframeColor(rail.colorHex),
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset { IntOffset(chipStartPx, 0) }
+                .animateContentSize(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            activeRails.forEachIndexed { index, rail ->
+                key(rail.id) {
+                    val yTarget = timeframePushOffsetsById[rail.id] ?: 0
+                    val animatedY by animateIntAsState(
+                        targetValue = yTarget,
+                        label = "chip-y-${rail.id}",
                     )
+
+                    Box(
+                        modifier = Modifier.offset { IntOffset(0, animatedY) },
+                    ) {
+                        TimeframeNameChip(
+                            text = rail.name,
+                            borderColor = parseTimeframeColor(rail.colorHex),
+                        )
+                    }
+
+                    if (index < activeRails.lastIndex) {
+                        Spacer(Modifier.width(TaskTimelineContentInset))
+                    }
                 }
             }
         }
