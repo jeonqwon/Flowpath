@@ -13,8 +13,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -96,7 +97,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -111,11 +111,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -173,7 +170,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal data class TaskDaySection(
@@ -960,16 +956,6 @@ private fun ExpandedTaskOverlay(
     val isScrolling = listState.isScrollInProgress
     val scrollingState by rememberUpdatedState(isScrolling)
     val onOpenState by rememberUpdatedState(onOpenTask)
-    var lastScrollTimeMillis by remember { mutableLongStateOf(0L) }
-
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { scrolling ->
-                if (scrolling) {
-                    lastScrollTimeMillis = System.currentTimeMillis()
-                }
-            }
-    }
 
     BoxWithConstraints(
         modifier = modifier,
@@ -1113,9 +1099,7 @@ private fun ExpandedTaskOverlay(
                     showTitle = false,
                     useTapGesture = true,
                     isScrollInProgress = scrollingState,
-                    lastScrollTimeMillis = lastScrollTimeMillis,
-                    onDragBy = { deltaY ->
-                        lastScrollTimeMillis = System.currentTimeMillis()
+                    onScrollBy = { deltaY ->
                         listState.dispatchRawDelta(-deltaY)
                     },
                 )
@@ -1810,12 +1794,10 @@ fun FullDayTaskBlock(
     stickyTitleOffset: Dp = 0.dp,
     useTapGesture: Boolean = false,
     isScrollInProgress: Boolean = false,
-    lastScrollTimeMillis: Long = 0L,
-    onDragBy: ((Float) -> Unit)? = null,
+    onScrollBy: ((Float) -> Unit)? = null,
 ) {
     val block = positionedBlock.segment.block
     val density = LocalDensity.current
-    val viewConfiguration = LocalViewConfiguration.current
     val start = block.startAt.atZone(zoneId).toLocalTime()
     val topExtension = if (renderContinuesFromPrevious) TaskTimelineBoundaryOverlap else 0.dp
     val bottomExtension = if (renderContinuesIntoNext) TaskTimelineBoundaryOverlap else 0.dp
@@ -1843,44 +1825,21 @@ fun FullDayTaskBlock(
         .zIndex(1f)
     val scrolling by rememberUpdatedState(isScrollInProgress)
     val tapCallback by rememberUpdatedState(onOpen)
-    val dragCallback by rememberUpdatedState(onDragBy)
-    val recentScrollTime by rememberUpdatedState(lastScrollTimeMillis)
-    val dragStartThresholdPx = maxOf(viewConfiguration.touchSlop, with(density) { 10.dp.toPx() })
-    val tapSlopPx = with(density) { 6.dp.toPx() }
+    val scrollCallback by rememberUpdatedState(onScrollBy)
+    val cardScrollableState = rememberScrollableState { delta ->
+        scrollCallback?.invoke(delta)
+        delta
+    }
     val positionedModifier = if (useTapGesture) {
-        cardModifier.then(
-            Modifier.pointerInput(dragStartThresholdPx, tapSlopPx, scrolling, dragCallback, recentScrollTime) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val startPosition = down.position
-                    var previousPosition = down.position
-                    var dragging = false
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        val currentPosition = change.position
-                        val deltaY = currentPosition.y - previousPosition.y
-                        val distance = (currentPosition - startPosition).getDistance()
-                        val deltaFromStartY = currentPosition.y - startPosition.y
-                        if (!dragging && (abs(deltaFromStartY) >= dragStartThresholdPx || distance >= tapSlopPx)) {
-                            dragging = true
-                        }
-                        if (dragging) {
-                            dragCallback?.invoke(deltaY)
-                            change.consume()
-                        }
-                        previousPosition = currentPosition
-                        if (change.changedToUpIgnoreConsumed()) {
-                            val recentlyScrolled = System.currentTimeMillis() - recentScrollTime < 250L
-                            if (!dragging && distance < tapSlopPx && !scrolling && !recentlyScrolled) {
-                                tapCallback()
-                            }
-                            break
-                        }
-                    }
-                }
-            }
-        )
+        cardModifier
+            .scrollable(
+                state = cardScrollableState,
+                orientation = Orientation.Vertical,
+            )
+            .clickable(
+                enabled = !scrolling,
+                onClick = { if (!scrolling) tapCallback() },
+            )
     } else {
         cardModifier.clickable(
             enabled = !scrolling,
