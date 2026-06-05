@@ -166,13 +166,13 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var tasksSelectedDateEpochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var tasksScrollOffset by rememberSaveable { mutableStateOf(0) }
-    var tasksAutoPositionNonce by rememberSaveable { mutableStateOf(1) }
+    var shouldAutoPositionTasksToNow by remember { mutableStateOf(true) }
     val pagerState = rememberPagerState(initialPage = selectedTab.ordinal, pageCount = { AppTab.entries.size })
     val sharedSelectedDate = LocalDate.ofEpochDay(tasksSelectedDateEpochDay)
     val onSharedDateChange: (LocalDate) -> Unit = { newDate ->
         tasksSelectedDateEpochDay = newDate.toEpochDay()
         tasksScrollOffset = 0
-        tasksAutoPositionNonce += 1
+        shouldAutoPositionTasksToNow = false
     }
 
     LaunchedEffect(Unit) {
@@ -581,7 +581,14 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     settings = state.settings,
                     isActive = selectedTab == AppTab.Tasks,
                     selectedDate = sharedSelectedDate,
+                    selectedDateScrollOffset = tasksScrollOffset,
+                    autoScrollToNow = shouldAutoPositionTasksToNow,
+                    onAutoScrollToNowConsumed = { shouldAutoPositionTasksToNow = false },
                     onSelectedDateChange = onSharedDateChange,
+                    onScrollPositionChange = { date, offset ->
+                        tasksSelectedDateEpochDay = date.toEpochDay()
+                        tasksScrollOffset = offset
+                    },
                     onTasksViewModeChanged = { value -> scope.launch { viewModel.setTasksViewMode(value) } },
                     onAddTask = {
                         followUpSourceTaskId = null

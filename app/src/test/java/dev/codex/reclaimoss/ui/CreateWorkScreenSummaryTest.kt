@@ -244,6 +244,67 @@ class CreateWorkScreenSummaryTest {
     }
 
     @Test
+    fun `window slider range uses start to end for normal windows`() {
+        val range = windowSliderRange(
+            start = LocalTime.of(18, 0),
+            end = LocalTime.of(21, 0),
+            overnight = false,
+        )
+
+        assertEquals(18 * 60f, range.start)
+        assertEquals(21 * 60f, range.endInclusive)
+    }
+
+    @Test
+    fun `window slider range uses end to start for overnight windows`() {
+        val range = windowSliderRange(
+            start = LocalTime.of(22, 0),
+            end = LocalTime.of(2, 0),
+            overnight = true,
+        )
+
+        assertEquals(2 * 60f, range.start)
+        assertEquals(22 * 60f, range.endInclusive)
+    }
+
+    @Test
+    fun `overnight slider range maps left handle to end and right handle to start`() {
+        val (start, end) = windowTimesFromSliderRange(
+            range = (2 * 60f)..(22 * 60f),
+            overnight = true,
+        )
+
+        assertEquals(LocalTime.of(22, 0), start)
+        assertEquals(LocalTime.of(2, 0), end)
+    }
+
+    @Test
+    fun `normal window slider enforces minimum duration between handles`() {
+        val range = coerceWindowSliderRange(
+            rawRange = (18 * 60f)..((18 * 60f) + 30f),
+            previousRange = (18 * 60f)..(21 * 60f),
+            overnight = false,
+            minimumWindowMinutes = 60,
+        )
+
+        assertEquals(18 * 60f, range.start)
+        assertEquals(19 * 60f, range.endInclusive)
+    }
+
+    @Test
+    fun `overnight window slider enforces minimum duration outside handles`() {
+        val range = coerceWindowSliderRange(
+            rawRange = 0f..(22 * 60f),
+            previousRange = (2 * 60f)..(22 * 60f),
+            overnight = true,
+            minimumWindowMinutes = 600,
+        )
+
+        assertEquals(8 * 60f, range.start)
+        assertEquals(22 * 60f, range.endInclusive)
+    }
+
+    @Test
     fun `task repeat summary reflects weekly recurrence`() {
         val summary = withLocale(Locale.US) {
             taskRepeatSummary(

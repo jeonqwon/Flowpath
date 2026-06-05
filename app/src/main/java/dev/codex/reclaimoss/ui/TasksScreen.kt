@@ -300,6 +300,8 @@ private const val MaxOverlappingTimeframeRails = 5
 private val ExpandedDayHeaderHeight = 48.dp
 private val ExpandedDayHeaderTopInset = 10.dp
 private val ExpandedDateChipSlotHeight = 30.dp
+private val ExpandedDateChipAboveMidnightOffset = 38.dp
+private val ExpandedTaskStickyTitleTopInset = 8.dp
 private val TimeframeHeaderChipVerticalAdjustment = 2.dp
 private val TimeframeHeaderChipMaxWidth = 96.dp
 private val TimeframeHeaderChipSlotStep = 38.dp
@@ -325,7 +327,11 @@ fun TasksScreen(
     settings: AppSettings,
     isActive: Boolean,
     selectedDate: LocalDate,
+    selectedDateScrollOffset: Int,
+    autoScrollToNow: Boolean,
+    onAutoScrollToNowConsumed: () -> Unit,
     onSelectedDateChange: (LocalDate) -> Unit,
+    onScrollPositionChange: (LocalDate, Int) -> Unit,
     onTasksViewModeChanged: (TasksViewMode) -> Unit,
     onAddTask: () -> Unit,
     onAddReminder: () -> Unit,
@@ -337,8 +343,15 @@ fun TasksScreen(
     val today = remember(zoneId) { LocalDate.now(zoneId) }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val collapsedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
-    val expandedListState = rememberLazyListState(initialFirstVisibleItemIndex = taskFeedIndexForDate(today, selectedDate))
+    val initialTaskFeedIndex = taskFeedIndexForDate(today, selectedDate)
+    val collapsedListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialTaskFeedIndex,
+        initialFirstVisibleItemScrollOffset = selectedDateScrollOffset,
+    )
+    val expandedListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialTaskFeedIndex,
+        initialFirstVisibleItemScrollOffset = selectedDateScrollOffset,
+    )
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
     val activeReminders = remember(state.snapshot.reminders) { state.snapshot.reminders.filter { it.status != ReminderStatus.COMPLETED } }
     val dateFormatter = remember(settings.dateFormatPreference) {
@@ -364,25 +377,40 @@ fun TasksScreen(
 
     LaunchedEffect(isActive, settings.tasksViewMode) {
         if (!isActive) return@LaunchedEffect
+        if (autoScrollToNow) return@LaunchedEffect
         when (settings.tasksViewMode) {
             TasksViewMode.COLLAPSED -> {
-                collapsedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
+                collapsedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate), selectedDateScrollOffset)
             }
             TasksViewMode.EXPANDED -> {
-                expandedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate))
+                expandedListState.scrollToItem(taskFeedIndexForDate(today, selectedDate), selectedDateScrollOffset)
             }
         }
+    }
+    LaunchedEffect(isActive, settings.tasksViewMode, autoScrollToNow, hourHeight) {
+        if (!isActive || !autoScrollToNow) return@LaunchedEffect
+        val targetIndex = taskFeedIndexForDate(today, today)
+        val offsetPx = if (settings.tasksViewMode == TasksViewMode.EXPANDED) {
+            with(density) {
+                val nowMinutes = minutesFromStart(LocalTime.now(zoneId))
+                val scrollMinutes = (nowMinutes - 60).coerceAtLeast(0)
+                timelineOffset(scrollMinutes, hourHeight).roundToPx()
+            }
+        } else {
+            0
+        }
+        val listState = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
+        listState.scrollToItem(targetIndex, offsetPx)
+        onAutoScrollToNowConsumed()
     }
     LaunchedEffect(isActive, settings.tasksViewMode, collapsedListState, expandedListState) {
         if (!isActive) return@LaunchedEffect
         val stateToWatch = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) collapsedListState else expandedListState
-        snapshotFlow { stateToWatch.firstVisibleItemIndex }
-            .collect { index ->
-                onSelectedDateChange(
-                    when (settings.tasksViewMode) {
-                        TasksViewMode.COLLAPSED -> taskFeedDateForIndex(today, index)
-                        TasksViewMode.EXPANDED -> taskFeedDateForIndex(today, index)
-                    },
+        snapshotFlow { stateToWatch.firstVisibleItemIndex to stateToWatch.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                onScrollPositionChange(
+                    taskFeedDateForIndex(today, index),
+                    offset,
                 )
             }
     }
@@ -406,15 +434,31 @@ fun TasksScreen(
             ) {
                 IconButton(
                     onClick = {
-                        val visibleIndex = if (settings.tasksViewMode == TasksViewMode.COLLAPSED) {
-                            collapsedListState.firstVisibleItemIndex
-                        } else {
-                            expandedListState.firstVisibleItemIndex
+                        when (settings.tasksViewMode) {
+                            TasksViewMode.COLLAPSED -> {
+                                val targetIndex = collapsedListState.firstVisibleItemIndex
+                                val targetDate = taskFeedDateForIndex(today, targetIndex)
+                                val expandedDate = taskFeedDateForIndex(today, expandedListState.firstVisibleItemIndex)
+                                val expandedOffset = if (expandedDate == targetDate) {
+                                    expandedListState.firstVisibleItemScrollOffset
+                                } else {
+                                    0
+                                }
+                                if (expandedDate != targetDate) {
+                                    scope.launch {
+                                        expandedListState.scrollToItem(targetIndex, 0)
+                                    }
+                                }
+                                onScrollPositionChange(targetDate, expandedOffset)
+                                onTasksViewModeChanged(TasksViewMode.EXPANDED)
+                            }
+                            TasksViewMode.EXPANDED -> {
+                                val targetIndex = expandedListState.firstVisibleItemIndex
+                                val targetDate = taskFeedDateForIndex(today, targetIndex)
+                                onScrollPositionChange(targetDate, 0)
+                                onTasksViewModeChanged(TasksViewMode.COLLAPSED)
+                            }
                         }
-                        onSelectedDateChange(taskFeedDateForIndex(today, visibleIndex))
-                        onTasksViewModeChanged(
-                            if (settings.tasksViewMode == TasksViewMode.COLLAPSED) TasksViewMode.EXPANDED else TasksViewMode.COLLAPSED,
-                        )
                     },
                 ) {
                     Icon(
@@ -524,21 +568,24 @@ fun TasksScreen(
                         }
                         val stickyHeaderTopPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
                         val dateChipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+                        val dateChipAboveMidnightOffsetPx = with(density) { ExpandedDateChipAboveMidnightOffset.roundToPx() }
                         val headerDateChipOffsets by remember(
                             expandedListState,
                             pinnedDayIndex,
                             incomingDayIndex,
                             stickyHeaderTopPx,
                             dateChipHeightPx,
+                            dateChipAboveMidnightOffsetPx,
                         ) {
                             derivedStateOf {
                                 val visibleItems = expandedListState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
                                 fun chipYForIndex(index: Int): Int? {
                                     val position = visibleItems.indexOfFirst { it.index == index }
                                     if (position < 0) return null
+                                    val nextOffsetPx = visibleItems.getOrNull(position + 1)?.offset ?: Int.MAX_VALUE
                                     return resolveExpandedDateChipY(
-                                        bodyOffsetPx = visibleItems[position].offset,
-                                        nextBodyOffsetPx = visibleItems.getOrNull(position + 1)?.offset ?: Int.MAX_VALUE,
+                                        bodyOffsetPx = visibleItems[position].offset - dateChipAboveMidnightOffsetPx,
+                                        nextBodyOffsetPx = nextOffsetPx - dateChipAboveMidnightOffsetPx,
                                         stickyYPx = stickyHeaderTopPx,
                                         chipHeightPx = dateChipHeightPx,
                                     )
@@ -609,7 +656,7 @@ fun TasksScreen(
                                                 hourHeight = hourHeight,
                                                 allowConcurrentTasks = settings.allowConcurrentTasks,
                                                 showTaskCards = false,
-                                                showMidnightLabel = false,
+                                                showMidnightLabel = true,
                                                 drawVerticalDivider = false,
                                                 onOpenTask = onOpenTask,
                                                 onDeleteTask = onDeleteTask,
@@ -633,6 +680,16 @@ fun TasksScreen(
                                     .align(Alignment.TopStart)
                                     .fillMaxSize()
                                     .zIndex(10f),
+                            )
+                            ExpandedNowIndicatorOverlay(
+                                listState = expandedListState,
+                                today = today,
+                                zoneId = zoneId,
+                                hourHeight = hourHeight,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .fillMaxSize()
+                                    .zIndex(20f),
                             )
 
                             Box(
@@ -1071,12 +1128,6 @@ private fun ExpandedTaskOverlay(
                 val laneWidth = (contentWidth - laneGap * (laneCount - 1)) / laneCount
                 val laneXOffset = contentStart + (laneWidth + laneGap) * fragment.laneIndex
                 val titleReservePx = with(density) { 88.dp.roundToPx() }
-                val visibleTopInsideCardPx =
-                    (-absoluteYPx).coerceAtLeast(0)
-                val maxTitleOffsetPx =
-                    (heightPx - titleReservePx).coerceAtLeast(0)
-                val stickyTitleOffsetPx =
-                    visibleTopInsideCardPx.coerceIn(0, maxTitleOffsetPx)
                 val titleTopInsetPx = with(density) {
                     if (fragment.segment.continuesFromPreviousDay || absoluteYPx < 0) {
                         6.dp.roundToPx()
@@ -1084,6 +1135,14 @@ private fun ExpandedTaskOverlay(
                         14.dp.roundToPx()
                     }
                 }
+                val stickyTitleMinYPx = with(density) {
+                    (ExpandedDayHeaderHeight + ExpandedTaskStickyTitleTopInset).roundToPx()
+                }
+                val titleNaturalYPx = absoluteYPx + titleTopInsetPx
+                val titleMaxYPx = absoluteYPx + (heightPx - titleReservePx).coerceAtLeast(0) + titleTopInsetPx
+                val stickyTitleYPx = titleNaturalYPx
+                    .coerceAtLeast(stickyTitleMinYPx)
+                    .coerceAtMost(titleMaxYPx)
                 FullDayTaskBlock(
                     positionedBlock = PositionedTaskBlock(fragment.segment, fragment.laneIndex, fragment.totalLanes),
                     task = tasksById[block.taskId],
@@ -1107,7 +1166,7 @@ private fun ExpandedTaskOverlay(
                     StickyOverlayTaskTitle(
                         title = tasksById[block.taskId]?.title ?: block.taskId,
                         xOffset = laneXOffset + 18.dp,
-                        yOffset = with(density) { absoluteYPx.toDp() } + with(density) { stickyTitleOffsetPx.toDp() } + with(density) { titleTopInsetPx.toDp() },
+                        yOffset = with(density) { stickyTitleYPx.toDp() },
                         width = (laneWidth - 36.dp).coerceAtLeast(0.dp),
                     )
                 }
@@ -1198,14 +1257,15 @@ private fun ExpandedTimelineDateOverlay(
     }
     val stickyYPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
     val chipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+    val dateChipAboveMidnightOffsetPx = with(density) { ExpandedDateChipAboveMidnightOffset.roundToPx() }
     val visibleItems = listState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
 
     Box(modifier = modifier.clipToBounds()) {
         visibleItems.forEachIndexed { position, item ->
             val nextOffsetPx = visibleItems.getOrNull(position + 1)?.offset ?: Int.MAX_VALUE
             val chipYPx = resolveExpandedDateChipY(
-                bodyOffsetPx = item.offset,
-                nextBodyOffsetPx = nextOffsetPx,
+                bodyOffsetPx = item.offset - dateChipAboveMidnightOffsetPx,
+                nextBodyOffsetPx = nextOffsetPx - dateChipAboveMidnightOffsetPx,
                 stickyYPx = stickyYPx,
                 chipHeightPx = chipHeightPx,
             )
@@ -1217,6 +1277,42 @@ private fun ExpandedTimelineDateOverlay(
                     .height(ExpandedDateChipSlotHeight),
             )
         }
+    }
+}
+
+@Composable
+private fun ExpandedNowIndicatorOverlay(
+    listState: LazyListState,
+    today: LocalDate,
+    zoneId: ZoneId,
+    hourHeight: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val todayIndex = taskFeedIndexForDate(today, today)
+    val todayItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == todayIndex } ?: return
+    val now = remember(zoneId) { LocalTime.now(zoneId) }
+    val nowTop = with(density) { todayItem.offset.toDp() } +
+        timelineOffset(minutes = minutesFromStart(now), hourHeight = hourHeight)
+    val railStripOffset = maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap
+    val lineStart = railStripOffset + TaskTimelineLabelWidth
+
+    Box(modifier = modifier.clipToBounds()) {
+        Box(
+            modifier = Modifier
+                .offset(x = lineStart - 13.dp, y = nowTop - 7.dp)
+                .size(14.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = lineStart)
+                .height(2.dp)
+                .offset(y = nowTop)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)),
+        )
     }
 }
 

@@ -7,6 +7,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,6 +76,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -95,10 +97,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -985,17 +989,6 @@ fun DailyWindowConfigurator(
 
     if (hasWindow) {
         val overnight = endsNextDay
-        val durationMinutes = windowDurationMinutes(startTime, endTime, overnight)
-        val startLabel = startTime.formatHourLabel()
-        val endLabel = endTime.formatHourLabel()
-
-        Text(
-            "$startLabel – $endLabel${if (overnight) " next day" else ""} · ${durationMinutes / 60}h ${durationMinutes % 60}m",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1016,29 +1009,12 @@ fun DailyWindowConfigurator(
             )
         }
 
-        TimeOfDaySliderRow(
-            title = "Start",
-            time = startTime,
-            onTimeChanged = { newStart ->
-                val adjustedEnd = if (!overnight && newStart >= endTime) {
-                    newStart.plusMinutes(minimumWindowMinutes.toLong())
-                } else {
-                    endTime
-                }
-                if (windowSupportsDuration(newStart, adjustedEnd, overnight, minimumWindowMinutes)) {
-                    onWindowChanged(newStart, adjustedEnd, overnight)
-                }
-            },
-        )
-
-        TimeOfDaySliderRow(
-            title = "End",
-            time = endTime,
-            onTimeChanged = { newEnd ->
-                if (windowSupportsDuration(startTime, newEnd, overnight, minimumWindowMinutes)) {
-                    onWindowChanged(startTime, newEnd, overnight)
-                }
-            },
+        DailyWindowRangeSlider(
+            startTime = startTime,
+            endTime = endTime,
+            overnight = overnight,
+            minimumWindowMinutes = minimumWindowMinutes,
+            onWindowChanged = onWindowChanged,
         )
 
         Row(
@@ -1075,6 +1051,107 @@ fun DailyWindowConfigurator(
         }
     }
     footerContent()
+}
+
+@Composable
+private fun DailyWindowRangeSlider(
+    startTime: LocalTime,
+    endTime: LocalTime,
+    overnight: Boolean,
+    minimumWindowMinutes: Int,
+    onWindowChanged: (LocalTime, LocalTime, Boolean) -> Unit,
+) {
+    val sliderRange = windowSliderRange(startTime, endTime, overnight)
+    val inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+    val activeTrackColor = MaterialTheme.colorScheme.primary
+    val trackStrokeWidth = with(LocalDensity.current) { 6.dp.toPx() }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp),
+                    ) {
+                        val y = size.height / 2f
+                        val sliderMax = WindowSliderMaxMinutes.toFloat()
+                        val startX = (sliderRange.start / sliderMax) * size.width
+                        val endX = (sliderRange.endInclusive / sliderMax) * size.width
+                        drawLine(
+                            color = inactiveTrackColor,
+                            start = Offset(0f, y),
+                            end = Offset(size.width, y),
+                            strokeWidth = trackStrokeWidth,
+                            cap = StrokeCap.Round,
+                        )
+                        if (overnight) {
+                            drawLine(
+                                color = activeTrackColor,
+                                start = Offset(0f, y),
+                                end = Offset(startX, y),
+                                strokeWidth = trackStrokeWidth,
+                                cap = StrokeCap.Round,
+                            )
+                            drawLine(
+                                color = activeTrackColor,
+                                start = Offset(endX, y),
+                                end = Offset(size.width, y),
+                                strokeWidth = trackStrokeWidth,
+                                cap = StrokeCap.Round,
+                            )
+                        } else {
+                            drawLine(
+                                color = activeTrackColor,
+                                start = Offset(startX, y),
+                                end = Offset(endX, y),
+                                strokeWidth = trackStrokeWidth,
+                                cap = StrokeCap.Round,
+                            )
+                        }
+                    }
+                    RangeSlider(
+                        value = sliderRange,
+                        onValueChange = { rawRange ->
+                            val coercedRange = coerceWindowSliderRange(
+                                rawRange = rawRange,
+                                previousRange = sliderRange,
+                                overnight = overnight,
+                                minimumWindowMinutes = minimumWindowMinutes,
+                            )
+                            val (newStart, newEnd) = windowTimesFromSliderRange(coercedRange, overnight)
+                            onWindowChanged(newStart, newEnd, overnight)
+                        },
+                        valueRange = 0f..WindowSliderMaxMinutes.toFloat(),
+                        steps = WindowSliderStepCount,
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = Color.Transparent,
+                            inactiveTrackColor = Color.Transparent,
+                            activeTickColor = Color.Transparent,
+                            inactiveTickColor = Color.Transparent,
+                        ),
+                    )
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf("12a", "6a", "12p", "6p", "12a").forEach { label ->
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1128,19 +1205,16 @@ private fun adjustedWindowForOvernightToggle(
     enableOvernight: Boolean,
     minimumWindowMinutes: Int,
 ): Pair<LocalTime, LocalTime> {
-    if (windowSupportsDuration(startTime, endTime, enableOvernight, minimumWindowMinutes)) {
-        return startTime to endTime
-    }
-    return if (!enableOvernight && endTime <= startTime) {
-        val fallbackEnd = startTime.plusMinutes(minimumWindowMinutes.toLong())
-        if (fallbackEnd.isAfter(startTime) && !fallbackEnd.isAfter(LocalTime.of(23, 59))) {
-            startTime to fallbackEnd
-        } else {
-            startTime to LocalTime.of(23, 59)
-        }
-    } else {
-        startTime to endTime
-    }
+    val physicalRange = listOf(minutesFromStart(startTime), minutesFromStart(endTime))
+        .sorted()
+        .let { it[0].toFloat()..it[1].toFloat() }
+    val adjustedRange = coerceWindowSliderRange(
+        rawRange = physicalRange,
+        previousRange = physicalRange,
+        overnight = enableOvernight,
+        minimumWindowMinutes = minimumWindowMinutes,
+    )
+    return windowTimesFromSliderRange(adjustedRange, enableOvernight)
 }
 
 @Composable
@@ -1897,9 +1971,11 @@ fun DateTimePickerCard(
     ) {
         Column(
             Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(if (label.isBlank()) 0.dp else 4.dp),
         ) {
-            Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (label.isNotBlank()) {
+                Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Text(
                 value,
                 style = MaterialTheme.typography.titleMedium,
@@ -2375,7 +2451,7 @@ private fun WindowTimeField(
     ) {
         TaskSectionTitle(title)
         DateTimePickerCard(
-            label = "Time",
+            label = "",
             value = timeLabel,
             modifier = Modifier.fillMaxWidth(),
             onClick = {
@@ -2575,6 +2651,10 @@ data class WindowSliderState(
     val endsNextDay: Boolean,
 )
 
+private const val WindowSliderStepMinutes = 15
+private const val WindowSliderMaxMinutes = (24 * 60) - WindowSliderStepMinutes
+private const val WindowSliderStepCount = (WindowSliderMaxMinutes / WindowSliderStepMinutes) - 1
+
 fun windowSliderState(
     start: LocalTime,
     end: LocalTime,
@@ -2587,6 +2667,75 @@ fun windowSliderState(
         endMinutes = rawEndMinutes,
         endsNextDay = overnight,
     )
+}
+
+fun windowSliderRange(
+    start: LocalTime,
+    end: LocalTime,
+    overnight: Boolean,
+): ClosedFloatingPointRange<Float> {
+    val startMinutes = minutesFromStart(start)
+    val endMinutes = minutesFromStart(end)
+    return if (overnight) {
+        endMinutes.coerceAtMost(startMinutes).toFloat()..startMinutes.coerceAtLeast(endMinutes).toFloat()
+    } else {
+        startMinutes.toFloat()..endMinutes.coerceAtLeast(startMinutes).toFloat()
+    }
+}
+
+fun coerceWindowSliderRange(
+    rawRange: ClosedFloatingPointRange<Float>,
+    previousRange: ClosedFloatingPointRange<Float>,
+    overnight: Boolean,
+    minimumWindowMinutes: Int,
+): ClosedFloatingPointRange<Float> {
+    val effectiveMinimum = minimumWindowMinutes
+        .coerceIn(WindowSliderStepMinutes, WindowSliderMaxMinutes)
+    val rawStart = snapToStepForCreate(rawRange.start.roundToInt(), WindowSliderStepMinutes)
+        .coerceIn(0, WindowSliderMaxMinutes)
+    val rawEnd = snapToStepForCreate(rawRange.endInclusive.roundToInt(), WindowSliderStepMinutes)
+        .coerceIn(0, WindowSliderMaxMinutes)
+    var start = rawStart.coerceAtMost(rawEnd)
+    var end = rawEnd.coerceAtLeast(rawStart)
+    val movedStart = kotlin.math.abs(rawRange.start - previousRange.start) >
+        kotlin.math.abs(rawRange.endInclusive - previousRange.endInclusive)
+
+    if (overnight) {
+        val maxGapBetweenHandles = ((24 * 60) - effectiveMinimum).coerceAtLeast(0)
+        if (end - start > maxGapBetweenHandles) {
+            if (movedStart) {
+                start = (end - maxGapBetweenHandles).coerceAtLeast(0)
+            } else {
+                end = (start + maxGapBetweenHandles).coerceAtMost(WindowSliderMaxMinutes)
+            }
+        }
+    } else if (end - start < effectiveMinimum) {
+        if (movedStart) {
+            start = (end - effectiveMinimum).coerceAtLeast(0)
+        } else {
+            end = (start + effectiveMinimum).coerceAtMost(WindowSliderMaxMinutes)
+        }
+        if (end - start < effectiveMinimum) {
+            start = (end - effectiveMinimum).coerceAtLeast(0)
+        }
+    }
+
+    return start.toFloat()..end.toFloat()
+}
+
+fun windowTimesFromSliderRange(
+    range: ClosedFloatingPointRange<Float>,
+    overnight: Boolean,
+): Pair<LocalTime, LocalTime> {
+    val lower = snapToStepForCreate(range.start.roundToInt(), WindowSliderStepMinutes)
+        .coerceIn(0, WindowSliderMaxMinutes)
+    val upper = snapToStepForCreate(range.endInclusive.roundToInt(), WindowSliderStepMinutes)
+        .coerceIn(0, WindowSliderMaxMinutes)
+    return if (overnight) {
+        sliderMinutesToLocalTime(upper) to sliderMinutesToLocalTime(lower)
+    } else {
+        sliderMinutesToLocalTime(lower) to sliderMinutesToLocalTime(upper)
+    }
 }
 
 fun sliderTimesFromRange(
