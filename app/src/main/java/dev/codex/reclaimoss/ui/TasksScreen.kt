@@ -230,6 +230,11 @@ private data class ExpandedOverlayFragment(
     val dayOffsetPx: Int,
 )
 
+private data class HeaderChipVerticalOffsets(
+    val outgoingDateYPx: Int,
+    val incomingDateYPx: Int?,
+)
+
 data class VisibleTaskSegment(
     val block: ScheduleBlock,
     val continuesFromPreviousDay: Boolean,
@@ -296,11 +301,11 @@ internal fun buildTimeframeRailMetadata(
 private const val TaskFeedDayCount = 20001
 private const val TaskFeedCenterIndex = TaskFeedDayCount / 2
 private const val MaxOverlappingTimeframeRails = 5
-private val ExpandedStickyHeaderMinHeight = 26.dp
-private val ExpandedDayHeaderHeight = 66.dp
+private val ExpandedDayHeaderHeight = 48.dp
 private val ExpandedDayHeaderTopInset = 10.dp
-private val TimeframeHeaderChipSlotWidth = 78.dp
-private val TimeframeHeaderChipSlotGap = 2.dp
+private val ExpandedDateChipSlotHeight = 30.dp
+private val TimeframeHeaderChipMaxWidth = 96.dp
+private val TimeframeHeaderChipSlotStep = 38.dp
 private val TaskTimelineLabelWidth = 52.dp
 private val TaskTimelineContentInset = 6.dp
 private val TaskTimelineCompactRailWidth = 2.dp
@@ -520,6 +525,34 @@ fun TasksScreen(
                         val incomingRailMetadata = remember(incomingDate, state.snapshot.timeframes) {
                             incomingDate?.let { railMetadataForDate(state.snapshot.timeframes, it) }
                         }
+                        val stickyHeaderTopPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
+                        val dateChipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+                        val headerDateChipOffsets by remember(
+                            expandedListState,
+                            pinnedDayIndex,
+                            incomingDayIndex,
+                            stickyHeaderTopPx,
+                            dateChipHeightPx,
+                        ) {
+                            derivedStateOf {
+                                val visibleItems = expandedListState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
+                                fun chipYForIndex(index: Int): Int? {
+                                    val position = visibleItems.indexOfFirst { it.index == index }
+                                    if (position < 0) return null
+                                    return resolveExpandedDateChipY(
+                                        bodyOffsetPx = visibleItems[position].offset,
+                                        nextBodyOffsetPx = visibleItems.getOrNull(position + 1)?.offset ?: Int.MAX_VALUE,
+                                        stickyYPx = stickyHeaderTopPx,
+                                        chipHeightPx = dateChipHeightPx,
+                                    )
+                                }
+
+                                HeaderChipVerticalOffsets(
+                                    outgoingDateYPx = chipYForIndex(pinnedDayIndex) ?: stickyHeaderTopPx,
+                                    incomingDateYPx = incomingDayIndex?.let { chipYForIndex(it) },
+                                )
+                            }
+                        }
                         val timeframeChipPlacements = remember(
                             pinnedRailMetadata,
                             incomingRailMetadata,
@@ -585,12 +618,6 @@ fun TasksScreen(
                                                 onDeleteTask = onDeleteTask,
                                             )
 
-                                            ExpandedTimelineDayBoundaryLabel(
-                                                date = date,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopStart)
-                                                    .zIndex(4f),
-                                            )
                                         }
                                     }
                                 }
@@ -621,13 +648,20 @@ fun TasksScreen(
                                     .zIndex(30f),
                             ) {
                                 PinnedExpandedTimelineHeader(
-                                    date = pinnedDate,
-                                    incomingDate = incomingDate,
                                     timeframePlacements = timeframeChipPlacements,
-                                    progress = headerTransition.progress,
+                                    outgoingDateYPx = headerDateChipOffsets.outgoingDateYPx,
+                                    incomingDateYPx = headerDateChipOffsets.incomingDateYPx,
                                     modifier = Modifier,
                                 )
                             }
+                            ExpandedTimelineDateOverlay(
+                                listState = expandedListState,
+                                today = today,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .fillMaxSize()
+                                    .zIndex(40f),
+                            )
                         }
                     }
                 }
@@ -1120,71 +1154,33 @@ private fun StickyOverlayTaskTitle(
 
 @Composable
 private fun PinnedExpandedTimelineHeader(
-    date: LocalDate,
-    incomingDate: LocalDate?,
     timeframePlacements: List<TimeframeChipPlacement>,
-    progress: Float,
+    outgoingDateYPx: Int,
+    incomingDateYPx: Int?,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val railStripOffsetPx = with(density) {
-        (maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap).roundToPx()
-    }
     val headerTopInsetPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
-    val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
     val chipStartPx = with(density) {
         (maxTimelineRailStripWidth(compact = false) +
             TaskTimelineRailGap +
             TaskTimelineLabelWidth +
             TaskTimelineContentInset).roundToPx()
     }
-    val chipStridePx = with(density) {
-        (TimeframeHeaderChipSlotWidth + TimeframeHeaderChipSlotGap).roundToPx()
-    }
-    val activeProgress = if (incomingDate != null) progress.coerceIn(0f, 1f) else 0f
-    val outgoingDateYPx = headerTopInsetPx - (headerHeightPx * activeProgress).roundToInt()
-    val incomingDateYPx = headerHeightPx - ((headerHeightPx - headerTopInsetPx) * activeProgress).roundToInt()
+    val chipStridePx = with(density) { TimeframeHeaderChipSlotStep.roundToPx() }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(ExpandedDayHeaderHeight),
     ) {
-        TimelineDateChipSlot(
-            date = date,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset {
-                    IntOffset(
-                        railStripOffsetPx,
-                        outgoingDateYPx,
-                    )
-                },
-        )
-
-        if (incomingDate != null) {
-            TimelineDateChipSlot(
-                date = incomingDate,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset {
-                        IntOffset(
-                            railStripOffsetPx,
-                            incomingDateYPx,
-                        )
-                    },
-            )
-        }
-
         timeframePlacements.forEach { placement ->
             val slotProgress = placement.progress.coerceIn(0f, 1f)
             val slot = placement.fromSlot + ((placement.toSlot - placement.fromSlot) * slotProgress)
             val chipOffsetY = when (placement.motion) {
                 StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
-                StickyHeaderTimeframeChipMotion.EXITING ->
-                    headerTopInsetPx - (headerHeightPx * slotProgress).roundToInt()
-                StickyHeaderTimeframeChipMotion.ENTERING ->
-                    headerHeightPx - ((headerHeightPx - headerTopInsetPx) * slotProgress).roundToInt()
+                StickyHeaderTimeframeChipMotion.EXITING -> outgoingDateYPx
+                StickyHeaderTimeframeChipMotion.ENTERING -> incomingDateYPx ?: outgoingDateYPx
             }
             TimeframeNameChip(
                 text = placement.name,
@@ -1197,22 +1193,55 @@ private fun PinnedExpandedTimelineHeader(
                             chipOffsetY,
                         )
                     }
-                    .widthIn(max = TimeframeHeaderChipSlotWidth),
+                    .zIndex(1f)
+                    .widthIn(max = TimeframeHeaderChipMaxWidth),
             )
         }
     }
 }
 
 @Composable
-private fun ExpandedTimelineDayBoundaryLabel(
-    date: LocalDate,
+private fun ExpandedTimelineDateOverlay(
+    listState: LazyListState,
+    today: LocalDate,
     modifier: Modifier = Modifier,
 ) {
-    TimelineDateChipSlot(
-        date = date,
-        modifier = modifier
-            .height(ExpandedStickyHeaderMinHeight),
-    )
+    val density = LocalDensity.current
+    val railStripOffsetPx = with(density) {
+        (maxTimelineRailStripWidth(compact = false) + TaskTimelineRailGap).roundToPx()
+    }
+    val stickyYPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
+    val chipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+    val visibleItems = listState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
+
+    Box(modifier = modifier.clipToBounds()) {
+        visibleItems.forEachIndexed { position, item ->
+            val nextOffsetPx = visibleItems.getOrNull(position + 1)?.offset ?: Int.MAX_VALUE
+            val chipYPx = resolveExpandedDateChipY(
+                bodyOffsetPx = item.offset,
+                nextBodyOffsetPx = nextOffsetPx,
+                stickyYPx = stickyYPx,
+                chipHeightPx = chipHeightPx,
+            )
+            TimelineDateChipSlot(
+                date = taskFeedDateForIndex(today, item.index),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset { IntOffset(railStripOffsetPx, chipYPx) }
+                    .height(ExpandedDateChipSlotHeight),
+            )
+        }
+    }
+}
+
+internal fun resolveExpandedDateChipY(
+    bodyOffsetPx: Int,
+    nextBodyOffsetPx: Int,
+    stickyYPx: Int,
+    chipHeightPx: Int,
+): Int {
+    val pinnedY = bodyOffsetPx.coerceAtLeast(stickyYPx)
+    return pinnedY.coerceAtMost(nextBodyOffsetPx - chipHeightPx)
 }
 
 @Composable

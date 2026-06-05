@@ -408,6 +408,45 @@ class TasksScreenLayoutTest {
     }
 
     @Test
+    fun `expanded date chip stays in timestamp gutter before reaching sticky bar`() {
+        assertEquals(
+            120,
+            resolveExpandedDateChipY(
+                bodyOffsetPx = 120,
+                nextBodyOffsetPx = 1000,
+                stickyYPx = 10,
+                chipHeightPx = 30,
+            ),
+        )
+    }
+
+    @Test
+    fun `expanded date chip pins at sticky bar after boundary scrolls past`() {
+        assertEquals(
+            10,
+            resolveExpandedDateChipY(
+                bodyOffsetPx = -400,
+                nextBodyOffsetPx = 1000,
+                stickyYPx = 10,
+                chipHeightPx = 30,
+            ),
+        )
+    }
+
+    @Test
+    fun `expanded date chip is pushed away by next boundary chip`() {
+        assertEquals(
+            -5,
+            resolveExpandedDateChipY(
+                bodyOffsetPx = -900,
+                nextBodyOffsetPx = 25,
+                stickyYPx = 10,
+                chipHeightPx = 30,
+            ),
+        )
+    }
+
+    @Test
     fun `continuing timeframe placement stays vertically pinned`() {
         val placements = buildTimeframeChipPlacements(
             currentRails = listOf(testRail("tf-1", "Sprint")),
