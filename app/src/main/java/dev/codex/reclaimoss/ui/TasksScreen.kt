@@ -304,6 +304,7 @@ private const val MaxOverlappingTimeframeRails = 5
 private val ExpandedDayHeaderHeight = 48.dp
 private val ExpandedDayHeaderTopInset = 10.dp
 private val ExpandedDateChipSlotHeight = 30.dp
+private val TimeframeHeaderChipVerticalAdjustment = 2.dp
 private val TimeframeHeaderChipMaxWidth = 96.dp
 private val TimeframeHeaderChipSlotStep = 38.dp
 private val TaskTimelineLabelWidth = 52.dp
@@ -1161,6 +1162,7 @@ private fun PinnedExpandedTimelineHeader(
 ) {
     val density = LocalDensity.current
     val headerTopInsetPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
+    val timeframeVerticalAdjustmentPx = with(density) { TimeframeHeaderChipVerticalAdjustment.roundToPx() }
     val chipStartPx = with(density) {
         (maxTimelineRailStripWidth(compact = false) +
             TaskTimelineRailGap +
@@ -1181,7 +1183,7 @@ private fun PinnedExpandedTimelineHeader(
                 StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
                 StickyHeaderTimeframeChipMotion.EXITING -> outgoingDateYPx
                 StickyHeaderTimeframeChipMotion.ENTERING -> incomingDateYPx ?: outgoingDateYPx
-            }
+            } + timeframeVerticalAdjustmentPx
             TimeframeNameChip(
                 text = placement.name,
                 borderColor = parseTimeframeColor(placement.colorHex),
