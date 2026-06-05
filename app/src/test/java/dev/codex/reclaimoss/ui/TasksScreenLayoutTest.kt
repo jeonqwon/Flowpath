@@ -278,7 +278,7 @@ class TasksScreenLayoutTest {
     }
 
     @Test
-    fun `expanded task segments anchor overnight block only on its start day`() {
+    fun `expanded task segments split overnight block across both days`() {
         val zoneId = ZoneId.of("America/New_York")
         val block = scheduleBlock(
             startAt = Instant.parse("2026-06-02T02:00:00Z"),
@@ -298,7 +298,13 @@ class TasksScreenLayoutTest {
 
         assertEquals(1, firstDay.size)
         assertEquals(true, firstDay.single().continuesIntoNextDay)
-        assertEquals(emptyList<VisibleTaskSegment>(), secondDay)
+        assertEquals("2026-06-02T02:00:00Z", firstDay.single().block.startAt.toString())
+        assertEquals("2026-06-02T04:00:00Z", firstDay.single().block.endAt.toString())
+
+        assertEquals(1, secondDay.size)
+        assertEquals(true, secondDay.single().continuesFromPreviousDay)
+        assertEquals("2026-06-02T04:00:00Z", secondDay.single().block.startAt.toString())
+        assertEquals("2026-06-02T10:00:00Z", secondDay.single().block.endAt.toString())
     }
 
     @Test
@@ -361,6 +367,140 @@ class TasksScreenLayoutTest {
             stickyTimeframeHeaderLabels(metadata),
         )
     }
+
+    @Test
+    fun `expanded header handoff moves forward into next day`() {
+        val transition = resolveExpandedHeaderTransition(
+            scrollPx = 940,
+            dayHeightPx = 1000,
+            maxIndex = 20,
+        )
+
+        assertEquals(0, transition.pinnedDayIndex)
+        assertEquals(1, transition.incomingDayIndex)
+        assertEquals(0.4f, transition.progress, 0.001f)
+    }
+
+    @Test
+    fun `expanded header handoff mirrors when reversed before boundary`() {
+        val transition = resolveExpandedHeaderTransition(
+            scrollPx = 999,
+            dayHeightPx = 1000,
+            maxIndex = 20,
+        )
+
+        assertEquals(0, transition.pinnedDayIndex)
+        assertEquals(1, transition.incomingDayIndex)
+        assertEquals(0.99f, transition.progress, 0.001f)
+    }
+
+    @Test
+    fun `expanded header handoff snaps after transition completes`() {
+        val transition = resolveExpandedHeaderTransition(
+            scrollPx = 1000,
+            dayHeightPx = 1000,
+            maxIndex = 20,
+        )
+
+        assertEquals(1, transition.pinnedDayIndex)
+        assertEquals(null, transition.incomingDayIndex)
+        assertEquals(0f, transition.progress, 0.001f)
+    }
+
+    @Test
+    fun `continuing timeframe placement stays vertically pinned`() {
+        val placements = buildTimeframeChipPlacements(
+            currentRails = listOf(testRail("tf-1", "Sprint")),
+            incomingRails = listOf(testRail("tf-1", "Sprint")),
+            progress = 0.75f,
+        )
+
+        assertEquals(StickyHeaderTimeframeChipMotion.PINNED, placements.single().motion)
+        assertEquals(0, placements.single().fromSlot)
+        assertEquals(0, placements.single().toSlot)
+        assertEquals(0.75f, placements.single().progress, 0.001f)
+    }
+
+    @Test
+    fun `ending timeframe placement exits upward`() {
+        val placements = buildTimeframeChipPlacements(
+            currentRails = listOf(testRail("tf-1", "Sprint")),
+            incomingRails = emptyList(),
+            progress = 0.5f,
+        )
+
+        assertEquals(StickyHeaderTimeframeChipMotion.EXITING, placements.single().motion)
+        assertEquals(0, placements.single().fromSlot)
+        assertEquals(0, placements.single().toSlot)
+        assertEquals(0.5f, placements.single().progress, 0.001f)
+    }
+
+    @Test
+    fun `starting timeframe placement enters from below`() {
+        val placements = buildTimeframeChipPlacements(
+            currentRails = emptyList(),
+            incomingRails = listOf(testRail("tf-2", "Exams")),
+            progress = 0.25f,
+        )
+
+        assertEquals(
+            TimeframeChipPlacement(
+                id = "tf-2",
+                name = "Exams",
+                colorHex = "#F4B6D2",
+                motion = StickyHeaderTimeframeChipMotion.ENTERING,
+                fromSlot = 0,
+                toSlot = 0,
+                progress = 0.25f,
+            ),
+            placements.single(),
+        )
+    }
+
+    @Test
+    fun `continuing timeframe shifts left when an earlier timeframe ends`() {
+        val current = listOf(
+            testRail("tf-1", "Sprint"),
+            testRail("tf-2", "Finals"),
+            testRail("tf-3", "Reading"),
+        )
+        val incoming = listOf(
+            testRail("tf-1", "Sprint"),
+            testRail("tf-3", "Reading"),
+        )
+
+        val placements = buildTimeframeChipPlacements(
+            currentRails = current,
+            incomingRails = incoming,
+            progress = 0.5f,
+        )
+
+        assertEquals(
+            TimeframeChipPlacement(
+                id = "tf-3",
+                name = "Reading",
+                colorHex = "#F4B6D2",
+                motion = StickyHeaderTimeframeChipMotion.PINNED,
+                fromSlot = 2,
+                toSlot = 1,
+                progress = 0.5f,
+            ),
+            placements.single { it.id == "tf-3" },
+        )
+    }
+
+    private fun testRail(
+        id: String,
+        name: String,
+    ) = TimeframeRailMetadata(
+        id = id,
+        name = name,
+        colorHex = "#F4B6D2",
+        startDate = LocalDate.of(2026, 5, 18),
+        laneIndex = 0,
+        continuesFromPreviousDay = true,
+        continuesIntoNextDay = true,
+    )
 
     private fun scheduleBlock(
         id: String = "block-1",
