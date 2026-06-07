@@ -313,10 +313,33 @@ class SchedulerEngine {
         }
 
         return SchedulePlan(
-            blocks = results.sortedBy { it.startAt },
+            blocks = coalesceAdjacentTaskBlocks(results).sortedBy { it.startAt },
             unscheduledTaskIds = unscheduled.distinct(),
             issues = issues,
         )
+    }
+
+    private fun coalesceAdjacentTaskBlocks(blocks: List<ScheduleBlock>): List<ScheduleBlock> {
+        if (blocks.size < 2) return blocks
+        val merged = mutableListOf<ScheduleBlock>()
+        blocks.sortedWith(compareBy<ScheduleBlock> { it.taskId }.thenBy { it.startAt }).forEach { block ->
+            val previous = merged.lastOrNull()
+            if (previous != null &&
+                previous.taskId == block.taskId &&
+                previous.endAt == block.startAt &&
+                previous.source == BlockSource.AUTO &&
+                block.source == BlockSource.AUTO &&
+                previous.lockState == BlockLockState.FLEXIBLE &&
+                block.lockState == BlockLockState.FLEXIBLE &&
+                previous.completionState == BlockCompletionState.PENDING &&
+                block.completionState == BlockCompletionState.PENDING
+            ) {
+                merged[merged.lastIndex] = previous.copy(endAt = block.endAt)
+            } else {
+                merged += block
+            }
+        }
+        return merged
     }
 
     private fun blockCanStayScheduled(
@@ -443,11 +466,7 @@ class SchedulerEngine {
                 for (segment in freeSegments) {
                     val capacity = Duration.between(segment.startAt, segment.endAt).toMinutes().toInt()
                     if (capacity < policy.minBlockMinutes) continue
-                    if (matchesPreference(segment, zoneId, preferredTimePeriodId, timePeriods)) {
-                        preferredSegments += segment
-                    } else {
-                        fallbackSegments += segment
-                    }
+                    preferredSegments += segment
                 }
             }
             val effectiveAllowSplitting = policy.allowTaskSplitting && task.allowSplitting
@@ -499,6 +518,7 @@ class SchedulerEngine {
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
                         allowTaskSplitting = effectiveAllowSplitting,
+                        breakBetweenBlocksMinutes = policy.breakBetweenBlocksMinutes,
                     )
                 }
                 preferredCandidate?.let { return it }
@@ -522,6 +542,7 @@ class SchedulerEngine {
                         zoneId = zoneId,
                         alignmentMinutes = policy.alignmentMinutes,
                         allowTaskSplitting = effectiveAllowSplitting,
+                        breakBetweenBlocksMinutes = policy.breakBetweenBlocksMinutes,
                     )
                 }
             }
@@ -563,6 +584,7 @@ class SchedulerEngine {
         zoneId: ZoneId,
         alignmentMinutes: Int,
         allowTaskSplitting: Boolean,
+        breakBetweenBlocksMinutes: Int,
     ): BusyWindow? {
         firstOrNull { segment ->
             val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
@@ -581,9 +603,16 @@ class SchedulerEngine {
             Duration.between(alignedStart, segment.endAt).toMinutes().toInt() >= preferredBlockMinutes
         }?.let { segment ->
             val alignedStart = alignToNextAlignment(segment.startAt, zoneId, alignmentMinutes)
+            val available = Duration.between(alignedStart, segment.endAt).toMinutes().toInt()
+            val leftover = available - preferredBlockMinutes - breakBetweenBlocksMinutes
+            val effectiveMinutes = if (leftover > 0 && leftover < minBlockMinutes) {
+                available.coerceAtMost(remainingMinutes)
+            } else {
+                preferredBlockMinutes
+            }
             return BusyWindow(
                 startAt = alignedStart,
-                endAt = alignedStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
+                endAt = alignedStart.plus(effectiveMinutes.toLong(), ChronoUnit.MINUTES),
             )
         }
         firstOrNull { segment ->
@@ -715,12 +744,6 @@ class SchedulerEngine {
             else -> current
         }
 
-    private fun matchesPreference(
-        segment: BusyWindow,
-        zoneId: ZoneId,
-        preferredTimePeriodId: String?,
-        timePeriods: List<TimePeriod>,
-    ): Boolean = true
 
     private fun subtractBusy(
         start: Instant,
@@ -945,18 +968,13 @@ class SchedulerEngine {
     private fun maxInstant(a: Instant, b: Instant): Instant = if (a >= b) a else b
 
     private fun alignToNextAlignment(instant: Instant, zoneId: ZoneId, alignmentMinutes: Int): Instant {
-        val local = instant.atZone(zoneId)
+        if (alignmentMinutes == 0) return instant
+        val local = instant.atZone(zoneId).truncatedTo(ChronoUnit.MINUTES)
         val minute = local.minute
-        val hasSubMinute = local.second != 0 || local.nano != 0
         val effectiveAlignment = alignmentMinutes.coerceAtLeast(1)
         val remainder = minute % effectiveAlignment
-        val minutesToAdd = when {
-            remainder == 0 && !hasSubMinute -> 0
-            remainder == 0 -> effectiveAlignment
-            else -> effectiveAlignment - remainder
-        }
+        val minutesToAdd = if (remainder == 0) 0 else effectiveAlignment - remainder
         return local
-            .truncatedTo(ChronoUnit.MINUTES)
             .plusMinutes(minutesToAdd.toLong())
             .toInstant()
     }

@@ -10,6 +10,7 @@ node_modules/
 test-results/
 stitch_preview/data/
 *.log
+app/*.log
 *.png
 engine/build/
 .kotlin/

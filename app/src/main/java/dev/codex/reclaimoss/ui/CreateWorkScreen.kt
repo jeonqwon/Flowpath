@@ -3,7 +3,10 @@ package dev.codex.reclaimoss.ui
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.NumberPicker
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -198,6 +201,7 @@ fun CreateWorkScreen(
     rescheduleMode: Boolean = false,
     onBack: () -> Unit,
     onSaveTask: (TaskDraft) -> Unit,
+    isSaving: Boolean = false,
 ) {
     val context = LocalContext.current
     var taskDraft by rememberSaveable(
@@ -272,6 +276,7 @@ fun CreateWorkScreen(
                 .resolvedOverlapPolicy(allowConcurrentTasks),
         )
     }
+    var showAdvancedOptions by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showScheduleSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showWindowSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
     var showRepeatSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
@@ -383,21 +388,10 @@ fun CreateWorkScreen(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
             }
-            Text(
-                when {
-                    followUpMode -> "Create Follow-up"
-                    editMode -> "Edit Task"
-                    rescheduleMode -> "Reschedule Task"
-                    else -> "Create Task"
-                },
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
         }
 
         LazyColumn(
@@ -440,45 +434,81 @@ fun CreateWorkScreen(
             }
             item {
                 CreateFormCard {
-                    SettingsSummaryRow(
-                        title = "Schedule",
-                        summary = scheduleRowSummary,
-                        onClick = {
-                            scheduleDraft = taskDraft
-                            showScheduleSheet = true
-                        },
-                    )
-                    if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                        SettingsSummaryRow(
-                            title = "Availability",
-                            summary = timingSummary,
-                            onClick = {
-                                windowDraft = taskDraft
-                                showWindowSheet = true
-                            },
-                        )
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { showAdvancedOptions = !showAdvancedOptions },
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "More options",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Icon(
+                                Icons.Outlined.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.graphicsLayer(
+                                    rotationZ = if (showAdvancedOptions) 90f else 0f
+                                ),
+                            )
+                        }
                     }
-                    if (!followUpMode && !rescheduleMode) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                        SettingsSummaryRow(
-                            title = "Repeat",
-                            summary = repeatSummary,
-                            onClick = {
-                                repeatDraft = taskDraft
-                                showRepeatSheet = true
-                            },
-                        )
+                    AnimatedVisibility(
+                        visible = showAdvancedOptions,
+                        enter = expandVertically(),
+                        exit = shrinkVertically(),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                            SettingsSummaryRow(
+                                title = "Schedule",
+                                summary = scheduleRowSummary,
+                                onClick = {
+                                    scheduleDraft = taskDraft
+                                    showScheduleSheet = true
+                                },
+                            )
+                            if (taskDraft.schedulingMode == TaskSchedulingMode.FLEXIBLE || taskDraft.schedulingMode == TaskSchedulingMode.FIXED_DAY) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                                SettingsSummaryRow(
+                                    title = "Availability",
+                                    summary = timingSummary,
+                                    onClick = {
+                                        windowDraft = taskDraft
+                                        showWindowSheet = true
+                                    },
+                                )
+                            }
+                            if (!followUpMode && !rescheduleMode) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                                SettingsSummaryRow(
+                                    title = "Repeat",
+                                    summary = repeatSummary,
+                                    onClick = {
+                                        repeatDraft = taskDraft
+                                        showRepeatSheet = true
+                                    },
+                                )
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                            SettingsSummaryRow(
+                                title = "Rules",
+                                summary = rulesSummary,
+                                onClick = {
+                                    rulesDraft = taskDraft.resolvedOverlapPolicy(allowConcurrentTasks)
+                                    showRulesSheet = true
+                                },
+                            )
+                        }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                    SettingsSummaryRow(
-                            title = "Rules",
-                            summary = rulesSummary,
-                            onClick = {
-                                rulesDraft = taskDraft.resolvedOverlapPolicy(allowConcurrentTasks)
-                                showRulesSheet = true
-                            },
-                        )
                 }
             }
         }
@@ -490,7 +520,7 @@ fun CreateWorkScreen(
                 rescheduleMode -> "Save Reschedule"
                 else -> "Save Task"
             },
-            enabled = canSaveTask,
+            enabled = canSaveTask && !isSaving,
             onClick = { onSaveTask(taskDraft) },
         )
     }

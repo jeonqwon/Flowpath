@@ -86,8 +86,8 @@ class PlannerCoordinator(
     val snapshot = repository.observeSnapshot()
     private val recurrenceMaterializationDays = 180
 
-    private val alwaysAvailableWorkHours = WorkHoursProfile(
-        timezone = clock.zone.id,
+    private val alwaysAvailableWorkHours get() = WorkHoursProfile(
+        timezone = ZoneId.systemDefault().id,
         days = DayOfWeek.entries.associateWith {
             WorkHoursDay(
                 windows = listOf(TimeWindow(LocalTime.MIDNIGHT, LocalTime.of(23, 59, 59))),

@@ -73,7 +73,7 @@ data class AppSettings(
     val allowTaskSplitting: Boolean = true,
     val defaultTaskSplitting: Boolean = true,
     val allowConcurrentTasks: Boolean = false,
-    val maxTaskChunkMinutes: Int = 120,
+    val maxTaskChunkMinutes: Int = 480,
     val preferredPeriodFallbackMode: PreferredPeriodFallbackMode = PreferredPeriodFallbackMode.USE_OTHER_PRODUCTIVE_PERIODS,
     val urgentRescheduleMode: UrgentRescheduleMode = UrgentRescheduleMode.MOVE_OTHER_FLEXIBLE_IF_NEEDED,
     val defaultTaskReminder: Boolean = false,
@@ -100,6 +100,7 @@ class AppSettingsRepository(
     suspend fun setAlignmentMinutes(value: Int) = updateInt(
         ALIGNMENT_MINUTES,
         when {
+            value <= 0 -> 0
             value <= 15 -> 15
             value <= 30 -> 30
             else -> 60
@@ -108,7 +109,7 @@ class AppSettingsRepository(
     suspend fun setAllowTaskSplitting(value: Boolean) = updateBoolean(ALLOW_TASK_SPLITTING, value)
     suspend fun setDefaultTaskSplitting(value: Boolean) = updateBoolean(DEFAULT_TASK_SPLITTING, value)
     suspend fun setAllowConcurrentTasks(value: Boolean) = updateBoolean(ALLOW_CONCURRENT_TASKS, value)
-    suspend fun setMaxTaskChunkMinutes(value: Int) = updateInt(MAX_TASK_CHUNK_MINUTES, value.coerceIn(30, 360))
+    suspend fun setMaxTaskChunkMinutes(value: Int) = updateInt(MAX_TASK_CHUNK_MINUTES, value.coerceIn(30, 1440))
     suspend fun setPreferredPeriodFallbackMode(value: PreferredPeriodFallbackMode) = updateString(PREFERRED_PERIOD_FALLBACK_MODE, value.name)
     suspend fun setUrgentRescheduleMode(value: UrgentRescheduleMode) = updateString(URGENT_RESCHEDULE_MODE, value.name)
     suspend fun setDefaultTaskReminder(value: Boolean) = updateBoolean(DEFAULT_TASK_REMINDER, value)

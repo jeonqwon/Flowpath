@@ -161,6 +161,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var createTaskDraftOverride by remember { mutableStateOf<TaskDraft?>(null) }
     var timeframeDraftOverride by remember { mutableStateOf<TimeframeDraft?>(null) }
     var timeframeErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    var isSaving by remember { mutableStateOf(false) }
     var createSessionKey by rememberSaveable { mutableStateOf(0) }
     var showingTimeframeEditor by rememberSaveable { mutableStateOf(false) }
     var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -281,6 +282,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 followUpMode = followUpSourceTaskId != null,
                 editMode = editSourceTaskId != null,
                 rescheduleMode = rescheduleSourceTaskId != null,
+                isSaving = isSaving,
                 onBack = {
                     showingCreate = false
                     followUpSourceTaskId = null
@@ -289,7 +291,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     createTaskDraftOverride = null
                 },
                 onSaveTask = { draft ->
+                    if (isSaving) return@CreateWorkScreen
+                    isSaving = true
                     scope.launch {
+                        try {
                         val sourceTaskId = followUpSourceTaskId
                         val editTaskId = editSourceTaskId
                         val rescheduleTaskId = rescheduleSourceTaskId
@@ -331,6 +336,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                                 else -> "Task scheduled"
                             },
                         )
+                        } finally {
+                            isSaving = false
+                        }
                     }
                 },
             )
@@ -497,11 +505,11 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         selectedTaskId = null
                         showingCreate = true
                     },
-                    onDone = {
+                    onDone = { block ->
                         scope.launch {
-                            viewModel.completeTask(task.id)
+                            viewModel.completeBlock(block, state.snapshot.tasks)
                             selectedTaskId = null
-                            snackbarHostState.showLatestSnackbar("Task done")
+                            snackbarHostState.showLatestSnackbar("Block done")
                         }
                     },
                     onDoneAllRecurring = {

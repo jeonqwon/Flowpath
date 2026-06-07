@@ -300,6 +300,7 @@ private const val MaxOverlappingTimeframeRails = 5
 private val ExpandedDayHeaderHeight = 48.dp
 private val ExpandedDayHeaderTopInset = 10.dp
 private val ExpandedDateChipSlotHeight = 30.dp
+private val ExpandedDateChipGap = 16.dp
 private val ExpandedDateChipAboveMidnightOffset = 38.dp
 private val ExpandedTaskStickyTitleTopInset = 8.dp
 private val TimeframeHeaderChipVerticalAdjustment = 2.dp
@@ -568,6 +569,7 @@ fun TasksScreen(
                         }
                         val stickyHeaderTopPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
                         val dateChipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+                        val dateChipGapPx = with(density) { ExpandedDateChipGap.roundToPx() }
                         val dateChipAboveMidnightOffsetPx = with(density) { ExpandedDateChipAboveMidnightOffset.roundToPx() }
                         val headerDateChipOffsets by remember(
                             expandedListState,
@@ -575,6 +577,7 @@ fun TasksScreen(
                             incomingDayIndex,
                             stickyHeaderTopPx,
                             dateChipHeightPx,
+                            dateChipGapPx,
                             dateChipAboveMidnightOffsetPx,
                         ) {
                             derivedStateOf {
@@ -588,6 +591,7 @@ fun TasksScreen(
                                         nextBodyOffsetPx = nextOffsetPx - dateChipAboveMidnightOffsetPx,
                                         stickyYPx = stickyHeaderTopPx,
                                         chipHeightPx = dateChipHeightPx,
+                                        chipGapPx = dateChipGapPx,
                                     )
                                 }
 
@@ -1257,6 +1261,7 @@ private fun ExpandedTimelineDateOverlay(
     }
     val stickyYPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
     val chipHeightPx = with(density) { ExpandedDateChipSlotHeight.roundToPx() }
+    val chipGapPx = with(density) { ExpandedDateChipGap.roundToPx() }
     val dateChipAboveMidnightOffsetPx = with(density) { ExpandedDateChipAboveMidnightOffset.roundToPx() }
     val visibleItems = listState.layoutInfo.visibleItemsInfo.sortedBy { it.index }
 
@@ -1268,6 +1273,7 @@ private fun ExpandedTimelineDateOverlay(
                 nextBodyOffsetPx = nextOffsetPx - dateChipAboveMidnightOffsetPx,
                 stickyYPx = stickyYPx,
                 chipHeightPx = chipHeightPx,
+                chipGapPx = chipGapPx,
             )
             TimelineDateChipSlot(
                 date = taskFeedDateForIndex(today, item.index),
@@ -1321,22 +1327,23 @@ internal fun resolveExpandedDateChipY(
     nextBodyOffsetPx: Int,
     stickyYPx: Int,
     chipHeightPx: Int,
+    chipGapPx: Int = 0,
 ): Int {
     val pinnedY = bodyOffsetPx.coerceAtLeast(stickyYPx)
-    return pinnedY.coerceAtMost(nextBodyOffsetPx - chipHeightPx)
+    return pinnedY.coerceAtMost(nextBodyOffsetPx - chipHeightPx - chipGapPx)
 }
 
 @Composable
 private fun DateChip(text: String) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(
             text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -1351,17 +1358,17 @@ private fun TimeframeNameChip(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .border(
                 width = 1.dp,
                 color = borderColor.copy(alpha = 0.88f),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(
             text,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1489,10 +1496,9 @@ private fun TasksSheetActionList(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         actions.forEach { (label, action) ->
             FilledTonalButton(
                 onClick = action,
@@ -1502,10 +1508,6 @@ private fun TasksSheetActionList(
                 Text(label)
             }
         }
-        TextButton(onClick = onDone, modifier = Modifier.align(Alignment.End)) {
-            Text("Done")
-        }
-        Spacer(Modifier.height(16.dp))
     }
 }
 

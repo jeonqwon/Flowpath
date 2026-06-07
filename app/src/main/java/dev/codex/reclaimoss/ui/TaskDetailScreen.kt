@@ -141,7 +141,7 @@ fun TaskDetailScreen(
     onFollowUp: () -> Unit,
     onEdit: () -> Unit,
     onReschedule: () -> Unit,
-    onDone: () -> Unit,
+    onDone: (ScheduleBlock) -> Unit,
     onDoneAllRecurring: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -235,7 +235,9 @@ fun TaskDetailScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
-                        onClick = onDone,
+                        onClick = {
+                            firstBlock?.let { onDone(it) }
+                        },
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = RoundedCornerShape(999.dp),
                     ) {
