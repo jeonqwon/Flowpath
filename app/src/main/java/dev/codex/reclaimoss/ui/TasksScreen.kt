@@ -107,11 +107,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -306,7 +311,7 @@ private val ExpandedTaskStickyTitleTopInset = 8.dp
 private val TimeframeHeaderChipVerticalAdjustment = 2.dp
 private val TimeframeHeaderChipMaxWidth = 96.dp
 private val TimeframeHeaderChipSlotStep = 38.dp
-private val TaskTimelineLabelWidth = 52.dp
+private val TaskTimelineLabelWidth = 64.dp
 private val TaskTimelineContentInset = 6.dp
 private val TaskTimelineCompactRailWidth = 2.dp
 private val TaskTimelineExpandedRailWidth = 2.dp
@@ -656,7 +661,12 @@ fun TasksScreen(
                                             val dayTaskSegments = visibleTaskSegmentsForDay(
                                                 blocks = state.snapshot.blocks
                                                     .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
-                                                    .filter { tasksById[it.taskId]?.status == TaskStatus.ACTIVE },
+                                                    .filter { tasksById[it.taskId]?.status == TaskStatus.ACTIVE }
+                                                    .filter { block ->
+                                                        // Exclude overnight blocks — they render in the overlay
+                                                        block.startAt.atZone(zoneId).toLocalDate() ==
+                                                            block.endAt.atZone(zoneId).toLocalDate()
+                                                    },
                                                 day = date,
                                                 zoneId = zoneId,
                                             )
@@ -668,6 +678,7 @@ fun TasksScreen(
                                                 hourHeight = hourHeight,
                                                 allowConcurrentTasks = settings.allowConcurrentTasks,
                                                 showTaskCards = true,
+                                                showCardTitles = false,
                                                 showMidnightLabel = true,
                                                 drawVerticalDivider = false,
                                                 onOpenTask = onOpenTask,
@@ -688,6 +699,7 @@ fun TasksScreen(
                                 hourHeight = hourHeight,
                                 allowConcurrentTasks = settings.allowConcurrentTasks,
                                 onOpenTask = onOpenTask,
+                                topBarHeight = padding.calculateTopPadding(),
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .fillMaxSize()
@@ -1001,7 +1013,7 @@ private fun TimelineDateChipSlot(
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier.width(TaskTimelineLabelWidth),
+        modifier = modifier.widthIn(min = TaskTimelineLabelWidth),
         contentAlignment = Alignment.CenterStart,
     ) {
         DateChip(text = compactStickyDateText(date))
@@ -1018,6 +1030,7 @@ private fun ExpandedTaskOverlay(
     hourHeight: Dp,
     allowConcurrentTasks: Boolean,
     onOpenTask: (String) -> Unit,
+    topBarHeight: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1149,14 +1162,19 @@ private fun ExpandedTaskOverlay(
                     }
                 }
                 val stickyTitleMinYPx = with(density) {
-                    (ExpandedDayHeaderHeight + ExpandedTaskStickyTitleTopInset).roundToPx()
+                    (topBarHeight + ExpandedDayHeaderHeight + ExpandedTaskStickyTitleTopInset).roundToPx()
                 }
                 val titleNaturalYPx = absoluteYPx + titleTopInsetPx
-                val titleMaxYPx = absoluteYPx + (heightPx - titleReservePx).coerceAtLeast(0) + titleTopInsetPx
+                val isOvernightBlock = block.startAt.atZone(zoneId).toLocalDate() != block.endAt.atZone(zoneId).toLocalDate()
+                val effectiveHeightPx = if (isOvernightBlock) {
+                    val orig = blocks.firstOrNull { it.id == block.id } ?: block
+                    val origDur = java.time.Duration.between(orig.startAt, orig.endAt).toMinutes().toInt().coerceAtLeast(1)
+                    with(density) { timelineOffset(origDur, hourHeight).roundToPx() }
+                } else heightPx
+                val titleMaxYPx = absoluteYPx + (effectiveHeightPx - titleReservePx).coerceAtLeast(0) + titleTopInsetPx
                 val stickyTitleYPx = titleNaturalYPx
                     .coerceAtLeast(stickyTitleMinYPx)
                     .coerceAtMost(titleMaxYPx)
-                // Overlay card body DISABLED — embedded cards in LazyColumn handle positioning correctly
                 if (topmostFragmentByTaskId[block.taskId] == fragment) {
                     StickyOverlayTaskTitle(
                         title = tasksById[block.taskId]?.title ?: block.taskId,
@@ -1166,6 +1184,41 @@ private fun ExpandedTaskOverlay(
                     )
                 }
             }
+        }
+        // Render overnight cards (spanning midnight) persistently regardless of day scroll
+        val firstVisibleDay = visibleDays.firstOrNull()
+        if (firstVisibleDay != null) {
+            val (firstDayIdx, firstDayPair) = firstVisibleDay
+            val (firstDayDate, firstDayOffsetPx) = firstDayPair
+            val timelineHtPx = with(density) { timelineOffset(24 * 60, hourHeight).roundToPx() }
+            blocks
+                .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+                .filter { tasksById[it.taskId]?.status == TaskStatus.ACTIVE }
+                .filter { it.startAt.atZone(zoneId).toLocalDate() != it.endAt.atZone(zoneId).toLocalDate() }
+                .forEach { ob ->
+                    val obDay = ob.startAt.atZone(zoneId).toLocalDate()
+                    val dayDiff = java.time.Duration.between(firstDayDate.atStartOfDay(), obDay.atStartOfDay()).toDays().toInt()
+                    val obDayOffsetPx = firstDayOffsetPx + dayDiff * timelineHtPx
+                    val ovMin = minutesFromStart(ob.startAt.atZone(zoneId).toLocalTime())
+                    val ovDur = java.time.Duration.between(ob.startAt, ob.endAt).toMinutes().toInt().coerceAtLeast(1)
+                    val ovTopPx = obDayOffsetPx + with(density) { timelineOffset(ovMin, hourHeight).roundToPx() }
+                    val ovHtPx = with(density) { timelineOffset(ovDur, hourHeight).roundToPx() }
+                    val ovTopDp = with(density) { ovTopPx.toDp() }
+                    val surfaceColor = MaterialTheme.colorScheme.surface
+                    val borderClr = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                    val ovWdPx = with(density) { contentWidth.toPx() }
+                    Box(
+                        modifier = Modifier
+                            .offset(x = contentStart, y = ovTopDp)
+                            .size(0.dp).zIndex(1f)
+                            .drawBehind {
+                                val r = 22.dp.toPx()
+                                drawRoundRect(surfaceColor, Offset.Zero, Size(ovWdPx, ovHtPx.toFloat()), CornerRadius(r, r))
+                                drawRoundRect(borderClr, Offset.Zero, Size(ovWdPx, ovHtPx.toFloat()), CornerRadius(r, r), style = Stroke(1.dp.toPx()))
+                            }
+                            .clickable { onOpenState(ob.taskId) },
+                    )
+                }
         }
     }
 }
@@ -1675,6 +1728,7 @@ fun FullDayTimeline(
     hourHeight: Dp,
     allowConcurrentTasks: Boolean = false,
     showTaskCards: Boolean = true,
+    showCardTitles: Boolean = true,
     showMidnightLabel: Boolean = true,
     drawVerticalDivider: Boolean = true,
     onOpenTask: (String) -> Unit,
@@ -1741,6 +1795,7 @@ fun FullDayTimeline(
                 contentStart = contentStart,
                 contentWidth = contentWidth,
                 hourHeight = hourHeight,
+                showTitle = showCardTitles,
                 onOpen = { onOpenTask(positioned.segment.block.taskId) },
             )
         }
