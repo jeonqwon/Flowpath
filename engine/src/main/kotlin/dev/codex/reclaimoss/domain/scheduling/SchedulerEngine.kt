@@ -78,7 +78,13 @@ class SchedulerEngine {
         val baseTasksToSchedule = tasks
             .filter { it.status == TaskStatus.ACTIVE && it.remainingMinutes > 0 }
             .sortedWith(
-                compareBy<ScheduleTask> { it.taskKind != TaskKind.SLEEP }
+                compareBy<ScheduleTask> {
+                    when (it.taskKind) {
+                        TaskKind.SLEEP -> 0
+                        TaskKind.BLOCKER -> 1
+                        TaskKind.NORMAL -> 2
+                    }
+                }
                     .thenBy { !it.hasDeadline }
                     .thenBy { existingAnchorByTaskId[it.id] == null }
                     .thenBy { existingAnchorByTaskId[it.id] ?: Instant.MAX }
@@ -565,7 +571,11 @@ class SchedulerEngine {
         taskBlocks.forEach { block ->
             val window = BusyWindow(block.startAt, block.endAt)
             val otherTask = tasksById[block.taskId]
-            if (otherTask != null && tasksCanOverlap(task, otherTask, allowConcurrentTasks)) {
+            val blockerAndSleep = otherTask != null && (
+                (task.taskKind == TaskKind.SLEEP && otherTask.taskKind == TaskKind.BLOCKER) ||
+                (task.taskKind == TaskKind.BLOCKER && otherTask.taskKind == TaskKind.SLEEP)
+            )
+            if (blockerAndSleep || (otherTask != null && tasksCanOverlap(task, otherTask, allowConcurrentTasks))) {
                 softTaskWindows += window
             } else {
                 blockingTaskWindows += window
@@ -959,7 +969,11 @@ class SchedulerEngine {
             0.0
         }
         val priority = policy.priorityWeight * task.priority.score.toDouble()
-        val taskKindBoost = if (task.taskKind == TaskKind.SLEEP) 1000.0 else 0.0
+        val taskKindBoost = when (task.taskKind) {
+            TaskKind.SLEEP -> 1000.0
+            TaskKind.BLOCKER -> 500.0
+            TaskKind.NORMAL -> 0.0
+        }
         return taskKindBoost + urgency + priority
     }
 

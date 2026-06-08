@@ -233,6 +233,48 @@ class PlannerCoordinator(
         return result
     }
 
+    suspend fun createBlocker(
+        title: String,
+        startAt: Instant,
+        endAt: Instant,
+    ): TaskCreationResult {
+        val taskId = newId("task")
+        val task = ScheduleTask(
+            id = taskId,
+            title = title,
+            priority = TaskPriority.HIGH,
+            hasDeadline = false,
+            schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+            fixedStartAt = startAt,
+            fixedEndAt = endAt,
+            dueAt = endAt,
+            estimatedMinutes = 0,
+            remainingMinutes = 0,
+            taskKind = TaskKind.BLOCKER,
+            status = TaskStatus.ACTIVE,
+        )
+        repository.upsertTask(task)
+        try {
+            placeExactTask(taskId)
+            val issues = repository.getSchedulingIssues().filter { it.taskId == taskId }
+            if (issues.isNotEmpty()) {
+                repository.deleteTask(taskId)
+                val hasPartial = issues.any { it.type == SchedulingIssueType.PARTIAL }
+                return TaskCreationResult(
+                    taskId = taskId,
+                    scheduled = false,
+                    partial = hasPartial,
+                    reason = issues.firstOrNull()?.reason ?: "Unable to place blocker at the selected time.",
+                )
+            }
+        } catch (_: Exception) {
+            repository.deleteTask(taskId)
+            return TaskCreationResult(taskId = taskId, scheduled = false, partial = false, reason = "Unable to place blocker.")
+        }
+        rebuildSchedule()
+        return TaskCreationResult(taskId = taskId, scheduled = true, partial = false)
+    }
+
     suspend fun createReminder(
         title: String,
         description: String,

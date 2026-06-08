@@ -316,6 +316,10 @@ class PlannerViewModel(
 
     suspend fun seedIfNeeded() = coordinator.ensureSeedData()
 
+    suspend fun addBlocker(title: String, startAt: Instant, endAt: Instant): TaskCreationResult {
+        return coordinator.createBlocker(title, startAt, endAt)
+    }
+
     suspend fun addTask(draft: TaskDraft): TaskCreationResult {
         return coordinator.createTask(
             title = draft.title,

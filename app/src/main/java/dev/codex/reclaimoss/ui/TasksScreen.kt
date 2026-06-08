@@ -336,6 +336,7 @@ fun TasksScreen(
     onTasksViewModeChanged: (TasksViewMode) -> Unit,
     onAddTask: () -> Unit,
     onAddReminder: () -> Unit,
+    onAddBlocker: () -> Unit,
     onDeleteTask: (String) -> Unit,
     onOpenTask: (String) -> Unit,
     onOpenReminder: (Reminder) -> Unit,
@@ -652,14 +653,21 @@ fun TasksScreen(
                                                     .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                                             )
 
+                                            val dayTaskSegments = visibleTaskSegmentsForDay(
+                                                blocks = state.snapshot.blocks
+                                                    .filter { it.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
+                                                    .filter { tasksById[it.taskId]?.status == TaskStatus.ACTIVE },
+                                                day = date,
+                                                zoneId = zoneId,
+                                            )
                                             FullDayTimeline(
-                                                segments = emptyList(),
+                                                segments = dayTaskSegments,
                                                 tasksById = tasksById,
                                                 zoneId = zoneId,
                                                 day = date,
                                                 hourHeight = hourHeight,
                                                 allowConcurrentTasks = settings.allowConcurrentTasks,
-                                                showTaskCards = false,
+                                                showTaskCards = true,
                                                 showMidnightLabel = true,
                                                 drawVerticalDivider = false,
                                                 onOpenTask = onOpenTask,
@@ -738,6 +746,7 @@ fun TasksScreen(
                     actions = listOf(
                         "Add Task" to onAddTask,
                         "Add Reminder" to onAddReminder,
+                        "Add Blocker" to onAddBlocker,
                     ),
                     onDone = { showingSheet = null },
                 )
@@ -1147,25 +1156,7 @@ private fun ExpandedTaskOverlay(
                 val stickyTitleYPx = titleNaturalYPx
                     .coerceAtLeast(stickyTitleMinYPx)
                     .coerceAtMost(titleMaxYPx)
-                FullDayTaskBlock(
-                    positionedBlock = PositionedTaskBlock(fragment.segment, fragment.laneIndex, fragment.totalLanes),
-                    task = tasksById[block.taskId],
-                    zoneId = zoneId,
-                    contentStart = contentStart,
-                    contentWidth = contentWidth,
-                    hourHeight = hourHeight,
-                    onOpen = { onOpenState(block.taskId) },
-                    absoluteY = with(density) { absoluteYPx.toDp() },
-                    absoluteHeight = with(density) { heightPx.toDp() },
-                    renderContinuesFromPrevious = fragment.segment.continuesFromPreviousDay,
-                    renderContinuesIntoNext = fragment.segment.continuesIntoNextDay,
-                    showTitle = false,
-                    useTapGesture = true,
-                    isScrollInProgress = scrollingState,
-                    onScrollBy = { deltaY ->
-                        listState.dispatchRawDelta(-deltaY)
-                    },
-                )
+                // Overlay card body DISABLED — embedded cards in LazyColumn handle positioning correctly
                 if (topmostFragmentByTaskId[block.taskId] == fragment) {
                     StickyOverlayTaskTitle(
                         title = tasksById[block.taskId]?.title ?: block.taskId,

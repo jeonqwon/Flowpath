@@ -66,6 +66,8 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
@@ -133,6 +135,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OpenReclaimApp(appGraph: AppGraph) {
     val viewModel: PlannerViewModel = viewModel(
@@ -152,6 +155,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
     var onboardingDismissedThisSession by rememberSaveable { mutableStateOf(false) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
+    var showingBlockerSheet by rememberSaveable { mutableStateOf(false) }
+    var blockerTitle by rememberSaveable { mutableStateOf("") }
     var showingReminderCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -344,6 +349,90 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             )
         }
         return
+    }
+
+    if (showingBlockerSheet) {
+        var blockerStartDate by remember { mutableStateOf(LocalDate.now()) }
+        var blockerEndDate by remember { mutableStateOf(LocalDate.now()) }
+        var blockerStartTime by remember { mutableStateOf(LocalTime.of(9, 0)) }
+        var blockerEndTime by remember { mutableStateOf(LocalTime.of(17, 0)) }
+        val context = LocalContext.current
+        val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d") }
+        val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
+        ModalBottomSheet(
+            onDismissRequest = { showingBlockerSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("Add Blocker", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    FilledTonalButton(
+                        onClick = {
+                            val date = blockerStartDate
+                            DatePickerDialog(context, { _, y, m, d -> blockerStartDate = LocalDate.of(y, m + 1, d) }, date.year, date.monthValue - 1, date.dayOfMonth).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("From: ${blockerStartDate.format(dateFormatter)}") }
+                    FilledTonalButton(
+                        onClick = {
+                            val date = blockerEndDate
+                            DatePickerDialog(context, { _, y, m, d -> blockerEndDate = LocalDate.of(y, m + 1, d) }, date.year, date.monthValue - 1, date.dayOfMonth).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("To: ${blockerEndDate.format(dateFormatter)}") }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    FilledTonalButton(
+                        onClick = {
+                            TimePickerDialog(context, { _, h, m -> blockerStartTime = LocalTime.of(h, m) }, blockerStartTime.hour, blockerStartTime.minute, false).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Start: ${blockerStartTime.format(timeFormatter)}") }
+                    FilledTonalButton(
+                        onClick = {
+                            TimePickerDialog(context, { _, h, m -> blockerEndTime = LocalTime.of(h, m) }, blockerEndTime.hour, blockerEndTime.minute, false).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("End: ${blockerEndTime.format(timeFormatter)}") }
+                }
+
+                OutlinedTextField(
+                    value = blockerTitle,
+                    onValueChange = { blockerTitle = it },
+                    label = { Text("Blocker name (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val zoneId = ZoneId.systemDefault()
+                            val startInstant = blockerStartDate.atTime(blockerStartTime).atZone(zoneId).toInstant()
+                            val endInstant = blockerEndDate.atTime(blockerEndTime).atZone(zoneId).toInstant()
+                            val title = blockerTitle.ifBlank { "Blocker" }
+                            val result = viewModel.addBlocker(title, startInstant, endInstant)
+                            showingBlockerSheet = false
+                            snackbarHostState.showLatestSnackbar(
+                                if (result.scheduled) "Blocker added" else result.reason ?: "Unable to add blocker"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("Save Blocker") }
+            }
+        }
     }
 
     if (showingReminderCreate) {
@@ -608,6 +697,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     },
                     onAddReminder = {
                         showingReminderCreate = true
+                    },
+                    onAddBlocker = {
+                        showingBlockerSheet = true
                     },
                     onDeleteTask = { taskId ->
                         scope.launch {

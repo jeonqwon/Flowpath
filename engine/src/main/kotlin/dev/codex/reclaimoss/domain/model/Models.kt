@@ -81,6 +81,7 @@ enum class TaskSchedulingMode {
 enum class TaskKind {
     NORMAL,
     SLEEP,
+    BLOCKER,
 }
 
 enum class TaskContinuationMode {

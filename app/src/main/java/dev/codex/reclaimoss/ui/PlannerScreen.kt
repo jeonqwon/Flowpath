@@ -184,17 +184,6 @@ fun PlannerScreen(
             .filter { historyCutoff == null || !it.updatedAt.isBefore(historyCutoff) }
             .groupBy { it.updatedAt.atZone(zoneId).toLocalDate() }
     }
-    val darkThemeHeader = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val todayHeaderColor = if (darkThemeHeader) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f)
-    }
-    val todayHeaderTextColor = if (darkThemeHeader) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
 
     Column(
         modifier = Modifier
@@ -203,54 +192,8 @@ fun PlannerScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                IconButton(onClick = {
-                    val newDate = selectedDate.minusDays(1)
-                    onSelectedDateChange(newDate)
-                    visibleMonth = YearMonth.from(newDate)
-                }) {
-                    Icon(Icons.Outlined.ChevronLeft, contentDescription = "Previous day")
-                }
-                Text(
-                    headerDateLabel(selectedDate, settings.dateFormatPreference),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            if (selectedDate == today) {
-                                todayHeaderColor
-                            } else {
-                                Color.Transparent
-                            },
-                        )
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (selectedDate == today) todayHeaderTextColor else MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                IconButton(onClick = {
-                    val newDate = selectedDate.plusDays(1)
-                    onSelectedDateChange(newDate)
-                    visibleMonth = YearMonth.from(newDate)
-                }) {
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = "Next day")
-                }
-            }
-            HeaderActionSlot {
-                HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
-            }
+        HeaderActionSlot {
+            HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -421,12 +364,11 @@ fun CompactTaskRow(
     onOpen: () -> Unit,
 ) {
     val firstBlock = blocks.minByOrNull { it.startAt } ?: return
-    val totalMinutes = blocks.sumOf { java.time.Duration.between(it.startAt, it.endAt).toMinutes().toInt() }
-    val blockSummary = if (blocks.size == 1) {
-        "${firstBlock.startAt.atZone(zoneId).toLocalTime().formatAsClock()} - ${firstBlock.endAt.atZone(zoneId).toLocalTime().formatAsClock()}"
-    } else {
-        "${firstBlock.startAt.atZone(zoneId).toLocalTime().formatAsClock()} start • ${totalMinutes.durationLabel()} total • ${blocks.size} blocks"
-    }
+    val blockSummary = blocks
+        .sortedBy { it.startAt }
+        .joinToString(" · ") { block ->
+            "${block.startAt.atZone(zoneId).toLocalTime().formatAsClock()}-${block.endAt.atZone(zoneId).toLocalTime().formatAsClock()}"
+        }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
