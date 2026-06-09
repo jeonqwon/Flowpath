@@ -200,11 +200,13 @@ fun TaskDetailScreen(
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     Text(task.title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        firstBlock?.let {
-                            "${timeFormatter.format(it.startAt.atZone(zoneId))} - ${timeFormatter.format(it.endAt.atZone(zoneId))}"
-                        } ?: "Not scheduled yet",
+                        if (blocks.isNotEmpty()) {
+                            blocks.sortedBy { it.startAt }.joinToString(" · ") {
+                                "${timeFormatter.format(it.startAt.atZone(zoneId))}-${timeFormatter.format(it.endAt.atZone(zoneId))}"
+                            }
+                        } else "Not scheduled yet",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.secondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
                     )
                     if (task.description.isNotBlank()) {

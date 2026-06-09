@@ -192,8 +192,13 @@ fun PlannerScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        HeaderActionSlot {
-            HeaderActionButton(label = "Add Timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            HeaderActionSlot {
+                HeaderActionButton(label = "Add timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+            }
         }
         LazyColumn(
             modifier = Modifier.weight(1f),

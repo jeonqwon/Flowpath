@@ -154,8 +154,8 @@ enum class AppTab(val label: String) {
 
 val HeaderActionShape = RoundedCornerShape(22.dp)
 val HeaderActionHeight = 44.dp
-val HeaderActionWidth = 176.dp
-val HeaderActionSlotWidth = 220.dp
+val HeaderActionWidth = 120.dp
+val HeaderActionSlotWidth = 150.dp
 val SurfaceTintStrong = Color(0xFFE9EEF9)
 val CreateScreenSnackbarBottomOffset = 108.dp
 
@@ -374,11 +374,64 @@ class PlannerViewModel(
                 estimatedMinutes = entry.durationMinutes,
                 addReminder = false,
                 schedulingMode = TaskSchedulingMode.FIXED_EXACT,
+                allowSplitting = false,
                 notBeforeAt = null,
                 fixedStartAt = occurrence.startAt,
                 fixedEndAt = occurrence.endAt,
             )
         }
+    }
+
+    suspend fun addSleepFromDraft(draft: TaskDraft): List<TaskCreationResult>? {
+        val zoneId = ZoneId.systemDefault()
+        val weekdays = draft.recurrenceDays
+        if (weekdays.isEmpty()) return null
+        val results = mutableListOf<TaskCreationResult>()
+        val draftStart = draft.schedulingStartInstantOrNull()
+        val draftEnd = draft.fixedEndAtInstantOrNull()
+        if (draftStart == null || draftEnd == null) return null
+        val windowStartTime = draftStart.atZone(zoneId).toLocalTime()
+        val windowEndTime = draftEnd.atZone(zoneId).toLocalTime()
+        val windowOvernight = !draftEnd.isAfter(draftStart) || windowEndTime <= windowStartTime
+        val duration = draft.estimatedMinutes.coerceAtLeast(240)
+        weekdays.forEach { day ->
+            // Compute the next occurrence date, then build window around it
+            val occurrenceDate = nextSleepOccurrenceDate(day, zoneId)
+            val windowStartInstant = java.time.LocalDateTime.of(occurrenceDate, windowStartTime).atZone(zoneId).toInstant()
+            val windowEndInstant = java.time.LocalDateTime.of(
+                if (windowOvernight) occurrenceDate.plusDays(1) else occurrenceDate,
+                windowEndTime,
+            ).atZone(zoneId).toInstant()
+            val result = coordinator.createTask(
+                title = draft.title.ifBlank { "Sleep" },
+                description = draft.description,
+                priority = TaskPriority.URGENT,
+                preferredTimePeriodId = null,
+                taskKind = TaskKind.SLEEP,
+                dueAt = windowStartInstant,
+                hasDeadline = true,
+                continuationParentTaskId = null,
+                continuationMode = null,
+                overlapPolicy = TaskOverlapPolicy.DISALLOW,
+                recurrenceRule = RecurrenceRule(
+                    type = RecurrenceType.WEEKLY,
+                    interval = 1,
+                    daysOfWeek = setOf(day),
+                    until = null,
+                    endMode = RecurrenceEndMode.NEVER,
+                    occurrenceCount = null,
+                ),
+                estimatedMinutes = duration,
+                addReminder = false,
+                schedulingMode = TaskSchedulingMode.FLEXIBLE_WINDOW,
+                allowSplitting = false,
+                notBeforeAt = null,
+                fixedStartAt = windowStartInstant,
+                fixedEndAt = windowEndInstant,
+            )
+            results.add(result)
+        }
+        return results
     }
 
     suspend fun addFollowUpTask(sourceTaskId: String, draft: TaskDraft): TaskCreationResult? {
@@ -571,6 +624,7 @@ class PlannerViewModel(
     suspend fun setReminderLeadMinutes(value: Int) = settingsRepository.setReminderLeadMinutes(value)
     suspend fun setHistoryRetention(value: HistoryRetention) = settingsRepository.setHistoryRetention(value)
     suspend fun setHasCompletedOnboarding(value: Boolean) = settingsRepository.setHasCompletedOnboarding(value)
+    suspend fun setHasSeenSleepTutorial(value: Boolean) = settingsRepository.setHasSeenSleepTutorial(value)
     suspend fun setTaskHourHeightDp(value: Int) = settingsRepository.setTaskHourHeightDp(value)
 }
 
@@ -707,6 +761,36 @@ private data class SleepOccurrence(
     val startAt: Instant,
     val endAt: Instant,
 )
+
+private fun nextSleepOccurrenceDate(
+    day: DayOfWeek,
+    zoneId: ZoneId,
+    now: LocalDate = LocalDate.now(zoneId),
+): LocalDate {
+    var date = generateSequence(now) { it.plusDays(1) }.first { it.dayOfWeek == day }
+    // If today matches but it's already past, get next week's
+    if (date == now) {
+        date = generateSequence(now.plusDays(1)) { it.plusDays(1) }.first { it.dayOfWeek == day }
+    }
+    return date
+}
+
+private fun nextSleepOccurrenceForDay(
+    day: DayOfWeek,
+    timeOfDay: LocalTime,
+    zoneId: ZoneId,
+    now: LocalDateTime = LocalDateTime.now(zoneId),
+): Instant {
+    var date = generateSequence(now.toLocalDate()) { it.plusDays(1) }
+        .first { it.dayOfWeek == day }
+    var startAt = LocalDateTime.of(date, timeOfDay)
+    if (startAt.isBefore(now)) {
+        date = generateSequence(date.plusDays(1)) { it.plusDays(1) }
+            .first { it.dayOfWeek == day }
+        startAt = LocalDateTime.of(date, timeOfDay)
+    }
+    return startAt.atZone(zoneId).toInstant()
+}
 
 private fun nextSleepOccurrence(
     entry: SleepOnboardingEntryDraft,

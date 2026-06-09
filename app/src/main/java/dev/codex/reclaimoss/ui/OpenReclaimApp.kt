@@ -153,10 +153,12 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Tasks) }
-    var onboardingDismissedThisSession by rememberSaveable { mutableStateOf(false) }
     var showingCreate by rememberSaveable { mutableStateOf(false) }
     var showingBlockerSheet by rememberSaveable { mutableStateOf(false) }
     var blockerTitle by rememberSaveable { mutableStateOf("") }
+    var showingRecurring by rememberSaveable { mutableStateOf(false) }
+    var createInSleepMode by rememberSaveable { mutableStateOf(false) }
+    var showTaskTutorial by rememberSaveable { mutableStateOf(false) }
     var showingReminderCreate by rememberSaveable { mutableStateOf(false) }
     var selectedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedReminderId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -169,7 +171,6 @@ fun OpenReclaimApp(appGraph: AppGraph) {
     var isSaving by remember { mutableStateOf(false) }
     var createSessionKey by rememberSaveable { mutableStateOf(0) }
     var showingTimeframeEditor by rememberSaveable { mutableStateOf(false) }
-    var onboardingErrorMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var tasksSelectedDateEpochDay by rememberSaveable { mutableStateOf(LocalDate.now().toEpochDay()) }
     var tasksScrollOffset by rememberSaveable { mutableStateOf(0) }
     var shouldAutoPositionTasksToNow by remember { mutableStateOf(true) }
@@ -190,10 +191,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         return
     }
 
-    val shouldShowOnboarding = state.settingsLoaded &&
-        !state.settings.hasCompletedOnboarding &&
-        !onboardingDismissedThisSession &&
-        !hasCompleteSleepCoverage(state.snapshot.tasks)
+    val sleepFullyConfigured = hasCompleteSleepCoverage(state.snapshot.tasks)
 
     LaunchedEffect(state.settingsLoaded, state.settings.hasCompletedOnboarding, state.snapshot.tasks) {
         if (
@@ -234,6 +232,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         timeframeDraftOverride = null
         timeframeErrorMessage = null
     }
+    BackHandler(enabled = showingRecurring) {
+        showingRecurring = false
+    }
     BackHandler(enabled = selectedReminderId != null) {
         selectedReminderId = null
     }
@@ -241,17 +242,21 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         selectedTaskId = null
     }
 
-    if (shouldShowOnboarding) {
-        SleepOnboardingScreen(
-            errorMessage = onboardingErrorMessage,
-            onComplete = { entries ->
-                scope.launch {
-                    onboardingErrorMessage = null
-                    viewModel.completeSleepOnboarding(entries)
-                    viewModel.setHasCompletedOnboarding(true)
-                    onboardingDismissedThisSession = true
-                    selectedTab = AppTab.Tasks
-                }
+    if (showingRecurring) {
+        RecurringScreen(
+            existingSleepTasks = state.snapshot.tasks.filter { it.taskKind == TaskKind.SLEEP },
+            allTasks = state.snapshot.tasks,
+            onBack = { showingRecurring = false },
+            onOpenTask = { selectedTaskId = it },
+            onAddSleep = {
+                showingRecurring = false
+                followUpSourceTaskId = null
+                editSourceTaskId = null
+                rescheduleSourceTaskId = null
+                createTaskDraftOverride = null
+                createSessionKey += 1
+                createInSleepMode = true
+                showingCreate = true
             },
         )
         return
@@ -287,6 +292,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 followUpMode = followUpSourceTaskId != null,
                 editMode = editSourceTaskId != null,
                 rescheduleMode = rescheduleSourceTaskId != null,
+                sleepMode = createInSleepMode,
+                showTaskTutorial = showTaskTutorial,
+                existingSleepTasks = state.snapshot.tasks.filter { it.taskKind == TaskKind.SLEEP },
                 isSaving = isSaving,
                 onBack = {
                     showingCreate = false
@@ -294,6 +302,8 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     editSourceTaskId = null
                     rescheduleSourceTaskId = null
                     createTaskDraftOverride = null
+                    createInSleepMode = false
+                    showTaskTutorial = false
                 },
                 onSaveTask = { draft ->
                     if (isSaving) return@CreateWorkScreen
@@ -303,7 +313,20 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         val sourceTaskId = followUpSourceTaskId
                         val editTaskId = editSourceTaskId
                         val rescheduleTaskId = rescheduleSourceTaskId
-                        val result = if (sourceTaskId != null) {
+                        val isSleep = createInSleepMode
+                        val result: TaskCreationResult? = if (isSleep) {
+                            val sleepResults = viewModel.addSleepFromDraft(draft)
+                            if (sleepResults.isNullOrEmpty()) {
+                                null
+                            } else {
+                                TaskCreationResult(
+                                    taskId = sleepResults.first().taskId,
+                                    scheduled = sleepResults.all { it.scheduled },
+                                    partial = sleepResults.any { !it.scheduled },
+                                    reason = sleepResults.firstOrNull { !it.scheduled }?.reason,
+                                )
+                            }
+                        } else if (sourceTaskId != null) {
                             viewModel.addFollowUpTask(sourceTaskId, draft)
                         } else if (editTaskId != null) {
                             viewModel.editTask(editTaskId, draft)
@@ -319,9 +342,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         if (!result.scheduled) {
                             snackbarHostState.showLatestSnackbar(
                                 result.reason ?: if (result.partial) {
-                                    "Unable to fully schedule task. Try another time or shorter duration."
+                                    "Unable to fully schedule sleep. Try a different time or shorter duration."
                                 } else {
-                                    "Unable to schedule task. Try another time or shorter duration."
+                                    "Unable to schedule sleep. Try a different time or shorter duration."
                                 },
                             )
                             return@launch
@@ -331,9 +354,12 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         editSourceTaskId = null
                         rescheduleSourceTaskId = null
                         createTaskDraftOverride = null
-                        navigateToTab(AppTab.Tasks)
+                        createInSleepMode = false
+                        showTaskTutorial = false
+                        if (!isSleep) navigateToTab(AppTab.Tasks)
                         snackbarHostState.showLatestSnackbar(
                             when {
+                                isSleep -> "Sleep schedule saved"
                                 result.partial -> "Task partially scheduled"
                                 sourceTaskId != null -> "Follow-up task created"
                                 editTaskId != null -> "Task updated"
@@ -669,7 +695,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = !shouldShowOnboarding,
+            userScrollEnabled = !showingRecurring,
         ) { page ->
             when (AppTab.entries[page]) {
                 AppTab.Tasks -> TasksScreen(
@@ -716,6 +742,30 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             selectedReminderId = reminder.id
                         }
                     },
+                    sleepFullyConfigured = sleepFullyConfigured,
+                    sleepCoveredCount = coveredSleepWeekdays(state.snapshot.tasks.filter { it.taskKind == TaskKind.SLEEP }
+                        .map { SleepOnboardingEntryDraft(weekdays = it.recurrenceRule.daysOfWeek) }).size,
+                    hasAnyNormalTask = state.snapshot.tasks.any { it.taskKind == TaskKind.NORMAL },
+                    onStartTaskTutorial = {
+                        followUpSourceTaskId = null
+                        editSourceTaskId = null
+                        rescheduleSourceTaskId = null
+                        createTaskDraftOverride = null
+                        createSessionKey += 1
+                        createInSleepMode = false
+                        showTaskTutorial = true
+                        showingCreate = true
+                    },
+                    onAddSleep = {
+                        followUpSourceTaskId = null
+                        editSourceTaskId = null
+                        rescheduleSourceTaskId = null
+                        createTaskDraftOverride = null
+                        createSessionKey += 1
+                        createInSleepMode = true
+                        showingCreate = true
+                    },
+                    onOpenRecurring = { showingRecurring = true },
                 )
 
                 AppTab.Planner -> PlannerScreen(

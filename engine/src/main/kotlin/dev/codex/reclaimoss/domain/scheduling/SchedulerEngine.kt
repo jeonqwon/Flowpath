@@ -886,11 +886,12 @@ class SchedulerEngine {
         if (task.schedulingMode == TaskSchedulingMode.FLEXIBLE_WINDOW) {
             val startAt = task.fixedStartAt ?: return emptyList()
             val endAt = task.fixedEndAt ?: task.dueAt
-            val dayStart = date.atStartOfDay(zoneId).toInstant()
-            val nextDayStart = date.plusDays(1).atStartOfDay(zoneId).toInstant()
-            val segmentStart = maxInstant(startAt, dayStart)
-            val segmentEnd = minInstant(endAt, nextDayStart)
-            return if (segmentEnd > segmentStart) listOf(BusyWindow(segmentStart, segmentEnd)) else emptyList()
+            // Only return the window for the date containing its start.
+            // This prevents overnight windows (e.g. 10 PM – 7 AM) from being
+            // split at midnight into two partial segments.
+            val windowStartDate = startAt.atZone(zoneId).toLocalDate()
+            if (date != windowStartDate) return emptyList()
+            return listOf(BusyWindow(startAt, endAt))
         }
         val constraint = task.dailyWindowConstraint(zoneId) ?: return emptyList()
         val anchorDate = task.dueAt.atZone(zoneId).toLocalDate()

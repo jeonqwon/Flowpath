@@ -53,15 +53,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Bedtime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ZoomIn
@@ -345,6 +348,12 @@ fun TasksScreen(
     onDeleteTask: (String) -> Unit,
     onOpenTask: (String) -> Unit,
     onOpenReminder: (Reminder) -> Unit,
+    sleepFullyConfigured: Boolean = true,
+    sleepCoveredCount: Int = 7,
+    hasAnyNormalTask: Boolean = true,
+    onAddSleep: () -> Unit = {},
+    onStartTaskTutorial: () -> Unit = {},
+    onOpenRecurring: () -> Unit = {},
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val today = remember(zoneId) { LocalDate.now(zoneId) }
@@ -370,6 +379,7 @@ fun TasksScreen(
     val reminderFormatter = remember(settings.dateFormatPreference) { reminderDateTimeFormatter(settings.dateFormatPreference) }
     val hourHeight = settings.taskHourHeightDp.dp
     var showingSheet by rememberSaveable { mutableStateOf<TasksSheetType?>(null) }
+    var sleepHintDismissed by rememberSaveable { mutableStateOf(false) }
     var selectedDaySummaryEpoch by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedDaySummary = selectedDaySummaryEpoch?.let { epoch ->
         buildTaskDaySection(
@@ -437,9 +447,10 @@ fun TasksScreen(
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 IconButton(
+                    modifier = Modifier.size(38.dp),
                     onClick = {
                         when (settings.tasksViewMode) {
                             TasksViewMode.COLLAPSED -> {
@@ -474,6 +485,7 @@ fun TasksScreen(
                     )
                 }
                 IconButton(
+                    modifier = Modifier.size(38.dp),
                     onClick = {
                         val targetDate = today
                         onSelectedDateChange(targetDate)
@@ -493,15 +505,40 @@ fun TasksScreen(
                 ) {
                     Icon(Icons.Outlined.Home, contentDescription = "Go to today")
                 }
-                IconButton(onClick = { showingSheet = TasksSheetType.UPCOMING_REMINDERS }) {
+                IconButton(
+                    modifier = Modifier.size(38.dp),
+                    onClick = { showingSheet = TasksSheetType.UPCOMING_REMINDERS },
+                ) {
                     Icon(Icons.Outlined.Notifications, contentDescription = "Upcoming reminders")
+                }
+                IconButton(
+                    modifier = Modifier.size(38.dp),
+                    onClick = onOpenRecurring,
+                ) {
+                    Icon(Icons.Outlined.Repeat, contentDescription = "Recurring")
                 }
             }
             HeaderActionSlot {
                 HeaderActionButton(label = "Add", icon = Icons.Outlined.Add, onClick = { showingSheet = TasksSheetType.ADD_CHOOSER })
             }
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        if (!sleepHintDismissed) {
+            if (!sleepFullyConfigured) {
+                SleepSetupHintBanner(
+                    coveredCount = sleepCoveredCount,
+                    onAddSleep = onAddSleep,
+                    onDismiss = { sleepHintDismissed = true },
+                )
+            } else if (!hasAnyNormalTask) {
+                SleepSetupHintBanner(
+                    coveredCount = 7,
+                    onAddSleep = onStartTaskTutorial,
+                    onDismiss = { sleepHintDismissed = true },
+                    readyForTasks = true,
+                )
+            }
+        }
+        Box(modifier = Modifier.weight(1f, fill = true)) {
             AnimatedContent(
                 targetState = settings.tasksViewMode,
                 transitionSpec = {
@@ -755,11 +792,14 @@ fun TasksScreen(
             ) {
                 TasksSheetActionList(
                     title = "Add",
-                    actions = listOf(
-                        "Add Task" to onAddTask,
-                        "Add Reminder" to onAddReminder,
-                        "Add Blocker" to onAddBlocker,
-                    ),
+                    actions = buildList {
+                        if (sleepFullyConfigured || sleepHintDismissed) {
+                            add("Add Task" to onAddTask)
+                            add("Add Reminder" to onAddReminder)
+                            add("Add Blocker" to onAddBlocker)
+                        }
+                        add("Add Sleep" to onAddSleep)
+                    },
                     onDone = { showingSheet = null },
                 )
             }
@@ -1162,7 +1202,7 @@ private fun ExpandedTaskOverlay(
                     }
                 }
                 val stickyTitleMinYPx = with(density) {
-                    (topBarHeight + ExpandedDayHeaderHeight + ExpandedTaskStickyTitleTopInset).roundToPx()
+                    (topBarHeight + ExpandedTaskStickyTitleTopInset).roundToPx()
                 }
                 val titleNaturalYPx = absoluteYPx + titleTopInsetPx
                 val isOvernightBlock = block.startAt.atZone(zoneId).toLocalDate() != block.endAt.atZone(zoneId).toLocalDate()
@@ -1525,6 +1565,57 @@ private fun TimeframeRailStrip(
                         .width(railWidth)
                         .clip(shape)
                         .background(color.copy(alpha = 0.88f)),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepSetupHintBanner(
+    coveredCount: Int,
+    onAddSleep: () -> Unit,
+    onDismiss: () -> Unit,
+    readyForTasks: Boolean = false,
+) {
+    val text = if (readyForTasks) "All 7 days covered. Ready to create tasks around your sleep schedule."
+    else if (coveredCount == 0) "Add your sleeping hours"
+    else "$coveredCount of 7 days configured — finish your sleep schedule"
+    val action = if (readyForTasks) "Get started"
+    else if (coveredCount == 0) "Set up" else "Continue"
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Bedtime,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            TextButton(onClick = onAddSleep) {
+                Text(action, fontWeight = FontWeight.SemiBold)
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Outlined.Close,
+                    contentDescription = "Dismiss",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f),
                 )
             }
         }
