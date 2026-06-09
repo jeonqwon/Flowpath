@@ -1250,7 +1250,7 @@ private fun ExpandedTaskOverlay(
                     Box(
                         modifier = Modifier
                             .offset(x = contentStart, y = ovTopDp)
-                            .size(0.dp).zIndex(1f)
+                            .size(width = with(density) { ovWdPx.toDp() }, height = with(density) { ovHtPx.toDp() }).zIndex(1f)
                             .drawBehind {
                                 val r = 22.dp.toPx()
                                 drawRoundRect(surfaceColor, Offset.Zero, Size(ovWdPx, ovHtPx.toFloat()), CornerRadius(r, r))
