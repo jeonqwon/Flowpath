@@ -24,6 +24,8 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Button
@@ -151,9 +153,7 @@ fun RecurringScreen(
             // --- SLEEP CARD (always first) ---
             item {
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { sleepExpanded = !sleepExpanded },
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -164,7 +164,17 @@ fun RecurringScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("Sleep", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { sleepExpanded = !sleepExpanded },
+                            ) {
+                                Text("Sleep", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                Icon(
+                                    if (sleepExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                    null, Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Button(
                                     onClick = onAddSleep,
