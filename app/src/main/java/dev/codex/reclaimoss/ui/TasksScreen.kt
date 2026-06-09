@@ -1256,10 +1256,7 @@ private fun ExpandedTaskOverlay(
                                 drawRoundRect(surfaceColor, Offset.Zero, Size(ovWdPx, ovHtPx.toFloat()), CornerRadius(r, r))
                                 drawRoundRect(borderClr, Offset.Zero, Size(ovWdPx, ovHtPx.toFloat()), CornerRadius(r, r), style = Stroke(1.dp.toPx()))
                             }
-                            .clickable(
-                                enabled = !isScrolling,
-                                onClick = { if (!isScrolling) onOpenState(ob.taskId) },
-                            ),
+                            .clickable { onOpenState(ob.taskId) },
                     )
                 }
         }
