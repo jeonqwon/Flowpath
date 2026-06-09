@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -129,7 +130,6 @@ fun RecurringScreen(
     }
 
     var expandedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
-    var sleepExpanded by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -158,24 +158,29 @@ fun RecurringScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable { sleepExpanded = !sleepExpanded },
-                            ) {
-                                Text("Sleep", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                                Icon(
-                                    if (sleepExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                                    null, Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                            }
+                            Text("Sleep", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = if (sleepConfigured) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                ) {
+                                    Text(
+                                        "$coveredCount/7",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (sleepConfigured) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
                                 Button(
                                     onClick = onAddSleep,
                                     shape = RoundedCornerShape(14.dp),
@@ -186,91 +191,61 @@ fun RecurringScreen(
                             }
                         }
 
-                        // Expanded detail
-                        AnimatedVisibility(
-                            visible = sleepExpanded,
-                            enter = expandVertically(),
-                            exit = shrinkVertically(),
+                        // Weekday dots
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Column(
-                                modifier = Modifier.padding(top = 14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
+                            DayOfWeek.entries.forEach { day ->
+                                Surface(
+                                    modifier = Modifier.size(34.dp),
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = if (day in covered) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        if (day in covered) {
+                                            Icon(Icons.Outlined.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                        } else {
+                                            Text(weekdayLabelShort(day), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Per-day times — always visible and tappable
+                        if (coveredCount > 0) {
+                            covered.sortedBy { it.value }.forEach { day ->
+                                val sleepTask = existingSleepTasks.firstOrNull {
+                                    it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek
+                                }
+                                val time = sleepTimeForDay(existingSleepTasks, day) ?: return@forEach
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .then(
+                                            if (sleepTask != null) Modifier.clickable { onOpenTask(sleepTask.id) }
+                                            else Modifier
+                                        )
+                                        .padding(vertical = 4.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text("Coverage", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Surface(
-                                        shape = RoundedCornerShape(999.dp),
-                                        color = if (sleepConfigured) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surfaceVariant,
-                                    ) {
+                                    Text(weekdayLabel(day), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            "$coveredCount / 7 days",
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (sleepConfigured) MaterialTheme.colorScheme.onPrimaryContainer
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            "${time.first.formatAsClock()} – ${time.second.formatAsClock()}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
-                                    }
-                                }
-
-                                // Weekday row
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    DayOfWeek.entries.forEach { day ->
-                                        Surface(
-                                            modifier = Modifier.size(34.dp),
-                                            shape = RoundedCornerShape(999.dp),
-                                            color = if (day in covered) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.surfaceVariant,
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                if (day in covered) {
-                                                    Icon(Icons.Outlined.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
-                                                } else {
-                                                    Text(weekdayLabelShort(day), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Per-day times
-                                if (coveredCount > 0) {
-                                    covered.sortedBy { it.value }.forEach { day ->
-                                        val sleepTask = existingSleepTasks.firstOrNull {
-                                            it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek
-                                        }
-                                        val time = sleepTimeForDay(existingSleepTasks, day) ?: return@forEach
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .then(
-                                                    if (sleepTask != null) Modifier.clickable { onOpenTask(sleepTask.id) }
-                                                    else Modifier
-                                                ),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Text(weekdayLabel(day), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(
-                                                    "${time.first.formatAsClock()} – ${time.second.formatAsClock()}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                                if (sleepTask != null) {
-                                                    Icon(
-                                                        Icons.Outlined.ChevronRight, null, Modifier.size(14.dp),
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                                    )
-                                                }
-                                            }
+                                        if (sleepTask != null) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Icon(
+                                                Icons.Outlined.ChevronRight, null, Modifier.size(14.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                            )
                                         }
                                     }
                                 }

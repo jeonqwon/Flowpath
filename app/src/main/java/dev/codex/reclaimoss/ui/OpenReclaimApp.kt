@@ -247,7 +247,10 @@ fun OpenReclaimApp(appGraph: AppGraph) {
             existingSleepTasks = state.snapshot.tasks.filter { it.taskKind == TaskKind.SLEEP },
             allTasks = state.snapshot.tasks,
             onBack = { showingRecurring = false },
-            onOpenTask = { selectedTaskId = it },
+            onOpenTask = { taskId ->
+                showingRecurring = false
+                selectedTaskId = taskId
+            },
             onAddSleep = {
                 showingRecurring = false
                 followUpSourceTaskId = null
