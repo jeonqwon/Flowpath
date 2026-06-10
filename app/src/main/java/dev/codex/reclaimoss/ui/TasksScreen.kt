@@ -834,67 +834,55 @@ internal fun resolveExpandedHeaderTransition(
 }
 
 internal fun buildTimeframeChipPlacements(
-    currentRails: List<TimeframeRailMetadata>,
-    incomingRails: List<TimeframeRailMetadata>? = null,
-    progress: Float,
+    visibleDayRails: List<Pair<Int, List<TimeframeRailMetadata>>>,
+    firstVisibleDayIndex: Int,
 ): List<TimeframeChipPlacement> {
-    val orderedCurrent = currentRails.distinctBy { it.id }
-    val orderedIncoming = incomingRails?.distinctBy { it.id }
-    val clampedProgress = progress.coerceIn(0f, 1f)
-    if (orderedIncoming == null) {
-        return orderedCurrent.mapIndexed { slot, rail ->
-            TimeframeChipPlacement(
-                id = rail.id,
-                name = rail.name,
-                colorHex = rail.colorHex,
-                motion = StickyHeaderTimeframeChipMotion.PINNED,
-                fromSlot = slot,
-                toSlot = slot,
-                progress = 0f,
-            )
+    if (visibleDayRails.isEmpty()) return emptyList()
+
+    // For each unique timeframe ID, find its first and last visible day index
+    data class DayRange(val firstDay: Int, val lastDay: Int, val rail: TimeframeRailMetadata)
+
+    val ranges = linkedMapOf<String, DayRange>()
+    for ((dayIndex, rails) in visibleDayRails) {
+        for (rail in rails.distinctBy { it.id }) {
+            val existing = ranges[rail.id]
+            if (existing == null) {
+                ranges[rail.id] = DayRange(dayIndex, dayIndex, rail)
+            } else {
+                ranges[rail.id] = existing.copy(lastDay = dayIndex)
+            }
         }
     }
 
-    val incomingIds = orderedIncoming.map { it.id }.toSet()
-    val currentIds = orderedCurrent.map { it.id }.toSet()
-    val incomingSlotById = orderedIncoming
-        .mapIndexed { slot, rail -> rail.id to slot }
-        .toMap()
-
-    return buildList {
-        orderedCurrent.forEachIndexed { currentSlot, rail ->
-            val incomingSlot = incomingSlotById[rail.id]
-            add(
-                TimeframeChipPlacement(
-                    id = rail.id,
-                    name = rail.name,
-                    colorHex = rail.colorHex,
-                    motion = if (rail.id in incomingIds) {
-                        StickyHeaderTimeframeChipMotion.PINNED
-                    } else {
-                        StickyHeaderTimeframeChipMotion.EXITING
-                    },
-                    fromSlot = currentSlot,
-                    toSlot = incomingSlot ?: currentSlot,
-                    progress = clampedProgress,
-                ),
-            )
+    // Determine motion and trackDayIndex for each timeframe
+    return ranges.entries.mapIndexed { slot, (id, range) ->
+        val motion = when {
+            // ENTERING: first visible day is NOT the first day — this timeframe
+            // just became visible. Attach to its first day's date chip.
+            range.firstDay > firstVisibleDayIndex -> StickyHeaderTimeframeChipMotion.ENTERING
+            // EXITING: last visible day IS the first day — this timeframe's last day
+            // is at the header, about to scroll out. Attach to the exiting day.
+            range.lastDay == firstVisibleDayIndex && range.firstDay == firstVisibleDayIndex
+                && visibleDayRails.size == 1 -> StickyHeaderTimeframeChipMotion.EXITING
+            // Active on multiple days, ending soon: the last day is close to the header
+            range.lastDay == firstVisibleDayIndex -> StickyHeaderTimeframeChipMotion.EXITING
+            // PINNED: active across days, stays at header top
+            else -> StickyHeaderTimeframeChipMotion.PINNED
         }
-        orderedIncoming.forEachIndexed { incomingSlot, rail ->
-            if (rail.id !in currentIds) {
-                add(
-                    TimeframeChipPlacement(
-                        id = rail.id,
-                        name = rail.name,
-                        colorHex = rail.colorHex,
-                        motion = StickyHeaderTimeframeChipMotion.ENTERING,
-                        fromSlot = incomingSlot,
-                        toSlot = incomingSlot,
-                        progress = clampedProgress,
-                    ),
-                )
-            }
-        }
+        TimeframeChipPlacement(
+            id = id,
+            name = range.rail.name,
+            colorHex = range.rail.colorHex,
+            motion = motion,
+            fromSlot = slot,
+            toSlot = slot,
+            progress = 0f,
+            trackDayIndex = when (motion) {
+                StickyHeaderTimeframeChipMotion.ENTERING -> range.firstDay
+                StickyHeaderTimeframeChipMotion.EXITING -> range.lastDay
+                StickyHeaderTimeframeChipMotion.PINNED -> firstVisibleDayIndex
+            },
+        )
     }
 }
 
@@ -1102,38 +1090,17 @@ private fun ExpandedContinuousTimeline(
             )
         }
 
-        val pinnedDate = taskFeedDateForIndex(today, firstVisibleDayIndex)
-        val pinnedRails = railMetadataForDate(timeframes, pinnedDate)
-        // Find the day index where each timeframe first appears among visible days
-        val firstDayForTimeframe = mutableMapOf<String, Int>()
-        for (dayIndex in firstVisibleDayIndex..lastVisibleDayIndex) {
+        val visibleDayRails = visibleDayIndices.map { dayIndex ->
             val date = taskFeedDateForIndex(today, dayIndex)
-            for (rail in railMetadataForDate(timeframes, date)) {
-                if (rail.id !in firstDayForTimeframe) {
-                    firstDayForTimeframe[rail.id] = dayIndex
-                }
-            }
+            dayIndex to railMetadataForDate(timeframes, date)
         }
         val timeframeChipPlacements = buildTimeframeChipPlacements(
-            currentRails = pinnedRails,
-            incomingRails = if (lastVisibleDayIndex > firstVisibleDayIndex) {
-                railMetadataForDate(timeframes, taskFeedDateForIndex(today, lastVisibleDayIndex))
-            } else null,
-            progress = headerTransition.progress,
-        ).map { placement ->
-            placement.copy(
-                trackDayIndex = when (placement.motion) {
-                    StickyHeaderTimeframeChipMotion.PINNED -> firstVisibleDayIndex
-                    StickyHeaderTimeframeChipMotion.EXITING -> firstVisibleDayIndex
-                    StickyHeaderTimeframeChipMotion.ENTERING ->
-                        firstDayForTimeframe[placement.id] ?: lastVisibleDayIndex
-                }
-            )
-        }
-        // ENTERING chips follow the date chip of the specific day where their timeframe starts
+            visibleDayRails = visibleDayRails,
+            firstVisibleDayIndex = firstVisibleDayIndex,
+        )
         val headerDateChipOffsets = HeaderChipVerticalOffsets(
             outgoingDateYPx = dateChipYForDayIndex(firstVisibleDayIndex),
-            incomingDateYPx = null,  // computed per-chip from trackDayIndex
+            incomingDateYPx = null,
         )
 
         val scrollableState = rememberScrollableState { delta ->
