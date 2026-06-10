@@ -72,7 +72,7 @@ data class AppSettings(
     val alignmentMinutes: Int = 30,
     val allowTaskSplitting: Boolean = true,
     val defaultTaskSplitting: Boolean = true,
-    val allowConcurrentTasks: Boolean = false,
+    val allowConcurrentTasks: Boolean = true,
     val maxTaskChunkMinutes: Int = 480,
     val preferredPeriodFallbackMode: PreferredPeriodFallbackMode = PreferredPeriodFallbackMode.USE_OTHER_PRODUCTIVE_PERIODS,
     val urgentRescheduleMode: UrgentRescheduleMode = UrgentRescheduleMode.MOVE_OTHER_FLEXIBLE_IF_NEEDED,

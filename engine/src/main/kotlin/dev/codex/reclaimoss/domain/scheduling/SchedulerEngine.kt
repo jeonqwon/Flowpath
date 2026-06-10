@@ -249,7 +249,15 @@ class SchedulerEngine {
                 cursor = existingAnchorByTaskId[task.id]?.let { maxInstant(firstBlockStart, it) } ?: firstBlockStart
             }
 
-            while (remaining > 0 && cursor <= effectiveTaskDueAt) {
+            val effectiveAllowSplitting = policy.allowTaskSplitting && task.allowSplitting
+            // When splitting, allow the loop to continue past the strict deadline
+            // so remaining portions can be placed after a blocker (e.g. sleep)
+            val splitLoopEnd = if (effectiveAllowSplitting && remaining < startingRemaining) {
+                maxInstant(effectiveTaskDueAt, cursor.plus(policy.lookAheadDays.toLong(), ChronoUnit.DAYS))
+            } else {
+                effectiveTaskDueAt
+            }
+            while (remaining > 0 && cursor <= splitLoopEnd) {
                 val (occupied, softOccupied) = partitionBusyWindowsForTask(
                     task = task,
                     taskBlocks = pendingBlocksPool.filter { it.taskId != task.id },
@@ -260,7 +268,13 @@ class SchedulerEngine {
                 val candidate = nextCandidate(
                     task = task,
                     cursor = cursor,
-                    dueAt = effectiveTaskDueAt,
+                    // When splitting, let remaining portions extend past the deadline
+                    // so the task can be split around sleep into the next day
+                    dueAt = if (effectiveAllowSplitting && remaining < startingRemaining) {
+                        maxInstant(effectiveTaskDueAt, cursor.plus(policy.lookAheadDays.toLong(), ChronoUnit.DAYS))
+                    } else {
+                        effectiveTaskDueAt
+                    },
                     timeframeEnd = timeframeEnd,
                     zoneId = zoneId,
                     workHours = workHours,
@@ -268,7 +282,9 @@ class SchedulerEngine {
                     softOccupied = softOccupied,
                     timePeriods = timePeriods,
                     policy = policy,
-                    allowConcurrentForTask = taskAllowsOverlap(task, policy.allowConcurrentTasks),
+                    // Anchor first block at fixedStartAt even if overlapping
+                    allowConcurrentForTask = taskAllowsOverlap(task, policy.allowConcurrentTasks) &&
+                        !(remaining == startingRemaining && task.fixedStartAt != null),
                     remainingMinutes = remaining,
                     preferredTimePeriodId = task.preferredTimePeriodId,
                 ) ?: break
@@ -446,6 +462,11 @@ class SchedulerEngine {
         val endDate = lookAheadEnd.atZone(zoneId).toLocalDate()
         var earliestFallback: BusyWindow? = null
         var bestConcurrentCandidate: ScoredBusyWindow? = null
+        // For non-concurrent path: track best full-fit (unsplit) and best partial-fit across all dates
+        var bestUnsplittable: BusyWindow? = null
+        var bestUnsplittableDate: LocalDate? = null
+        var bestSplittable: BusyWindow? = null
+        var bestSplittableCapacity = 0
 
         while (!date.isAfter(endDate)) {
             val preferredSegments = mutableListOf<BusyWindow>()
@@ -505,29 +526,62 @@ class SchedulerEngine {
                     ?.let { candidate -> minByNullable(bestConcurrentCandidate, candidate) }
                     ?: fallbackCandidate?.let { candidate -> minByNullable(bestConcurrentCandidate, candidate) }
                     ?: bestConcurrentCandidate
-            } else {
-                val preferredCandidate = if (hasWindowConstraint) {
-                    preferredSegments.bestWindowedBlock(
-                        remainingMinutes = remainingMinutes,
-                        maxBlockMinutes = policy.maxBlockMinutes,
-                        minBlockMinutes = policy.minBlockMinutes,
-                        zoneId = zoneId,
-                        alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = effectiveAllowSplitting,
-                        workHours = workHours,
-                    )
-                } else {
-                    preferredSegments.firstBlock(
-                        remainingMinutes = remainingMinutes,
-                        maxBlockMinutes = policy.maxBlockMinutes,
-                        minBlockMinutes = policy.minBlockMinutes,
-                        zoneId = zoneId,
-                        alignmentMinutes = policy.alignmentMinutes,
-                        allowTaskSplitting = effectiveAllowSplitting,
-                        breakBetweenBlocksMinutes = policy.breakBetweenBlocksMinutes,
-                    )
+            } else if (hasWindowConstraint) {
+                // Window-constrained: use bestWindowedBlock which prefers the middle
+                val candidate = preferredSegments.bestWindowedBlock(
+                    remainingMinutes = remainingMinutes,
+                    maxBlockMinutes = policy.maxBlockMinutes,
+                    minBlockMinutes = policy.minBlockMinutes,
+                    zoneId = zoneId,
+                    alignmentMinutes = policy.alignmentMinutes,
+                    allowTaskSplitting = effectiveAllowSplitting,
+                    workHours = workHours,
+                )
+                if (candidate != null) {
+                    val fitsFully = Duration.between(candidate.startAt, candidate.endAt).toMinutes().toInt() >= remainingMinutes
+                    if (fitsFully) {
+                        if (bestUnsplittable == null || date < bestUnsplittableDate!!) {
+                            bestUnsplittable = candidate
+                            bestUnsplittableDate = date
+                        }
+                    } else if (bestUnsplittable == null) {
+                        val capacity = Duration.between(candidate.startAt, candidate.endAt).toMinutes().toInt()
+                        if (capacity > bestSplittableCapacity) {
+                            bestSplittable = candidate
+                            bestSplittableCapacity = capacity
+                        }
+                    }
                 }
-                preferredCandidate?.let { return it }
+            } else {
+                // No window constraint: scan segments, prefer unsplit, then largest chunk
+                for (segment in preferredSegments) {
+                    val capacity = Duration.between(
+                        alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes),
+                        segment.endAt,
+                    ).toMinutes().toInt()
+                    if (capacity >= remainingMinutes) {
+                        // Full fit — prefer earliest date
+                        if (bestUnsplittable == null || date < bestUnsplittableDate!!) {
+                            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes)
+                            bestUnsplittable = BusyWindow(
+                                startAt = alignedStart,
+                                endAt = alignedStart.plus(remainingMinutes.toLong(), ChronoUnit.MINUTES),
+                            )
+                            bestUnsplittableDate = date
+                        }
+                    } else if (effectiveAllowSplitting && bestUnsplittable == null && capacity > bestSplittableCapacity) {
+                        // Partial fit — prefer largest chunk (minimizes pieces)
+                        val alignedStart = alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes)
+                        val blockMinutes = min(min(capacity, remainingMinutes), policy.maxBlockMinutes)
+                        if (blockMinutes >= policy.minBlockMinutes) {
+                            bestSplittable = BusyWindow(
+                                startAt = alignedStart,
+                                endAt = alignedStart.plus(blockMinutes.toLong(), ChronoUnit.MINUTES),
+                            )
+                            bestSplittableCapacity = blockMinutes
+                        }
+                    }
+                }
             }
             if (!policy.strictPreferredPeriod && earliestFallback == null) {
                 earliestFallback = if (hasWindowConstraint) {
@@ -556,7 +610,8 @@ class SchedulerEngine {
             date = date.plusDays(1)
         }
         if (allowConcurrentForTask) return bestConcurrentCandidate?.window
-        return earliestFallback
+        // Prefer unsplit over split, earliest unsplit first
+        return bestUnsplittable ?: bestSplittable ?: earliestFallback
     }
 
     private fun partitionBusyWindowsForTask(

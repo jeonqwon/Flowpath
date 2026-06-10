@@ -168,12 +168,13 @@ class PlannerCoordinator(
             taskId
         }
         val primaryTaskId = createdTaskIds.first()
+        val isHighPriority = taskKind == TaskKind.SLEEP || taskKind == TaskKind.BLOCKER
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             createdTaskIds.forEach { taskId ->
                 placeExactTask(taskId)
             }
-        } else {
-            // Fast path: try to schedule just the new task(s) in existing gaps
+        } else if (!isHighPriority && recurrenceRule.type == RecurrenceType.NONE) {
+            // Fast path: normal non-recurring tasks can slot into existing gaps
             val newTasks = repository.getTasks().filter { it.id in createdTaskIds }
             val targetedPlan = buildSchedulePlan(
                 tasks = newTasks,
@@ -184,16 +185,17 @@ class PlannerCoordinator(
             )
             val allScheduledCleanly = newTasks.all { planSchedulesTaskCleanly(targetedPlan, it.id) }
             if (allScheduledCleanly) {
-                // Fast path succeeded — no need to disturb other tasks
                 applyPlanForTasks(targetedPlan, newTasks)
             } else {
-                // Fast path failed (14-day window full, or recurring task needs coordination).
-                // Fall back to full rebuild which can move other tasks to make room.
                 rebuildSchedule()
             }
+        } else {
+            // High-priority (sleep/blocker) or recurring: always full rebuild
+            // so they get priority placement and can push other tasks aside
+            rebuildSchedule()
         }
         taskIdsNeedingReminder.forEach { createReminderForTask(it) }
-        val result = taskResultFor(primaryTaskId)
+        val result = taskResultFor(primaryTaskId, allowSplitting)
         val failedToFullySchedule = !result.scheduled
         if (failedToFullySchedule && recurrenceRule.type == RecurrenceType.NONE) {
             deleteTask(primaryTaskId)
@@ -244,7 +246,7 @@ class PlannerCoordinator(
             fixedStartAt = fixedStartAt,
             fixedEndAt = fixedEndAt,
         )
-        if (!result.scheduled) return result
+        if (!result.scheduled || result.partial) return result
         repository.clearAllPendingBlocks(sourceTaskId)
         repository.upsertTask(sourceTask.copy(remainingMinutes = 0, status = TaskStatus.COMPLETED, updatedAt = now()))
         return result
@@ -469,7 +471,7 @@ class PlannerCoordinator(
         } else {
             rebuildSchedule()
         }
-        val result = taskResultFor(taskId)
+        val result = taskResultFor(taskId, allowSplitting)
         if (!result.scheduled) {
             repository.upsertTask(existingTask)
             repository.replaceFlexibleBlocks(taskId, originalPendingBlocks)
@@ -885,10 +887,11 @@ class PlannerCoordinator(
         )
         repository.clearAllPendingBlocks(existingTask.id)
         repository.upsertTask(updatedTask)
+        val isHighPriority = updatedTask.taskKind == TaskKind.SLEEP || updatedTask.taskKind == TaskKind.BLOCKER
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             placeExactTask(existingTask.id)
-        } else {
-            // Fast path: try to schedule just this task in existing gaps
+        } else if (!isHighPriority) {
+            // Fast path: normal tasks can slot into existing gaps
             val targetedPlan = buildSchedulePlan(
                 tasks = listOf(updatedTask),
                 existingBlocks = repository.getBlocks(),
@@ -899,11 +902,13 @@ class PlannerCoordinator(
             if (planSchedulesTaskCleanly(targetedPlan, updatedTask.id)) {
                 applyPlanForTasks(targetedPlan, listOf(updatedTask))
             } else {
-                // Fast path failed — fall back to full rebuild
                 rebuildSchedule()
             }
+        } else {
+            // High-priority (sleep/blocker): full rebuild to get priority placement
+            rebuildSchedule()
         }
-        val result = taskResultFor(existingTask.id)
+        val result = taskResultFor(existingTask.id, allowSplitting)
         if (!result.scheduled) {
             restoreTaskSnapshots(snapshots)
             return result
@@ -1004,7 +1009,7 @@ class PlannerCoordinator(
         } else {
             rebuildSchedule()
         }
-        val result = taskResultFor(existingTask.id)
+        val result = taskResultFor(existingTask.id, allowSplitting)
         if (!result.scheduled) {
             createdFutureTaskIds.forEach { deleteTaskArtifacts(it) }
             restoreTaskSnapshots(snapshots)
@@ -1166,17 +1171,28 @@ class PlannerCoordinator(
                 .map { SchedulerEngine.BusyWindow(it.startAt, it.endAt) }
         val overlapsHardBlock = hardBusyWindows.any { it.startAt < endAt && it.endAt > startAt }
         if (overlapsHardBlock) {
-            repository.replaceSchedulingIssuesForTask(
-                taskId,
-                listOf(
-                    SchedulingIssue(
-                        taskId = taskId,
-                        type = SchedulingIssueType.UNSCHEDULED,
-                        unscheduledMinutes = task.remainingMinutes,
-                        reason = "This fixed time is blocked by another task or calendar event.",
+            if (task.allowSplitting && task.remainingMinutes > 0) {
+                // Treat as flexible so the scheduler can split around the blocker
+                val updatedTask = task.copy(
+                    schedulingMode = TaskSchedulingMode.FLEXIBLE,
+                    fixedStartAt = startAt,
+                    fixedEndAt = null,
+                )
+                repository.upsertTask(updatedTask)
+                rebuildSchedule()
+            } else {
+                repository.replaceSchedulingIssuesForTask(
+                    taskId,
+                    listOf(
+                        SchedulingIssue(
+                            taskId = taskId,
+                            type = SchedulingIssueType.UNSCHEDULED,
+                            unscheduledMinutes = task.remainingMinutes,
+                            reason = "This fixed time is blocked by another task or calendar event.",
+                        ),
                     ),
-                ),
-            )
+                )
+            }
             return
         }
         repository.replaceFlexibleBlocks(
@@ -1508,13 +1524,14 @@ class PlannerCoordinator(
         }
     }
 
-    private suspend fun taskResultFor(taskId: String): TaskCreationResult {
+    private suspend fun taskResultFor(taskId: String, allowSplitting: Boolean = false): TaskCreationResult {
         val hasScheduledBlock = repository.getBlocks().any { it.taskId == taskId }
         val issue = repository.getSchedulingIssues().firstOrNull { it.taskId == taskId }
+        val isPartial = issue?.type == SchedulingIssueType.PARTIAL
         return TaskCreationResult(
             taskId = taskId,
-            scheduled = hasScheduledBlock && issue == null,
-            partial = issue?.type == SchedulingIssueType.PARTIAL,
+            scheduled = hasScheduledBlock && (issue == null || (allowSplitting && isPartial)),
+            partial = isPartial,
             reason = issue?.reason,
         )
     }

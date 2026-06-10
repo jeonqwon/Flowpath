@@ -603,9 +603,8 @@ fun CreateWorkScreen(
                 }
 
                 // Warning when overwriting existing sleep
-                val anyExistingDaily = existingSleepTasks.any { it.recurrenceRule.type == RecurrenceType.DAILY }
                 val sleepOverlapWarning = when (taskDraft.recurrenceType) {
-                    RecurrenceType.DAILY -> if (anyExistingDaily) {
+                    RecurrenceType.DAILY -> if (existingSleepTasks.isNotEmpty()) {
                         "Sleep is already scheduled. Saving will replace it for all days."
                     } else null
                     RecurrenceType.WEEKLY -> {
