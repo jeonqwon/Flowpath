@@ -197,7 +197,7 @@ fun PlannerScreen(
             horizontalArrangement = Arrangement.End,
         ) {
             HeaderActionSlot {
-                HeaderActionButton(label = "Add timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe)
+                HeaderActionButton(label = "Add timeframe", icon = Icons.Outlined.Add, onClick = onAddTimeframe, width = 180.dp)
             }
         }
         LazyColumn(

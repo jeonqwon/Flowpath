@@ -155,7 +155,7 @@ enum class AppTab(val label: String) {
 val HeaderActionShape = RoundedCornerShape(22.dp)
 val HeaderActionHeight = 44.dp
 val HeaderActionWidth = 120.dp
-val HeaderActionSlotWidth = 150.dp
+val HeaderActionSlotWidth = 190.dp
 val SurfaceTintStrong = Color(0xFFE9EEF9)
 val CreateScreenSnackbarBottomOffset = 108.dp
 
@@ -664,6 +664,7 @@ private fun TaskDraft.taskDueAtLocalDateTime(now: LocalDateTime = LocalDateTime.
     if (recurrenceType == RecurrenceType.NONE) {
         return if (hasDeadline) deadline else deadline.plusYears(1)
     }
+    if (!hasDeadline) return deadline.plusYears(1)
     val targetTime = deadline.toLocalTime()
     return when (recurrenceType) {
         RecurrenceType.NONE -> deadline

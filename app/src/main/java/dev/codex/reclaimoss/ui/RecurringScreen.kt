@@ -62,16 +62,40 @@ import java.util.Locale
 
 // -- helpers (keep existing) --
 
-fun sleepCoverageByWeekday(tasks: List<ScheduleTask>): Set<DayOfWeek> =
-    tasks.filter { it.taskKind == TaskKind.SLEEP && it.recurrenceRule.type == RecurrenceType.WEEKLY }
+fun sleepCoverageByWeekday(tasks: List<ScheduleTask>): Set<DayOfWeek> {
+    val sleepTasks = tasks.filter { it.taskKind == TaskKind.SLEEP }
+    if (sleepTasks.isEmpty()) return emptySet()
+    // If any sleep covers all days (daily), all days are covered
+    if (sleepTasks.any { it.recurrenceRule.type == RecurrenceType.DAILY }) {
+        return DayOfWeek.entries.toSet()
+    }
+    // Weekly: covered days from daysOfWeek
+    val weeklyDays = sleepTasks
+        .filter { it.recurrenceRule.type == RecurrenceType.WEEKLY }
         .flatMap { it.recurrenceRule.daysOfWeek }
         .toSet()
+    if (weeklyDays.isNotEmpty()) return weeklyDays
+    // Monthly or one-time: check which days have blocks scheduled
+    val zoneId = ZoneId.systemDefault()
+    return sleepTasks
+        .flatMap { task ->
+            val startDay = task.fixedStartAt?.atZone(zoneId)?.dayOfWeek
+            listOfNotNull(startDay)
+        }
+        .toSet()
+}
 
 fun sleepTimeForDay(tasks: List<ScheduleTask>, day: DayOfWeek): Pair<LocalTime, LocalTime>? {
-    val task = tasks.firstOrNull {
-        it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek
-    } ?: return null
     val zoneId = ZoneId.systemDefault()
+    val task = tasks.firstOrNull { task ->
+        if (task.taskKind != TaskKind.SLEEP) return@firstOrNull false
+        when (task.recurrenceRule.type) {
+            RecurrenceType.DAILY -> true
+            RecurrenceType.WEEKLY -> day in task.recurrenceRule.daysOfWeek
+            RecurrenceType.MONTHLY -> task.fixedStartAt?.atZone(zoneId)?.dayOfWeek == day
+            RecurrenceType.NONE -> task.fixedStartAt?.atZone(zoneId)?.dayOfWeek == day
+        }
+    } ?: return null
     val start = task.fixedStartAt?.atZone(zoneId)?.toLocalTime() ?: return null
     val end = task.fixedEndAt?.atZone(zoneId)?.toLocalTime() ?: return null
     return start to end
@@ -130,6 +154,7 @@ fun RecurringScreen(
     }
 
     var expandedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var sleepExpanded by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -158,94 +183,60 @@ fun RecurringScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { sleepExpanded = !sleepExpanded }
+                                .padding(16.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("Sleep", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = if (sleepConfigured) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant,
-                                ) {
-                                    Text(
-                                        "$coveredCount/7",
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (sleepConfigured) MaterialTheme.colorScheme.onPrimaryContainer
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Button(
-                                    onClick = onAddSleep,
-                                    shape = RoundedCornerShape(14.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                ) {
-                                    Text("Add/change", style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
+                            Text("Sleep", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Icon(
+                                if (sleepExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                contentDescription = if (sleepExpanded) "Collapse" else "Expand",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
 
-                        // Weekday dots
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            DayOfWeek.entries.forEach { day ->
-                                Surface(
-                                    modifier = Modifier.size(34.dp),
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = if (day in covered) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant,
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        if (day in covered) {
-                                            Icon(Icons.Outlined.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onPrimary)
-                                        } else {
-                                            Text(weekdayLabelShort(day), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
+                        // Dropdown: per-day times
+                        if (sleepExpanded && coveredCount > 0) {
+                            Column(
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                covered.sortedBy { it.value }.forEach { day ->
+                                    val sleepTask = existingSleepTasks.firstOrNull {
+                                        it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek
                                     }
-                                }
-                            }
-                        }
-
-                        // Per-day times — always visible and tappable
-                        if (coveredCount > 0) {
-                            covered.sortedBy { it.value }.forEach { day ->
-                                val sleepTask = existingSleepTasks.firstOrNull {
-                                    it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek
-                                }
-                                val time = sleepTimeForDay(existingSleepTasks, day) ?: return@forEach
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .then(
-                                            if (sleepTask != null) Modifier.clickable { onOpenTask(sleepTask.id) }
-                                            else Modifier
-                                        )
-                                        .padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(weekdayLabel(day), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            "${time.first.formatAsClock()} – ${time.second.formatAsClock()}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        if (sleepTask != null) {
-                                            Spacer(Modifier.width(4.dp))
-                                            Icon(
-                                                Icons.Outlined.ChevronRight, null, Modifier.size(14.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                    val time = sleepTimeForDay(existingSleepTasks, day) ?: return@forEach
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .then(
+                                                if (sleepTask != null) Modifier.clickable { onOpenTask(sleepTask.id) }
+                                                else Modifier
                                             )
+                                            .padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(weekdayLabel(day), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                "${time.first.formatAsClock()} – ${time.second.formatAsClock()}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            if (sleepTask != null) {
+                                                Spacer(Modifier.width(4.dp))
+                                                Icon(
+                                                    Icons.Outlined.ChevronRight, null, Modifier.size(14.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                                )
+                                            }
                                         }
                                     }
                                 }

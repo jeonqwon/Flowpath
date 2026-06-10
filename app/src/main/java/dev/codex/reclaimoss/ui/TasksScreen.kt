@@ -16,6 +16,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -309,7 +314,6 @@ private val ExpandedDateChipSlotHeight = 30.dp
 private val ExpandedDateChipGap = 16.dp
 private val ExpandedDateChipAboveMidnightOffset = 38.dp
 private val ExpandedTaskStickyTitleTopInset = 8.dp
-private val TimeframeHeaderChipVerticalAdjustment = 2.dp
 private val TimeframeHeaderChipMaxWidth = 96.dp
 private val TimeframeHeaderChipSlotStep = 38.dp
 private val TaskTimelineLabelWidth = 64.dp
@@ -1056,14 +1060,10 @@ private fun ExpandedContinuousTimeline(
             }
         }
 
-        val scrollableState = rememberScrollableState { delta ->
-            val previous = safeScrollPx
-            val next = (previous - delta).roundToInt().coerceIn(0, maxScrollPx)
-            if (next != previous) {
-                onScrollPxChange(next)
-            }
-            (previous - next).toFloat()
-        }
+        val scope = rememberCoroutineScope()
+        // Track velocity and fling job for cancel-on-touch
+        val flingVelocity = remember { mutableStateOf(0f) }
+        val flingJob = remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
         val firstVisibleDayIndex = (safeScrollPx / dayHeightPx).coerceIn(0, TaskFeedDayCount - 1)
         val lastVisibleDayIndex = ((safeScrollPx + viewportHeightPx) / dayHeightPx + 1)
@@ -1150,6 +1150,40 @@ private fun ExpandedContinuousTimeline(
             incomingDateYPx = headerTransition.incomingDayIndex?.let { dateChipYForDayIndex(it) },
         )
 
+        val scrollableState = rememberScrollableState { delta ->
+            // Cancel any running fling when user touches the screen
+            flingJob.value?.cancel()
+            if (abs(delta) > 1f) flingVelocity.value = delta
+            val next = (safeScrollPx - delta.roundToInt()).coerceIn(0, maxScrollPx)
+            if (next != safeScrollPx) onScrollPxChange(next)
+            delta
+        }
+
+        // Fling: animate momentum when user lifts finger and velocity is significant
+        val currentScroll by rememberUpdatedState(safeScrollPx)
+        val currentMax by rememberUpdatedState(maxScrollPx)
+        LaunchedEffect(flingVelocity.value) {
+            val velocity = flingVelocity.value
+            if (abs(velocity) < 10f) return@LaunchedEffect
+            // Wait one frame to confirm drag has ended
+            delay(32)
+            if (abs(flingVelocity.value) > 1f) return@LaunchedEffect // still dragging
+            val startPx = currentScroll
+            flingJob.value = launch {
+                var pos = 0f
+                var vel = velocity
+                while (abs(vel) > 1f) {
+                    val delta = vel * 0.016f
+                    pos += delta
+                    vel *= 0.94f
+                    val next = (startPx - pos.roundToInt()).coerceIn(0, currentMax)
+                    onScrollPxChange(next)
+                    if (next == 0 || next == currentMax) break
+                    delay(16)
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1158,10 +1192,39 @@ private fun ExpandedContinuousTimeline(
                     orientation = Orientation.Vertical,
                 ),
         ) {
+            // Vertical divider — spans full viewport, not per-day
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(start = railStripWidth + TaskTimelineRailGap + TaskTimelineLabelWidth - TaskTimelineDividerWidth)
+                    .width(TaskTimelineDividerWidth)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            )
+
+            // Timeframe rails — full viewport overlay stitched from visible days
             visibleDayIndices.forEach { dayIndex ->
                 val date = taskFeedDateForIndex(today, dayIndex)
                 val dayTopPx = dayIndex * dayHeightPx - safeScrollPx
-                val dayRailMetadata = railMetadataForDate(timeframes, date)
+                val dayBottomPx = dayTopPx + dayHeightPx
+                val visibleTop = dayTopPx.coerceAtLeast(0)
+                val visibleBottom = dayBottomPx.coerceAtMost(viewportHeightPx)
+                if (visibleBottom > visibleTop) {
+                    val dayRailMetadata = railMetadataForDate(timeframes, date)
+                    TimeframeRailStrip(
+                        rails = dayRailMetadata,
+                        modifier = Modifier
+                            .offset { IntOffset(0, visibleTop) }
+                            .height(with(density) { (visibleBottom - visibleTop).toDp() })
+                            .width(timelineRailStripWidth(dayRailMetadata, compact = false)),
+                        compact = false,
+                        segment = TimeframeRailSegment.BODY,
+                    )
+                }
+            }
+
+            visibleDayIndices.forEach { dayIndex ->
+                val date = taskFeedDateForIndex(today, dayIndex)
+                val dayTopPx = dayIndex * dayHeightPx - safeScrollPx
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1169,23 +1232,13 @@ private fun ExpandedContinuousTimeline(
                         .offset { IntOffset(0, dayTopPx) },
                     horizontalArrangement = Arrangement.spacedBy(TaskTimelineRailGap),
                 ) {
-                    TimeframeRailStrip(
-                        rails = dayRailMetadata,
-                        modifier = Modifier
-                            .width(timelineRailStripWidth(dayRailMetadata, compact = false))
-                            .fillMaxHeight(),
-                        compact = false,
-                        segment = TimeframeRailSegment.BODY,
+                    // Spacer instead of rails (rails rendered as overlay above)
+                    Spacer(Modifier
+                        .width(timelineRailStripWidth(railMetadataForDate(timeframes, date), compact = false))
+                        .fillMaxHeight()
                     )
 
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        Box(
-                            modifier = Modifier
-                                .offset(x = TaskTimelineLabelWidth - TaskTimelineDividerWidth)
-                                .width(TaskTimelineDividerWidth)
-                                .fillMaxHeight()
-                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-                        )
                         FullDayTimeline(
                             segments = emptyList(),
                             tasksById = emptyMap(),
@@ -1309,7 +1362,6 @@ private fun PinnedExpandedTimelineHeader(
 ) {
     val density = LocalDensity.current
     val headerTopInsetPx = with(density) { ExpandedDayHeaderTopInset.roundToPx() }
-    val timeframeVerticalAdjustmentPx = with(density) { TimeframeHeaderChipVerticalAdjustment.roundToPx() }
     val chipStartPx = with(density) {
         (maxTimelineRailStripWidth(compact = false) +
             TaskTimelineRailGap +
@@ -1327,10 +1379,10 @@ private fun PinnedExpandedTimelineHeader(
             val slotProgress = placement.progress.coerceIn(0f, 1f)
             val slot = placement.fromSlot + ((placement.toSlot - placement.fromSlot) * slotProgress)
             val chipOffsetY = when (placement.motion) {
-                StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
+                StickyHeaderTimeframeChipMotion.PINNED -> outgoingDateYPx
                 StickyHeaderTimeframeChipMotion.EXITING -> outgoingDateYPx
                 StickyHeaderTimeframeChipMotion.ENTERING -> incomingDateYPx ?: outgoingDateYPx
-            } + timeframeVerticalAdjustmentPx
+            }
             TimeframeNameChip(
                 text = placement.name,
                 borderColor = parseTimeframeColor(placement.colorHex),
@@ -1343,6 +1395,7 @@ private fun PinnedExpandedTimelineHeader(
                         )
                     }
                     .zIndex(1f)
+                    .height(ExpandedDateChipSlotHeight)
                     .widthIn(max = TimeframeHeaderChipMaxWidth),
             )
         }
@@ -1367,6 +1420,7 @@ private fun DateChip(text: String) {
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
@@ -1392,6 +1446,7 @@ private fun TimeframeNameChip(
                 shape = RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(
             text,
