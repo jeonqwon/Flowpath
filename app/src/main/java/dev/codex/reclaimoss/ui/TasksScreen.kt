@@ -218,6 +218,7 @@ internal data class TimeframeChipPlacement(
     val fromSlot: Int,
     val toSlot: Int,
     val progress: Float,
+    val trackDayIndex: Int = 0,  // day index whose date chip Y this chip follows
 )
 
 private data class HeaderChipVerticalOffsets(
@@ -326,7 +327,6 @@ private val TaskTimelineBoundaryOverlap = 2.dp
 
 private enum class TasksSheetType {
     ADD_CHOOSER,
-    UPCOMING_REMINDERS,
     DAY_SUMMARY,
 }
 
@@ -562,12 +562,6 @@ fun TasksScreen(
                 }
                 IconButton(
                     modifier = Modifier.size(38.dp),
-                    onClick = { showingSheet = TasksSheetType.UPCOMING_REMINDERS },
-                ) {
-                    Icon(Icons.Outlined.Notifications, contentDescription = "Upcoming reminders")
-                }
-                IconButton(
-                    modifier = Modifier.size(38.dp),
                     onClick = onOpenRecurring,
                 ) {
                     Icon(Icons.Outlined.Repeat, contentDescription = "Recurring")
@@ -671,34 +665,11 @@ fun TasksScreen(
                     actions = buildList {
                         if (sleepFullyConfigured || sleepHintDismissed) {
                             add("Add Task" to onAddTask)
-                            add("Add Reminder" to onAddReminder)
                             add("Add Blocker" to onAddBlocker)
                         }
                         add("Add Sleep" to onAddSleep)
                     },
                     onDone = { showingSheet = null },
-                )
-            }
-        }
-        TasksSheetType.UPCOMING_REMINDERS -> {
-            ModalBottomSheet(
-                onDismissRequest = { showingSheet = null },
-                containerColor = MaterialTheme.colorScheme.surface,
-            ) {
-                UpcomingRemindersSheet(
-                    reminders = activeReminders.sortedBy { it.dueAt },
-                    tasksById = tasksById,
-                    formatter = reminderFormatter,
-                    zoneId = zoneId,
-                    onOpenReminder = { reminder ->
-                        showingSheet = null
-                        val linkedTaskId = reminder.linkedTaskId
-                        if (linkedTaskId != null && tasksById.containsKey(linkedTaskId)) {
-                            onOpenTask(linkedTaskId)
-                        } else {
-                            onOpenReminder(reminder)
-                        }
-                    },
                 )
             }
         }
@@ -712,7 +683,6 @@ fun TasksScreen(
                     DaySummarySheet(
                         section = section,
                         formatter = dateFormatter,
-                        reminderFormatter = reminderFormatter,
                         zoneId = zoneId,
                         onExpand = {
                             showingSheet = null
@@ -722,10 +692,6 @@ fun TasksScreen(
                         onOpenTask = {
                             showingSheet = null
                             onOpenTask(it)
-                        },
-                        onOpenReminder = { reminder ->
-                            showingSheet = null
-                            onOpenReminder(reminder)
                         },
                     )
                 }
@@ -934,8 +900,6 @@ internal fun buildTimeframeChipPlacements(
 
 private fun collapsedDaySummaryText(section: TaskDaySection): String = buildString {
     append(if (section.taskCount == 1) "1 task" else "${section.taskCount} tasks")
-    append(" · ")
-    append(if (section.reminderCount == 1) "1 reminder" else "${section.reminderCount} reminders")
 }
 
 @Composable
@@ -1138,16 +1102,38 @@ private fun ExpandedContinuousTimeline(
             )
         }
 
-        val pinnedDate = taskFeedDateForIndex(today, headerTransition.pinnedDayIndex)
-        val incomingDate = headerTransition.incomingDayIndex?.let { taskFeedDateForIndex(today, it) }
+        val pinnedDate = taskFeedDateForIndex(today, firstVisibleDayIndex)
+        val pinnedRails = railMetadataForDate(timeframes, pinnedDate)
+        // Find the day index where each timeframe first appears among visible days
+        val firstDayForTimeframe = mutableMapOf<String, Int>()
+        for (dayIndex in firstVisibleDayIndex..lastVisibleDayIndex) {
+            val date = taskFeedDateForIndex(today, dayIndex)
+            for (rail in railMetadataForDate(timeframes, date)) {
+                if (rail.id !in firstDayForTimeframe) {
+                    firstDayForTimeframe[rail.id] = dayIndex
+                }
+            }
+        }
         val timeframeChipPlacements = buildTimeframeChipPlacements(
-            currentRails = railMetadataForDate(timeframes, pinnedDate),
-            incomingRails = incomingDate?.let { railMetadataForDate(timeframes, it) },
+            currentRails = pinnedRails,
+            incomingRails = if (lastVisibleDayIndex > firstVisibleDayIndex) {
+                railMetadataForDate(timeframes, taskFeedDateForIndex(today, lastVisibleDayIndex))
+            } else null,
             progress = headerTransition.progress,
-        )
+        ).map { placement ->
+            placement.copy(
+                trackDayIndex = when (placement.motion) {
+                    StickyHeaderTimeframeChipMotion.PINNED -> firstVisibleDayIndex
+                    StickyHeaderTimeframeChipMotion.EXITING -> firstVisibleDayIndex
+                    StickyHeaderTimeframeChipMotion.ENTERING ->
+                        firstDayForTimeframe[placement.id] ?: lastVisibleDayIndex
+                }
+            )
+        }
+        // ENTERING chips follow the date chip of the specific day where their timeframe starts
         val headerDateChipOffsets = HeaderChipVerticalOffsets(
-            outgoingDateYPx = dateChipYForDayIndex(headerTransition.pinnedDayIndex),
-            incomingDateYPx = headerTransition.incomingDayIndex?.let { dateChipYForDayIndex(it) },
+            outgoingDateYPx = dateChipYForDayIndex(firstVisibleDayIndex),
+            incomingDateYPx = null,  // computed per-chip from trackDayIndex
         )
 
         val scrollableState = rememberScrollableState { delta ->
@@ -1330,6 +1316,8 @@ private fun ExpandedContinuousTimeline(
                     timeframePlacements = timeframeChipPlacements,
                     outgoingDateYPx = headerDateChipOffsets.outgoingDateYPx,
                     incomingDateYPx = headerDateChipOffsets.incomingDateYPx,
+                    dateChipYForIndex = ::dateChipYForDayIndex,
+                    firstVisibleDayIndex = firstVisibleDayIndex,
                     modifier = Modifier,
                 )
             }
@@ -1358,6 +1346,8 @@ private fun PinnedExpandedTimelineHeader(
     timeframePlacements: List<TimeframeChipPlacement>,
     outgoingDateYPx: Int,
     incomingDateYPx: Int?,
+    dateChipYForIndex: (Int) -> Int = { 0 },
+    firstVisibleDayIndex: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -1379,9 +1369,13 @@ private fun PinnedExpandedTimelineHeader(
             val slotProgress = placement.progress.coerceIn(0f, 1f)
             val slot = placement.fromSlot + ((placement.toSlot - placement.fromSlot) * slotProgress)
             val chipOffsetY = when (placement.motion) {
-                StickyHeaderTimeframeChipMotion.PINNED -> outgoingDateYPx
-                StickyHeaderTimeframeChipMotion.EXITING -> outgoingDateYPx
-                StickyHeaderTimeframeChipMotion.ENTERING -> incomingDateYPx ?: outgoingDateYPx
+                StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
+                // Only attach to date chip when the exiting day is at the header (being pushed out)
+                StickyHeaderTimeframeChipMotion.EXITING ->
+                    if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
+                    else headerTopInsetPx
+                // ENTERING: follow the date chip of the specific day where this timeframe starts
+                StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
             }
             TimeframeNameChip(
                 text = placement.name,
@@ -1649,68 +1643,12 @@ private fun TasksSheetActionList(
 }
 
 @Composable
-private fun UpcomingRemindersSheet(
-    reminders: List<Reminder>,
-    tasksById: Map<String, ScheduleTask>,
-    formatter: DateTimeFormatter,
-    zoneId: ZoneId,
-    onOpenReminder: (Reminder) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Upcoming notifications", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        if (reminders.isEmpty()) {
-            Text("No upcoming reminders.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(reminders, key = { it.id }) { reminder ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onOpenReminder(reminder) },
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    ) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                reminder.dueDisplayText(formatter, DateTimeFormatter.ofPattern("MMM d"), zoneId),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            tasksById[reminder.linkedTaskId]?.let { linkedTask ->
-                                Text(
-                                    linkedTask.title,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
 private fun DaySummarySheet(
     section: TaskDaySection,
     formatter: DateTimeFormatter,
-    reminderFormatter: DateTimeFormatter,
     zoneId: ZoneId,
     onExpand: () -> Unit,
     onOpenTask: (String) -> Unit,
-    onOpenReminder: (Reminder) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -1741,27 +1679,6 @@ private fun DaySummarySheet(
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(task.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(task.status.name.lowercase().replaceFirstChar { it.titlecase(Locale.getDefault()) }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-        if (section.reminders.isNotEmpty()) {
-            Text("Reminders", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-            section.reminders.forEach { reminder ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onOpenReminder(reminder) },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(
-                            reminder.dueDisplayText(reminderFormatter, DateTimeFormatter.ofPattern("MMM d"), zoneId),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
                     }
                 }
             }

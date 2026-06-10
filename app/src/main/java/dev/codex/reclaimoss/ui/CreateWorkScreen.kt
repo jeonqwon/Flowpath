@@ -727,6 +727,83 @@ fun CreateWorkScreen(
                     } // close Box
                 }
             } else {
+                // Dependency section — pick a task to happen right after/before
+                if (!sleepMode && continuationTasks.isNotEmpty()) {
+                    item {
+                        var dependencyExpanded by remember { mutableStateOf(false) }
+                        CreateFormCard {
+                            TaskSectionTitle("Depends on")
+                            Spacer(Modifier.height(8.dp))
+                            ExposedDropdownMenuBox(
+                                expanded = dependencyExpanded,
+                                onExpandedChange = { dependencyExpanded = it },
+                            ) {
+                                OutlinedTextField(
+                                    value = continuationTasks.firstOrNull { it.id == taskDraft.continuationParentTaskId }?.title
+                                        ?: "None",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dependencyExpanded) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .menuAnchor(),
+                                    singleLine = true,
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = dependencyExpanded,
+                                    onDismissRequest = { dependencyExpanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("None", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                        onClick = {
+                                            taskDraft = taskDraft.copy(
+                                                continuationParentTaskId = null,
+                                                continuationMode = null,
+                                            )
+                                            dependencyExpanded = false
+                                        },
+                                    )
+                                    continuationTasks.forEach { t ->
+                                        DropdownMenuItem(
+                                            text = { Text(t.title) },
+                                            onClick = {
+                                                taskDraft = taskDraft.copy(
+                                                    continuationParentTaskId = t.id,
+                                                    continuationMode = taskDraft.continuationMode
+                                                        ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+                                                )
+                                                dependencyExpanded = false
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                            if (taskDraft.continuationParentTaskId != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = taskDraft.continuationMode == TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+                                        onClick = {
+                                            taskDraft = taskDraft.copy(
+                                                continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
+                                            )
+                                        },
+                                        label = { Text("After task ends") },
+                                    )
+                                    FilterChip(
+                                        selected = taskDraft.continuationMode == TaskContinuationMode.BEFORE_PARENT_START,
+                                        onClick = {
+                                            taskDraft = taskDraft.copy(
+                                                continuationMode = TaskContinuationMode.BEFORE_PARENT_START,
+                                            )
+                                        },
+                                        label = { Text("Before task starts") },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 item {
                     Box(
                         modifier = if (showTutorial && showTaskTutorial) Modifier.onGloballyPositioned { coords ->
@@ -1663,22 +1740,6 @@ fun TaskRulesEditor(
                 label = { Text(label) },
             )
         }
-    }
-    if (continuationTasks.isNotEmpty()) {
-        ContinuationSection(
-            tasks = continuationTasks,
-            selectedParentTaskId = draft.continuationParentTaskId,
-            selectedMode = draft.continuationMode,
-            onParentSelected = { taskId ->
-                onDraftChange(
-                    draft.copy(
-                        continuationParentTaskId = taskId,
-                        continuationMode = if (taskId == null) null else (draft.continuationMode ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END),
-                    ),
-                )
-            },
-            onModeSelected = { mode -> onDraftChange(draft.copy(continuationMode = mode)) },
-        )
     }
     TaskSectionTitle("Overlap")
     if (!globalAllowConcurrentTasks) {

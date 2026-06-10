@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import dev.codex.reclaimoss.domain.model.RecurrenceType
 import dev.codex.reclaimoss.domain.model.ScheduleTask
 import dev.codex.reclaimoss.domain.model.TaskKind
+import dev.codex.reclaimoss.domain.model.TaskStatus
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalTime
@@ -144,13 +145,18 @@ fun RecurringScreen(
     val coveredCount = covered.size
     val sleepConfigured = coveredCount == 7
 
-    // Other recurring tasks (non-sleep, non-blocker, with recurrence), ordered by next due date
-    val recurringTasks = remember(allTasks) {
-        allTasks.filter {
-            it.taskKind != TaskKind.SLEEP &&
-                it.taskKind != TaskKind.BLOCKER &&
-                it.recurrenceRule.type != RecurrenceType.NONE
-        }.sortedBy { it.dueAt }
+    // One card per recurring series (grouped by series ID or task ID)
+    val recurringSeries = remember(allTasks) {
+        allTasks
+            .filter {
+                it.taskKind != TaskKind.SLEEP &&
+                    it.taskKind != TaskKind.BLOCKER &&
+                    it.recurrenceRule.type != RecurrenceType.NONE &&
+                    it.status == TaskStatus.ACTIVE
+            }
+            .groupBy { it.recurrenceSeriesId ?: it.id }
+            .map { (_, tasks) -> tasks.minByOrNull { it.dueAt }!! }
+            .sortedBy { it.dueAt }
     }
 
     var expandedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -246,8 +252,8 @@ fun RecurringScreen(
                 }
             }
 
-            // --- RECURRING TASK CARDS ---
-            if (recurringTasks.isEmpty()) {
+            // --- RECURRING TASK CARDS (one per series) ---
+            if (recurringSeries.isEmpty()) {
                 item {
                     Text(
                         "No recurring tasks yet",
@@ -257,7 +263,10 @@ fun RecurringScreen(
                     )
                 }
             } else {
-                items(recurringTasks, key = { it.id }) { task ->
+                items(recurringSeries, key = { it.recurrenceSeriesId ?: it.id }) { task ->
+                    val occurrenceCount = allTasks.count {
+                        it.recurrenceSeriesId == task.recurrenceSeriesId && it.status == TaskStatus.ACTIVE
+                    }
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -266,17 +275,25 @@ fun RecurringScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Text(task.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Icon(
-                                Icons.Outlined.ChevronRight, null, Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(task.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1)
+                                Icon(
+                                    Icons.Outlined.ChevronRight, null, Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                )
+                            }
+                            Text(
+                                recurrenceSummary(task),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }

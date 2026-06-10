@@ -385,63 +385,63 @@ fun OpenReclaimApp(appGraph: AppGraph) {
         var blockerEndDate by remember { mutableStateOf(LocalDate.now()) }
         var blockerStartTime by remember { mutableStateOf(LocalTime.of(9, 0)) }
         var blockerEndTime by remember { mutableStateOf(LocalTime.of(17, 0)) }
+        var blockerTitleLocal by remember { mutableStateOf(blockerTitle) }
         val context = LocalContext.current
-        val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d") }
+        val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d yyyy") }
         val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
-        ModalBottomSheet(
-            onDismissRequest = { showingBlockerSheet = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        ) {
+
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
+        ) { padding ->
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text("Add Blocker", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    FilledTonalButton(
-                        onClick = {
-                            val date = blockerStartDate
-                            DatePickerDialog(context, { _, y, m, d -> blockerStartDate = LocalDate.of(y, m + 1, d) }, date.year, date.monthValue - 1, date.dayOfMonth).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("From: ${blockerStartDate.format(dateFormatter)}") }
-                    FilledTonalButton(
-                        onClick = {
-                            val date = blockerEndDate
-                            DatePickerDialog(context, { _, y, m, d -> blockerEndDate = LocalDate.of(y, m + 1, d) }, date.year, date.monthValue - 1, date.dayOfMonth).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("To: ${blockerEndDate.format(dateFormatter)}") }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    FilledTonalButton(
-                        onClick = {
-                            TimePickerDialog(context, { _, h, m -> blockerStartTime = LocalTime.of(h, m) }, blockerStartTime.hour, blockerStartTime.minute, false).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("Start: ${blockerStartTime.format(timeFormatter)}") }
-                    FilledTonalButton(
-                        onClick = {
-                            TimePickerDialog(context, { _, h, m -> blockerEndTime = LocalTime.of(h, m) }, blockerEndTime.hour, blockerEndTime.minute, false).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("End: ${blockerEndTime.format(timeFormatter)}") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = { showingBlockerSheet = false }) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Text("Add Blocker", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedTextField(
-                    value = blockerTitle,
-                    onValueChange = { blockerTitle = it },
+                    value = blockerTitleLocal,
+                    onValueChange = { blockerTitleLocal = it },
                     label = { Text("Blocker name (optional)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
+
+                CreateFormCard {
+                    DateTimeSection(
+                        title = "Start",
+                        dateTime = blockerStartDate.atTime(blockerStartTime),
+                        onDateTimeChanged = { dt ->
+                            blockerStartDate = dt.toLocalDate()
+                            blockerStartTime = dt.toLocalTime()
+                        },
+                        context = context,
+                    )
+                }
+
+                CreateFormCard {
+                    DateTimeSection(
+                        title = "End",
+                        dateTime = blockerEndDate.atTime(blockerEndTime),
+                        onDateTimeChanged = { dt ->
+                            blockerEndDate = dt.toLocalDate()
+                            blockerEndTime = dt.toLocalTime()
+                        },
+                        context = context,
+                    )
+                }
 
                 Button(
                     onClick = {
@@ -449,17 +449,20 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             val zoneId = ZoneId.systemDefault()
                             val startInstant = blockerStartDate.atTime(blockerStartTime).atZone(zoneId).toInstant()
                             val endInstant = blockerEndDate.atTime(blockerEndTime).atZone(zoneId).toInstant()
-                            val title = blockerTitle.ifBlank { "Blocker" }
+                            val title = blockerTitleLocal.ifBlank { "Blocker" }
                             val result = viewModel.addBlocker(title, startInstant, endInstant)
+                            blockerTitle = blockerTitleLocal
                             showingBlockerSheet = false
                             snackbarHostState.showLatestSnackbar(
                                 if (result.scheduled) "Blocker added" else result.reason ?: "Unable to add blocker"
                             )
                         }
                     },
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
                     shape = RoundedCornerShape(16.dp),
-                ) { Text("Save Blocker") }
+                ) { Text("Save Blocker", style = MaterialTheme.typography.titleMedium) }
+
+                Spacer(Modifier.height(32.dp))
             }
         }
     }

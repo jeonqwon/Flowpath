@@ -250,9 +250,11 @@ class SchedulerEngine {
             }
 
             val effectiveAllowSplitting = policy.allowTaskSplitting && task.allowSplitting
-            // When splitting, allow the loop to continue past the strict deadline
-            // so remaining portions can be placed after a blocker (e.g. sleep)
-            val splitLoopEnd = if (effectiveAllowSplitting && remaining < startingRemaining) {
+            // When splitting, allow remaining portions to extend past the deadline
+            // so they can be placed after a blocker (e.g. sleep). But NEVER override
+            // a dependency boundary — the task must respect its parent constraint.
+            val hasDependencyConstraint = dependencyEndBoundary != null || dependencyStartBoundary != null
+            val splitLoopEnd = if (effectiveAllowSplitting && remaining < startingRemaining && !hasDependencyConstraint) {
                 maxInstant(effectiveTaskDueAt, cursor.plus(policy.lookAheadDays.toLong(), ChronoUnit.DAYS))
             } else {
                 effectiveTaskDueAt
@@ -282,9 +284,12 @@ class SchedulerEngine {
                     softOccupied = softOccupied,
                     timePeriods = timePeriods,
                     policy = policy,
-                    // Anchor first block at fixedStartAt even if overlapping
+                    // For fixed-start tasks: always anchor at cursor (non-concurrent).
+                    // For flexible tasks: first block uses concurrent (best placement),
+                    // split portions use non-concurrent (earliest slot, no gaps).
                     allowConcurrentForTask = taskAllowsOverlap(task, policy.allowConcurrentTasks) &&
-                        !(remaining == startingRemaining && task.fixedStartAt != null),
+                        task.fixedStartAt == null &&
+                        remaining == startingRemaining,
                     remainingMinutes = remaining,
                     preferredTimePeriodId = task.preferredTimePeriodId,
                 ) ?: break
@@ -462,11 +467,6 @@ class SchedulerEngine {
         val endDate = lookAheadEnd.atZone(zoneId).toLocalDate()
         var earliestFallback: BusyWindow? = null
         var bestConcurrentCandidate: ScoredBusyWindow? = null
-        // For non-concurrent path: track best full-fit (unsplit) and best partial-fit across all dates
-        var bestUnsplittable: BusyWindow? = null
-        var bestUnsplittableDate: LocalDate? = null
-        var bestSplittable: BusyWindow? = null
-        var bestSplittableCapacity = 0
 
         while (!date.isAfter(endDate)) {
             val preferredSegments = mutableListOf<BusyWindow>()
@@ -496,7 +496,13 @@ class SchedulerEngine {
                     preferredSegments += segment
                 }
             }
-            val effectiveAllowSplitting = policy.allowTaskSplitting && task.allowSplitting
+            // Fixed-start tasks must anchor at cursor — treat splitting as always allowed
+            // so even non-splittable tasks can place a partial block at their fixed time.
+            val effectiveAllowSplitting = if (task.fixedStartAt != null) {
+                true
+            } else {
+                policy.allowTaskSplitting && task.allowSplitting
+            }
             if (allowConcurrentForTask) {
                 val preferredCandidate = preferredSegments.bestConcurrentBlock(
                     remainingMinutes = remainingMinutes,
@@ -526,62 +532,37 @@ class SchedulerEngine {
                     ?.let { candidate -> minByNullable(bestConcurrentCandidate, candidate) }
                     ?: fallbackCandidate?.let { candidate -> minByNullable(bestConcurrentCandidate, candidate) }
                     ?: bestConcurrentCandidate
-            } else if (hasWindowConstraint) {
-                // Window-constrained: use bestWindowedBlock which prefers the middle
-                val candidate = preferredSegments.bestWindowedBlock(
-                    remainingMinutes = remainingMinutes,
-                    maxBlockMinutes = policy.maxBlockMinutes,
-                    minBlockMinutes = policy.minBlockMinutes,
-                    zoneId = zoneId,
-                    alignmentMinutes = policy.alignmentMinutes,
-                    allowTaskSplitting = effectiveAllowSplitting,
-                    workHours = workHours,
-                )
-                if (candidate != null) {
-                    val fitsFully = Duration.between(candidate.startAt, candidate.endAt).toMinutes().toInt() >= remainingMinutes
-                    if (fitsFully) {
-                        if (bestUnsplittable == null || date < bestUnsplittableDate!!) {
-                            bestUnsplittable = candidate
-                            bestUnsplittableDate = date
-                        }
-                    } else if (bestUnsplittable == null) {
-                        val capacity = Duration.between(candidate.startAt, candidate.endAt).toMinutes().toInt()
-                        if (capacity > bestSplittableCapacity) {
-                            bestSplittable = candidate
-                            bestSplittableCapacity = capacity
-                        }
-                    }
-                }
             } else {
-                // No window constraint: scan segments, prefer unsplit, then largest chunk
-                for (segment in preferredSegments) {
-                    val capacity = Duration.between(
-                        alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes),
-                        segment.endAt,
-                    ).toMinutes().toInt()
-                    if (capacity >= remainingMinutes) {
-                        // Full fit — prefer earliest date
-                        if (bestUnsplittable == null || date < bestUnsplittableDate!!) {
-                            val alignedStart = alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes)
-                            bestUnsplittable = BusyWindow(
-                                startAt = alignedStart,
-                                endAt = alignedStart.plus(remainingMinutes.toLong(), ChronoUnit.MINUTES),
-                            )
-                            bestUnsplittableDate = date
-                        }
-                    } else if (effectiveAllowSplitting && bestUnsplittable == null && capacity > bestSplittableCapacity) {
-                        // Partial fit — prefer largest chunk (minimizes pieces)
-                        val alignedStart = alignToNextAlignment(segment.startAt, zoneId, policy.alignmentMinutes)
-                        val blockMinutes = min(min(capacity, remainingMinutes), policy.maxBlockMinutes)
-                        if (blockMinutes >= policy.minBlockMinutes) {
-                            bestSplittable = BusyWindow(
-                                startAt = alignedStart,
-                                endAt = alignedStart.plus(blockMinutes.toLong(), ChronoUnit.MINUTES),
-                            )
-                            bestSplittableCapacity = blockMinutes
-                        }
+                val preferredCandidate = if (hasWindowConstraint) {
+                    preferredSegments.bestWindowedBlock(
+                        remainingMinutes = remainingMinutes,
+                        maxBlockMinutes = policy.maxBlockMinutes,
+                        minBlockMinutes = policy.minBlockMinutes,
+                        zoneId = zoneId,
+                        alignmentMinutes = policy.alignmentMinutes,
+                        allowTaskSplitting = effectiveAllowSplitting,
+                        workHours = workHours,
+                    )
+                } else {
+                    // For fixed-start tasks: force anchor at cursor by only
+                    // considering the first (earliest) segment. This ensures
+                    // the block starts at the fixed time, splitting if needed.
+                    val segmentsToUse = if (task.fixedStartAt != null) {
+                        preferredSegments.take(1)
+                    } else {
+                        preferredSegments
                     }
+                    segmentsToUse.firstBlock(
+                        remainingMinutes = remainingMinutes,
+                        maxBlockMinutes = policy.maxBlockMinutes,
+                        minBlockMinutes = policy.minBlockMinutes,
+                        zoneId = zoneId,
+                        alignmentMinutes = policy.alignmentMinutes,
+                        allowTaskSplitting = effectiveAllowSplitting,
+                        breakBetweenBlocksMinutes = policy.breakBetweenBlocksMinutes,
+                    )
                 }
+                preferredCandidate?.let { return it }
             }
             if (!policy.strictPreferredPeriod && earliestFallback == null) {
                 earliestFallback = if (hasWindowConstraint) {
@@ -610,8 +591,7 @@ class SchedulerEngine {
             date = date.plusDays(1)
         }
         if (allowConcurrentForTask) return bestConcurrentCandidate?.window
-        // Prefer unsplit over split, earliest unsplit first
-        return bestUnsplittable ?: bestSplittable ?: earliestFallback
+        return earliestFallback
     }
 
     private fun partitionBusyWindowsForTask(
@@ -726,13 +706,14 @@ class SchedulerEngine {
             var candidateStart = alignedStart
             val windowMidpoint = Duration.between(Instant.EPOCH, segment.startAt).toMinutes() +
                 Duration.between(segment.startAt, segment.endAt).toMinutes() / 2
+            val step = alignmentMinutes.coerceAtLeast(1)
             while (!candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES).isAfter(segment.endAt)) {
                 val candidate = BusyWindow(
                     startAt = candidateStart,
                     endAt = candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
                 )
                 if (workHours != null && !isInsideWorkingWindow(candidate, zoneId, workHours)) {
-                    candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                    candidateStart = candidateStart.plus(step.toLong(), ChronoUnit.MINUTES)
                     continue
                 }
                 val overlapCount = softOccupied.count { it.startAt < candidate.endAt && it.endAt > candidate.startAt }
@@ -744,7 +725,7 @@ class SchedulerEngine {
                     startAt = candidate.startAt,
                 )
                 best = minByNullable(best, score)
-                candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                candidateStart = candidateStart.plus(step.toLong(), ChronoUnit.MINUTES)
             }
         }
         return best
@@ -775,13 +756,14 @@ class SchedulerEngine {
             var candidateStart = alignedStart
             val windowMidpoint = Duration.between(Instant.EPOCH, segment.startAt).toMinutes() +
                 Duration.between(segment.startAt, segment.endAt).toMinutes() / 2
+            val winStep = alignmentMinutes.coerceAtLeast(1)
             while (!candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES).isAfter(segment.endAt)) {
                 val candidate = BusyWindow(
                     startAt = candidateStart,
                     endAt = candidateStart.plus(preferredBlockMinutes.toLong(), ChronoUnit.MINUTES),
                 )
                 if (!isInsideWorkingWindow(candidate, zoneId, workHours)) {
-                    candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                    candidateStart = candidateStart.plus(winStep.toLong(), ChronoUnit.MINUTES)
                     continue
                 }
                 val candidateMidpoint = Duration.between(Instant.EPOCH, candidate.startAt).toMinutes() + preferredBlockMinutes / 2
@@ -792,7 +774,7 @@ class SchedulerEngine {
                     startAt = candidate.startAt,
                 )
                 best = minByNullable(best, score)
-                candidateStart = candidateStart.plus(alignmentMinutes.toLong(), ChronoUnit.MINUTES)
+                candidateStart = candidateStart.plus(winStep.toLong(), ChronoUnit.MINUTES)
             }
         }
         return best?.window

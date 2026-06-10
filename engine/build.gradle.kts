@@ -2,6 +2,11 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
+    application
+}
+
+application {
+    mainClass.set("dev.codex.reclaimoss.domain.scheduling.SchedulerCliKt")
 }
 
 kotlin {
