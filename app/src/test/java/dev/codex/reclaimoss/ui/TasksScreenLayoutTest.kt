@@ -16,6 +16,8 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -305,6 +307,88 @@ class TasksScreenLayoutTest {
         assertEquals(true, secondDay.single().continuesFromPreviousDay)
         assertEquals("2026-06-02T04:00:00Z", secondDay.single().block.startAt.toString())
         assertEquals("2026-06-02T10:00:00Z", secondDay.single().block.endAt.toString())
+    }
+
+    @Test
+    fun `expanded timeline scroll position maps date and offset to absolute pixels`() {
+        val today = LocalDate.of(2026, 6, 2)
+        val selectedDate = LocalDate.of(2026, 6, 4)
+
+        val scrollPx = expandedTimelineScrollPxForDate(
+            today = today,
+            date = selectedDate,
+            dayHeightPx = 1440,
+            dayOffsetPx = 320,
+        )
+
+        assertEquals(10000 * 1440 + 2 * 1440 + 320, scrollPx)
+    }
+
+    @Test
+    fun `expanded timeline scroll position resolves back to date and offset`() {
+        val today = LocalDate.of(2026, 6, 2)
+        val scrollPx = 10000 * 1440 + 3 * 1440 + 415
+
+        val position = expandedTimelinePositionForScrollPx(
+            today = today,
+            scrollPx = scrollPx,
+            dayHeightPx = 1440,
+        )
+
+        assertEquals(LocalDate.of(2026, 6, 5), position.date)
+        assertEquals(415, position.dayOffsetPx)
+    }
+
+    @Test
+    fun `expanded timeline block frame keeps overnight blocks continuous`() {
+        val zoneId = ZoneId.of("America/New_York")
+        val today = LocalDate.of(2026, 6, 1)
+        val block = scheduleBlock(
+            startAt = Instant.parse("2026-06-02T02:00:00Z"),
+            endAt = Instant.parse("2026-06-02T10:00:00Z"),
+        )
+
+        val frame = expandedTimelineBlockFramePx(
+            block = block,
+            today = today,
+            zoneId = zoneId,
+            dayHeightPx = 1440,
+            hourHeightPx = 60f,
+            minHeightPx = 64,
+        )
+
+        assertEquals(10000 * 1440 + 22 * 60, frame.topPx)
+        assertEquals(8 * 60, frame.heightPx)
+    }
+
+    @Test
+    fun `expanded timeline visible frame keeps card when bottom is below viewport`() {
+        val frame = requireNotNull(expandedTimelineVisibleBlockFramePx(
+            topPx = 900,
+            heightPx = 600,
+            viewportHeightPx = 1200,
+        ))
+
+        assertNotNull(frame)
+        assertEquals(900, frame.topPx)
+        assertEquals(300, frame.heightPx)
+        assertTrue(frame.hasOriginalTop)
+        assertFalse(frame.hasOriginalBottom)
+    }
+
+    @Test
+    fun `expanded timeline visible frame keeps card when top is above viewport`() {
+        val frame = requireNotNull(expandedTimelineVisibleBlockFramePx(
+            topPx = -420,
+            heightPx = 600,
+            viewportHeightPx = 1200,
+        ))
+
+        assertNotNull(frame)
+        assertEquals(0, frame.topPx)
+        assertEquals(180, frame.heightPx)
+        assertFalse(frame.hasOriginalTop)
+        assertTrue(frame.hasOriginalBottom)
     }
 
     @Test

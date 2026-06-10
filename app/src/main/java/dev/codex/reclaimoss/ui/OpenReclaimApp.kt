@@ -584,6 +584,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                     task = task,
                     blocks = blocks,
                     linkedReminder = reminder,
+                    timeframes = state.snapshot.timeframes,
                     onBack = { selectedTaskId = null },
                     onAddReminder = {
                         scope.launch {
