@@ -167,15 +167,32 @@ class PlannerCoordinator(
             if (addReminder) taskIdsNeedingReminder += taskId
             taskId
         }
+        val primaryTaskId = createdTaskIds.first()
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             createdTaskIds.forEach { taskId ->
                 placeExactTask(taskId)
             }
         } else {
-            rebuildSchedule()
+            // Fast path: try to schedule just the new task(s) in existing gaps
+            val newTasks = repository.getTasks().filter { it.id in createdTaskIds }
+            val targetedPlan = buildSchedulePlan(
+                tasks = newTasks,
+                existingBlocks = repository.getBlocks(),
+                rangeStart = now(),
+                extraBusyWindows = emptyList(),
+                preserveExistingPendingBlocks = true,
+            )
+            val allScheduledCleanly = newTasks.all { planSchedulesTaskCleanly(targetedPlan, it.id) }
+            if (allScheduledCleanly) {
+                // Fast path succeeded — no need to disturb other tasks
+                applyPlanForTasks(targetedPlan, newTasks)
+            } else {
+                // Fast path failed (14-day window full, or recurring task needs coordination).
+                // Fall back to full rebuild which can move other tasks to make room.
+                rebuildSchedule()
+            }
         }
         taskIdsNeedingReminder.forEach { createReminderForTask(it) }
-        val primaryTaskId = createdTaskIds.first()
         val result = taskResultFor(primaryTaskId)
         val failedToFullySchedule = !result.scheduled
         if (failedToFullySchedule && recurrenceRule.type == RecurrenceType.NONE) {
@@ -871,7 +888,20 @@ class PlannerCoordinator(
         if (schedulingMode == TaskSchedulingMode.FIXED_EXACT) {
             placeExactTask(existingTask.id)
         } else {
-            rebuildSchedule()
+            // Fast path: try to schedule just this task in existing gaps
+            val targetedPlan = buildSchedulePlan(
+                tasks = listOf(updatedTask),
+                existingBlocks = repository.getBlocks(),
+                rangeStart = now(),
+                extraBusyWindows = emptyList(),
+                preserveExistingPendingBlocks = true,
+            )
+            if (planSchedulesTaskCleanly(targetedPlan, updatedTask.id)) {
+                applyPlanForTasks(targetedPlan, listOf(updatedTask))
+            } else {
+                // Fast path failed — fall back to full rebuild
+                rebuildSchedule()
+            }
         }
         val result = taskResultFor(existingTask.id)
         if (!result.scheduled) {

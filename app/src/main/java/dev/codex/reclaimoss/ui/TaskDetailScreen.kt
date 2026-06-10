@@ -295,7 +295,7 @@ fun TaskDetailScreen(
                         modifier = Modifier.weight(1f).height(56.dp),
                         shape = RoundedCornerShape(999.dp),
                     ) {
-                        Text(if (isRecurringTask) "Done this task" else "Done")
+                        Text("Done")
                     }
                     Box(modifier = Modifier.weight(1f)) {
                         OutlinedButton(

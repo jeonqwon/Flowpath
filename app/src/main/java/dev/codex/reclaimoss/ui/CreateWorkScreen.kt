@@ -549,8 +549,12 @@ fun CreateWorkScreen(
                                 RecurrenceType.entries.forEach { type ->
                                     FilterChip(
                                         selected = taskDraft.recurrenceType == type,
-                                        onClick = { taskDraft = taskDraft.copy(recurrenceType = type) },
-                                        enabled = type !in setOf(RecurrenceType.NONE, RecurrenceType.DAILY, RecurrenceType.MONTHLY),
+                                        onClick = {
+                                            taskDraft = taskDraft.copy(
+                                                recurrenceType = type,
+                                                recurrenceDays = if (type == RecurrenceType.WEEKLY) taskDraft.recurrenceDays else emptySet(),
+                                            )
+                                        },
                                         label = { Text(type.displayNameForCreate()) },
                                     )
                                 }
@@ -599,12 +603,42 @@ fun CreateWorkScreen(
                 }
 
                 // Warning when overwriting existing sleep
-                val overlappingSleepDays = taskDraft.recurrenceDays.filter { day ->
-                    existingSleepTasks.any { it.taskKind == TaskKind.SLEEP && day in it.recurrenceRule.daysOfWeek }
-                }.toSet()
-                if (overlappingSleepDays.isNotEmpty()) {
-                    val dayNames = overlappingSleepDays.sortedBy { it.value }
-                        .joinToString(", ") { it.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()) }
+                val anyExistingDaily = existingSleepTasks.any { it.recurrenceRule.type == RecurrenceType.DAILY }
+                val sleepOverlapWarning = when (taskDraft.recurrenceType) {
+                    RecurrenceType.DAILY -> if (anyExistingDaily) {
+                        "Sleep is already scheduled. Saving will replace it for all days."
+                    } else null
+                    RecurrenceType.WEEKLY -> {
+                        val overlappingDays = taskDraft.recurrenceDays.filter { day ->
+                            existingSleepTasks.any { day in it.recurrenceRule.daysOfWeek }
+                        }.toSet()
+                        if (overlappingDays.isNotEmpty()) {
+                            val dayNames = overlappingDays.sortedBy { it.value }
+                                .joinToString(", ") { it.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()) }
+                            "Sleep already set for $dayNames. Saving will replace it."
+                        } else null
+                    }
+                    RecurrenceType.MONTHLY -> if (existingSleepTasks.isNotEmpty()) {
+                        "Sleep is already scheduled. Saving will replace all monthly occurrences."
+                    } else null
+                    RecurrenceType.NONE -> {
+                        val defaultZone = ZoneId.systemDefault()
+                        val oneTimeDay = taskDraft.deadline.atZone(defaultZone).toLocalDate()
+                        val conflicts = existingSleepTasks.any { existing ->
+                            when (existing.recurrenceRule.type) {
+                                RecurrenceType.DAILY -> true
+                                RecurrenceType.WEEKLY -> oneTimeDay.dayOfWeek in existing.recurrenceRule.daysOfWeek
+                                RecurrenceType.MONTHLY -> oneTimeDay.dayOfMonth == existing.dueAt.atZone(defaultZone).dayOfMonth
+                                RecurrenceType.NONE -> oneTimeDay == existing.dueAt.atZone(defaultZone).toLocalDate()
+                            }
+                        }
+                        if (conflicts) {
+                            "Sleep is already scheduled for this day. Saving will replace it."
+                        } else null
+                    }
+                    else -> null
+                }
+                if (sleepOverlapWarning != null) {
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -620,7 +654,7 @@ fun CreateWorkScreen(
                                 Text("⚠", style = MaterialTheme.typography.titleMedium)
                                 Spacer(Modifier.width(10.dp))
                                 Text(
-                                    "Sleep already set for $dayNames. Saving will replace it.",
+                                    sleepOverlapWarning,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onErrorContainer,
                                 )

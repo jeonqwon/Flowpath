@@ -624,6 +624,7 @@ fun TasksScreen(
                                 CollapsedTaskDayRow(
                                     section = section,
                                     railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
+                                    isScrollInProgress = collapsedListState.isScrollInProgress,
                                     onClick = {
                                         selectedDaySummaryEpoch = section.date.toEpochDay()
                                         showingSheet = TasksSheetType.DAY_SUMMARY
@@ -937,16 +938,21 @@ private fun collapsedDaySummaryText(section: TaskDaySection): String = buildStri
 private fun CollapsedTaskDayRow(
     section: TaskDaySection,
     railMetadata: List<TimeframeRailMetadata>,
+    isScrollInProgress: Boolean = false,
     onClick: () -> Unit,
 ) {
     val rowHeight = 88.dp
+    val scrolling by rememberUpdatedState(isScrollInProgress)
 
     Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(rowHeight)
-                .clickable(onClick = onClick),
+                .clickable(
+                    enabled = !scrolling,
+                    onClick = onClick,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Timeframe rails — same max-5 lane logic, same x-position as expanded
@@ -1073,7 +1079,13 @@ private fun ExpandedContinuousTimeline(
         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
         val stickyTitleMinYPx = headerHeightPx + with(density) { ExpandedTaskStickyTitleTopInset.roundToPx() }
         val lineStart = railStripWidth + TaskTimelineRailGap + TaskTimelineLabelWidth
-        val now = remember(zoneId) { LocalTime.now(zoneId) }
+        var now by remember { mutableStateOf(LocalTime.now(zoneId)) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                now = LocalTime.now(zoneId)
+                kotlinx.coroutines.delay(60_000L)
+            }
+        }
         val nowYPx = expandedTimelineScrollPxForDate(
             today = today,
             date = today,
@@ -1149,6 +1161,7 @@ private fun ExpandedContinuousTimeline(
             visibleDayIndices.forEach { dayIndex ->
                 val date = taskFeedDateForIndex(today, dayIndex)
                 val dayTopPx = dayIndex * dayHeightPx - safeScrollPx
+                val dayRailMetadata = railMetadataForDate(timeframes, date)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1157,9 +1170,9 @@ private fun ExpandedContinuousTimeline(
                     horizontalArrangement = Arrangement.spacedBy(TaskTimelineRailGap),
                 ) {
                     TimeframeRailStrip(
-                        rails = railMetadataForDate(timeframes, date),
+                        rails = dayRailMetadata,
                         modifier = Modifier
-                            .width(timelineRailStripWidth(railMetadataForDate(timeframes, date), compact = false))
+                            .width(timelineRailStripWidth(dayRailMetadata, compact = false))
                             .fillMaxHeight(),
                         compact = false,
                         segment = TimeframeRailSegment.BODY,
@@ -1570,7 +1583,11 @@ private fun TasksSheetActionList(
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(20.dp),
             ) {
-                Text(label)
+                Text(
+                    label,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
