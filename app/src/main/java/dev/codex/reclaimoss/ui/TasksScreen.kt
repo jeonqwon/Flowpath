@@ -3,7 +3,6 @@ package dev.codex.reclaimoss.ui
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -855,15 +854,8 @@ internal fun buildTimeframeChipPlacements(
         }
     }
 
-    // Determine motion and trackDayIndex for each timeframe.
-    // Order chips to match the vertical rail strip order (earliest startDate first, reversed)
-    val orderedEntries = ranges.entries.sortedWith(
-        compareBy<MutableMap.MutableEntry<String, DayRange>> { it.value.rail.startDate }
-            .thenBy { it.value.rail.name }
-            .thenBy { it.key }
-    ).asReversed()
-
-    return orderedEntries.mapIndexed { slot, (id, range) ->
+    // Determine motion and trackDayIndex for each timeframe
+    return ranges.entries.mapIndexed { slot, (id, range) ->
         val motion = when {
             // ENTERING: first visible day is NOT the first day — this timeframe
             // just became visible. Attach to its first day's date chip.
@@ -1340,6 +1332,7 @@ private fun PinnedExpandedTimelineHeader(
             .fillMaxWidth()
             .height(ExpandedDayHeaderHeight),
     ) {
+        val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -1354,18 +1347,22 @@ private fun PinnedExpandedTimelineHeader(
                         else headerTopInsetPx
                     StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
                 }
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(0, chipOffsetY) }
-                        .height(ExpandedDateChipSlotHeight)
-                        .zIndex(1f),
-                    contentAlignment = Alignment.CenterStart,
-                ) {
-                    TimeframeNameChip(
-                        text = placement.name,
-                        borderColor = parseTimeframeColor(placement.colorHex),
-                        modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
-                    )
+                // Only render near header so entering/exiting chips don't
+                // reserve space before they're visible in the header area
+                if (chipOffsetY > -headerHeightPx && chipOffsetY < headerHeightPx * 3) {
+                    Box(
+                        modifier = Modifier
+                            .offset { IntOffset(0, chipOffsetY) }
+                            .height(ExpandedDateChipSlotHeight)
+                            .zIndex(1f),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        TimeframeNameChip(
+                            text = placement.name,
+                            borderColor = parseTimeframeColor(placement.colorHex),
+                            modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
+                        )
+                    }
                 }
             }
         }
