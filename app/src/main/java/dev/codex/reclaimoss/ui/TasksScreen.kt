@@ -854,8 +854,10 @@ internal fun buildTimeframeChipPlacements(
         }
     }
 
-    // Determine motion and trackDayIndex for each timeframe
-    return ranges.entries.mapIndexed { slot, (id, range) ->
+    // Determine motion and trackDayIndex for each timeframe.
+    // Reverse order so chips appear c,b,a matching right-to-left rail strips.
+    val ordered = ranges.entries.toList().reversed()
+    return ordered.mapIndexed { slot, (id, range) ->
         val motion = when {
             // ENTERING: first visible day is NOT the first day — this timeframe
             // just became visible. Attach to its first day's date chip.
@@ -1335,18 +1337,19 @@ private fun PinnedExpandedTimelineHeader(
         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
         Row(
             modifier = Modifier
-                .align(Alignment.CenterStart)
+                .align(Alignment.TopStart)
                 .offset { IntOffset(chipStartPx, 0) },
-            horizontalArrangement = Arrangement.Start,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             timeframePlacements.forEach { placement ->
-                val chipOffsetY = when (placement.motion) {
+                // Slightly above the date chip for visual alignment
+                val chipOffsetY = (when (placement.motion) {
                     StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
                     StickyHeaderTimeframeChipMotion.EXITING ->
                         if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
                         else headerTopInsetPx
                     StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
-                }
+                })
                 // Only render near header so entering/exiting chips don't
                 // reserve space before they're visible in the header area
                 if (chipOffsetY > -headerHeightPx && chipOffsetY < headerHeightPx * 3) {
