@@ -3,6 +3,7 @@ package dev.codex.reclaimoss.ui
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -854,8 +855,15 @@ internal fun buildTimeframeChipPlacements(
         }
     }
 
-    // Determine motion and trackDayIndex for each timeframe
-    return ranges.entries.mapIndexed { slot, (id, range) ->
+    // Determine motion and trackDayIndex for each timeframe.
+    // Order chips to match the vertical rail strip order (earliest startDate first, reversed)
+    val orderedEntries = ranges.entries.sortedWith(
+        compareBy<MutableMap.MutableEntry<String, DayRange>> { it.value.rail.startDate }
+            .thenBy { it.value.rail.name }
+            .thenBy { it.key }
+    ).asReversed()
+
+    return orderedEntries.mapIndexed { slot, (id, range) ->
         val motion = when {
             // ENTERING: first visible day is NOT the first day — this timeframe
             // just became visible. Attach to its first day's date chip.
@@ -1332,33 +1340,34 @@ private fun PinnedExpandedTimelineHeader(
             .fillMaxWidth()
             .height(ExpandedDayHeaderHeight),
     ) {
-        timeframePlacements.forEach { placement ->
-            val slotProgress = placement.progress.coerceIn(0f, 1f)
-            val slot = placement.fromSlot + ((placement.toSlot - placement.fromSlot) * slotProgress)
-            val chipOffsetY = when (placement.motion) {
-                StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
-                // Only attach to date chip when the exiting day is at the header (being pushed out)
-                StickyHeaderTimeframeChipMotion.EXITING ->
-                    if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
-                    else headerTopInsetPx
-                // ENTERING: follow the date chip of the specific day where this timeframe starts
-                StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .offset { IntOffset(chipStartPx, 0) },
+            horizontalArrangement = Arrangement.Start,
+        ) {
+            timeframePlacements.forEach { placement ->
+                val chipOffsetY = when (placement.motion) {
+                    StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
+                    StickyHeaderTimeframeChipMotion.EXITING ->
+                        if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
+                        else headerTopInsetPx
+                    StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
+                }
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(0, chipOffsetY) }
+                        .height(ExpandedDateChipSlotHeight)
+                        .zIndex(1f),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    TimeframeNameChip(
+                        text = placement.name,
+                        borderColor = parseTimeframeColor(placement.colorHex),
+                        modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
+                    )
+                }
             }
-            TimeframeNameChip(
-                text = placement.name,
-                borderColor = parseTimeframeColor(placement.colorHex),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset {
-                        IntOffset(
-                            chipStartPx + (chipStridePx * slot).roundToInt(),
-                            chipOffsetY,
-                        )
-                    }
-                    .zIndex(1f)
-                    .height(ExpandedDateChipSlotHeight)
-                    .widthIn(max = TimeframeHeaderChipMaxWidth),
-            )
         }
     }
 }
