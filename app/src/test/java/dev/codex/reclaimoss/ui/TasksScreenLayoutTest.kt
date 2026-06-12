@@ -531,39 +531,42 @@ class TasksScreenLayoutTest {
     }
 
     @Test
-    fun `continuing timeframe placement stays vertically pinned`() {
+    fun `continuing timeframe placement stays pinned`() {
         val placements = buildTimeframeChipPlacements(
-            currentRails = listOf(testRail("tf-1", "Sprint")),
-            incomingRails = listOf(testRail("tf-1", "Sprint")),
-            progress = 0.75f,
+            visibleDayRails = listOf(
+                0 to listOf(testRail("tf-1", "Sprint")),
+                1 to listOf(testRail("tf-1", "Sprint")),
+            ),
+            firstVisibleDayIndex = 0,
         )
 
         assertEquals(StickyHeaderTimeframeChipMotion.PINNED, placements.single().motion)
         assertEquals(0, placements.single().fromSlot)
         assertEquals(0, placements.single().toSlot)
-        assertEquals(0.75f, placements.single().progress, 0.001f)
     }
 
     @Test
     fun `ending timeframe placement exits upward`() {
         val placements = buildTimeframeChipPlacements(
-            currentRails = listOf(testRail("tf-1", "Sprint")),
-            incomingRails = emptyList(),
-            progress = 0.5f,
+            visibleDayRails = listOf(
+                0 to listOf(testRail("tf-1", "Sprint")),
+            ),
+            firstVisibleDayIndex = 0,
         )
 
         assertEquals(StickyHeaderTimeframeChipMotion.EXITING, placements.single().motion)
         assertEquals(0, placements.single().fromSlot)
         assertEquals(0, placements.single().toSlot)
-        assertEquals(0.5f, placements.single().progress, 0.001f)
     }
 
     @Test
     fun `starting timeframe placement enters from below`() {
         val placements = buildTimeframeChipPlacements(
-            currentRails = emptyList(),
-            incomingRails = listOf(testRail("tf-2", "Exams")),
-            progress = 0.25f,
+            visibleDayRails = listOf(
+                0 to emptyList(),
+                1 to listOf(testRail("tf-2", "Exams")),
+            ),
+            firstVisibleDayIndex = 0,
         )
 
         assertEquals(
@@ -574,7 +577,8 @@ class TasksScreenLayoutTest {
                 motion = StickyHeaderTimeframeChipMotion.ENTERING,
                 fromSlot = 0,
                 toSlot = 0,
-                progress = 0.25f,
+                progress = 0f,
+                trackDayIndex = 1,
             ),
             placements.single(),
         )
@@ -582,34 +586,26 @@ class TasksScreenLayoutTest {
 
     @Test
     fun `continuing timeframe shifts left when an earlier timeframe ends`() {
-        val current = listOf(
-            testRail("tf-1", "Sprint"),
-            testRail("tf-2", "Finals"),
-            testRail("tf-3", "Reading"),
-        )
-        val incoming = listOf(
-            testRail("tf-1", "Sprint"),
-            testRail("tf-3", "Reading"),
-        )
-
         val placements = buildTimeframeChipPlacements(
-            currentRails = current,
-            incomingRails = incoming,
-            progress = 0.5f,
+            visibleDayRails = listOf(
+                0 to listOf(
+                    testRail("tf-1", "Sprint"),
+                    testRail("tf-2", "Finals"),
+                    testRail("tf-3", "Reading"),
+                ),
+                1 to listOf(
+                    testRail("tf-1", "Sprint"),
+                    testRail("tf-3", "Reading"),
+                ),
+            ),
+            firstVisibleDayIndex = 0,
+            previousSlots = mapOf("tf-3" to 2),
         )
 
-        assertEquals(
-            TimeframeChipPlacement(
-                id = "tf-3",
-                name = "Reading",
-                colorHex = "#F4B6D2",
-                motion = StickyHeaderTimeframeChipMotion.PINNED,
-                fromSlot = 2,
-                toSlot = 1,
-                progress = 0.5f,
-            ),
-            placements.single { it.id == "tf-3" },
-        )
+        val readingPlacement = placements.first { it.id == "tf-3" }
+        assertEquals(StickyHeaderTimeframeChipMotion.PINNED, readingPlacement.motion)
+        assertEquals(2, readingPlacement.fromSlot)
+        assertEquals(0, readingPlacement.toSlot)
     }
 
     private fun testRail(

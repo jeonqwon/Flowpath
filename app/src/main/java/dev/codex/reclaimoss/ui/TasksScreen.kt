@@ -115,7 +115,9 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -836,6 +838,7 @@ internal fun resolveExpandedHeaderTransition(
 internal fun buildTimeframeChipPlacements(
     visibleDayRails: List<Pair<Int, List<TimeframeRailMetadata>>>,
     firstVisibleDayIndex: Int,
+    previousSlots: Map<String, Int> = emptyMap(),
 ): List<TimeframeChipPlacement> {
     if (visibleDayRails.isEmpty()) return emptyList()
 
@@ -857,35 +860,58 @@ internal fun buildTimeframeChipPlacements(
     // Determine motion and trackDayIndex for each timeframe.
     // Reverse order so chips appear c,b,a matching right-to-left rail strips.
     val ordered = ranges.entries.toList().reversed()
-    return ordered.mapIndexed { slot, (id, range) ->
+    // Compute slots only for header chips (PINNED + EXITING).
+    // ENTERING chips render below the header and don't compete for header slots,
+    // so they get separate slot assignments that don't displace pinned chips.
+    val headerEntries = ordered.filter { (_, range) ->
+        !(range.firstDay > firstVisibleDayIndex)
+    }
+    val enteringEntries = ordered.filter { (_, range) ->
+        range.firstDay > firstVisibleDayIndex
+    }
+    val result = mutableListOf<TimeframeChipPlacement>()
+    headerEntries.mapIndexed { slot, (id, range) ->
         val motion = when {
-            // ENTERING: first visible day is NOT the first day — this timeframe
-            // just became visible. Attach to its first day's date chip.
-            range.firstDay > firstVisibleDayIndex -> StickyHeaderTimeframeChipMotion.ENTERING
-            // EXITING: last visible day IS the first day — this timeframe's last day
-            // is at the header, about to scroll out. Attach to the exiting day.
             range.lastDay == firstVisibleDayIndex && range.firstDay == firstVisibleDayIndex
                 && visibleDayRails.size == 1 -> StickyHeaderTimeframeChipMotion.EXITING
-            // Active on multiple days, ending soon: the last day is close to the header
             range.lastDay == firstVisibleDayIndex -> StickyHeaderTimeframeChipMotion.EXITING
-            // PINNED: active across days, stays at header top
             else -> StickyHeaderTimeframeChipMotion.PINNED
         }
-        TimeframeChipPlacement(
-            id = id,
-            name = range.rail.name,
-            colorHex = range.rail.colorHex,
-            motion = motion,
-            fromSlot = slot,
-            toSlot = slot,
-            progress = 0f,
-            trackDayIndex = when (motion) {
-                StickyHeaderTimeframeChipMotion.ENTERING -> range.firstDay
-                StickyHeaderTimeframeChipMotion.EXITING -> range.lastDay
-                StickyHeaderTimeframeChipMotion.PINNED -> firstVisibleDayIndex
-            },
+        val previousSlot = previousSlots[id]
+        result.add(
+            TimeframeChipPlacement(
+                id = id,
+                name = range.rail.name,
+                colorHex = range.rail.colorHex,
+                motion = motion,
+                fromSlot = previousSlot ?: slot,
+                toSlot = slot,
+                progress = 0f,
+                trackDayIndex = when (motion) {
+                    StickyHeaderTimeframeChipMotion.EXITING -> range.lastDay
+                    StickyHeaderTimeframeChipMotion.PINNED -> firstVisibleDayIndex
+                    else -> firstVisibleDayIndex
+                },
+            )
         )
     }
+    // ENTERING chips get slots after all header chips so they don't displace them
+    enteringEntries.mapIndexed { i, (id, range) ->
+        val slot = headerEntries.size + i
+        result.add(
+            TimeframeChipPlacement(
+                id = id,
+                name = range.rail.name,
+                colorHex = range.rail.colorHex,
+                motion = StickyHeaderTimeframeChipMotion.ENTERING,
+                fromSlot = slot,
+                toSlot = slot,
+                progress = 0f,
+                trackDayIndex = range.firstDay,
+            )
+        )
+    }
+    return result
 }
 
 private fun collapsedDaySummaryText(section: TaskDaySection): String = buildString {
@@ -1096,10 +1122,34 @@ private fun ExpandedContinuousTimeline(
             val date = taskFeedDateForIndex(today, dayIndex)
             dayIndex to railMetadataForDate(timeframes, date)
         }
+        val previousTimeframeSlots = remember { mutableMapOf<String, Int>() }
+        // Two-frame stability check: only commit a slot to history when it holds
+        // for two consecutive frames, preventing single-frame flicker at scroll
+        // boundaries from causing slot oscillation.
+        val pendingTimeframeSlots = remember { mutableMapOf<String, Int>() }
         val timeframeChipPlacements = buildTimeframeChipPlacements(
             visibleDayRails = visibleDayRails,
             firstVisibleDayIndex = firstVisibleDayIndex,
+            previousSlots = previousTimeframeSlots,
         )
+        LaunchedEffect(timeframeChipPlacements) {
+            val currentSlots = mutableMapOf<String, Int>()
+            timeframeChipPlacements.forEach { p ->
+                if (p.motion != StickyHeaderTimeframeChipMotion.ENTERING) {
+                    currentSlots[p.id] = p.toSlot
+                }
+            }
+            // Commit only when the slot matches the pending (previous frame) value
+            previousTimeframeSlots.clear()
+            currentSlots.forEach { (id, slot) ->
+                if (pendingTimeframeSlots[id] == slot) {
+                    previousTimeframeSlots[id] = slot
+                }
+            }
+            // Update pending for next frame's comparison
+            pendingTimeframeSlots.clear()
+            pendingTimeframeSlots.putAll(currentSlots)
+        }
         val headerDateChipOffsets = HeaderChipVerticalOffsets(
             outgoingDateYPx = dateChipYForDayIndex(firstVisibleDayIndex),
             incomingDateYPx = null,
@@ -1329,45 +1379,114 @@ private fun PinnedExpandedTimelineHeader(
     }
     val chipStridePx = with(density) { TimeframeHeaderChipSlotStep.roundToPx() }
 
+    // Track previous slots per chip ID for animation continuity
+    val slotAnimations = remember { mutableMapOf<String, Animatable<Float, *>>() }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(ExpandedDayHeaderHeight),
     ) {
         val headerHeightPx = with(density) { ExpandedDayHeaderHeight.roundToPx() }
+
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .offset { IntOffset(chipStartPx, 0) },
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            timeframePlacements.forEach { placement ->
-                // Slightly above the date chip for visual alignment
-                val chipOffsetY = (when (placement.motion) {
-                    StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
-                    StickyHeaderTimeframeChipMotion.EXITING ->
-                        if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
-                        else headerTopInsetPx
-                    StickyHeaderTimeframeChipMotion.ENTERING -> dateChipYForIndex(placement.trackDayIndex)
-                })
-                // Only render near header so entering/exiting chips don't
-                // reserve space before they're visible in the header area
-                if (chipOffsetY > -headerHeightPx && chipOffsetY < headerHeightPx * 3) {
-                    Box(
-                        modifier = Modifier
-                            .offset { IntOffset(0, chipOffsetY) }
-                            .height(ExpandedDateChipSlotHeight)
-                            .zIndex(1f),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        TimeframeNameChip(
-                            text = placement.name,
-                            borderColor = parseTimeframeColor(placement.colorHex),
-                            modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
-                        )
+            // Only PINNED/EXITING chips participate in the Row layout.
+            // ENTERING chips render below the header; keeping them out of the Row
+            // prevents them from displacing stable chips and causing slot flicker.
+            val headerPlacements = timeframePlacements.filter {
+                it.motion == StickyHeaderTimeframeChipMotion.PINNED ||
+                    it.motion == StickyHeaderTimeframeChipMotion.EXITING
+            }
+            headerPlacements.forEach { placement ->
+                androidx.compose.runtime.key(placement.id) {
+                    // Animate horizontal translation when slot changes.
+                    val fromSlot = placement.fromSlot.toFloat()
+                    val toSlot = placement.toSlot.toFloat()
+                    val needsAnimation = placement.fromSlot != placement.toSlot
+
+                    val anim = slotAnimations.getOrPut(placement.id) {
+                        Animatable(fromSlot)
+                    }
+                    LaunchedEffect(placement.fromSlot, placement.toSlot) {
+                        if (needsAnimation) {
+                            anim.snapTo(fromSlot)
+                            anim.animateTo(toSlot, animationSpec = tween(250, easing = FastOutSlowInEasing))
+                        } else {
+                            anim.snapTo(toSlot)
+                        }
+                    }
+
+                    // When fromSlot == toSlot, always use 0 delta so the chip
+                    // renders at its natural Row position regardless of stale anim state.
+                    val slotDelta = if (needsAnimation) anim.value - toSlot else 0f
+                    val animTranslationX = (slotDelta * chipStridePx)
+
+                    val chipOffsetY = (when (placement.motion) {
+                        StickyHeaderTimeframeChipMotion.PINNED -> headerTopInsetPx
+                        StickyHeaderTimeframeChipMotion.EXITING ->
+                            if (placement.trackDayIndex == firstVisibleDayIndex) outgoingDateYPx
+                            else headerTopInsetPx
+                        else -> headerTopInsetPx
+                    })
+                    if (chipOffsetY > -headerHeightPx && chipOffsetY < headerHeightPx * 3) {
+                        Box(
+                            modifier = Modifier
+                                .graphicsLayer {
+                                    translationX = animTranslationX
+                                }
+                                .offset { IntOffset(0, chipOffsetY) }
+                                .height(ExpandedDateChipSlotHeight)
+                                .zIndex(1f),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            TimeframeNameChip(
+                                text = placement.name,
+                                borderColor = parseTimeframeColor(placement.colorHex),
+                                modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
+                            )
+                        }
                     }
                 }
             }
+            // ENTERING chips render below the header, positioned absolutely near
+            // their track day — they don't affect header Row layout at all.
+            val enteringPlacements = timeframePlacements.filter {
+                it.motion == StickyHeaderTimeframeChipMotion.ENTERING
+            }
+            enteringPlacements.forEach { placement ->
+                androidx.compose.runtime.key(placement.id) {
+                    val chipOffsetY = dateChipYForIndex(placement.trackDayIndex)
+                    if (chipOffsetY > -headerHeightPx && chipOffsetY < headerHeightPx * 3) {
+                        // Position entering chip near its track day, using toSlot for
+                        // approximate horizontal placement (won't affect pinned chips).
+                        val enteringX = chipStartPx + (placement.toSlot * chipStridePx)
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(enteringX, chipOffsetY) }
+                                .height(ExpandedDateChipSlotHeight)
+                                .zIndex(1f),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            TimeframeNameChip(
+                                text = placement.name,
+                                borderColor = parseTimeframeColor(placement.colorHex),
+                                modifier = Modifier.widthIn(max = TimeframeHeaderChipMaxWidth),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean up animations for chips that are no longer present
+        val currentIds = timeframePlacements.map { it.id }.toSet()
+        LaunchedEffect(currentIds) {
+            slotAnimations.keys.removeAll { it !in currentIds }
         }
     }
 }

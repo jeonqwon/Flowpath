@@ -13,8 +13,8 @@ android {
         applicationId = "dev.codex.reclaimoss"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.2.1"
+        versionCode = 7
+        versionName = "0.3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -53,6 +53,13 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "Flowpath-v${versionName}.apk"
+        }
     }
 }
 
@@ -98,4 +105,15 @@ dependencies {
 
 kapt {
     correctErrorTypes = true
+}
+
+android {
+    applicationVariants.all {
+        val variant = this
+        variant.outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                output.outputFileName = "Flowpath-v${variant.versionName}.apk"
+            }
+    }
 }

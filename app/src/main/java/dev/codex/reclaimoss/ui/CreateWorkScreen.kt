@@ -228,6 +228,7 @@ fun CreateWorkScreen(
                     it.hasDeadline,
                     it.continuationParentTaskId ?: "",
                     it.continuationMode?.name ?: "",
+                    it.noGap.toString(),
                     it.overlapPolicy.name,
                     it.allowSplitting,
                     it.deadline.toString(),
@@ -255,21 +256,22 @@ fun CreateWorkScreen(
                     hasDeadline = saved[5] as Boolean,
                     continuationParentTaskId = (saved[6] as String).ifBlank { null },
                     continuationMode = (saved[7] as String).ifBlank { null }?.let(TaskContinuationMode::valueOf),
-                    overlapPolicy = TaskOverlapPolicy.valueOf(saved[8] as String),
-                    allowSplitting = saved[9] as Boolean,
-                    deadline = LocalDateTime.parse(saved[10] as String),
-                    schedulingMode = TaskSchedulingMode.valueOf(saved[11] as String),
-                    hasWindow = saved[12] as Boolean,
-                    startDate = (saved[13] as String).ifBlank { null }?.let(LocalDate::parse),
-                    fixedDate = LocalDate.parse(saved[14] as String),
-                    fixedStartAt = LocalDateTime.parse(saved[15] as String),
-                    fixedEndAt = LocalDateTime.parse(saved[16] as String),
-                    repeatsForever = saved[17] as Boolean,
-                    estimatedMinutes = saved[18] as Int,
-                    addReminder = saved[19] as Boolean,
-                    recurrenceType = RecurrenceType.valueOf(saved[20] as String),
-                    recurrenceInterval = saved[21] as Int,
-                    recurrenceDays = (saved[22] as String)
+                    noGap = (saved[8] as String).toBooleanStrictOrNull() ?: false,
+                    overlapPolicy = TaskOverlapPolicy.valueOf(saved[9] as String),
+                    allowSplitting = saved[10] as Boolean,
+                    deadline = LocalDateTime.parse(saved[11] as String),
+                    schedulingMode = TaskSchedulingMode.valueOf(saved[12] as String),
+                    hasWindow = saved[13] as Boolean,
+                    startDate = (saved[14] as String).ifBlank { null }?.let(LocalDate::parse),
+                    fixedDate = LocalDate.parse(saved[15] as String),
+                    fixedStartAt = LocalDateTime.parse(saved[16] as String),
+                    fixedEndAt = LocalDateTime.parse(saved[17] as String),
+                    repeatsForever = saved[18] as Boolean,
+                    estimatedMinutes = saved[19] as Int,
+                    addReminder = saved[20] as Boolean,
+                    recurrenceType = RecurrenceType.valueOf(saved[21] as String),
+                    recurrenceInterval = saved[22] as Int,
+                    recurrenceDays = (saved[23] as String)
                         .takeIf { it.isNotBlank() }
                         ?.split(",")
                         ?.map { DayOfWeek.valueOf(it) }
@@ -336,6 +338,12 @@ fun CreateWorkScreen(
             1 -> listState.animateScrollToItem(1)
             2 -> listState.animateScrollToItem(2)
             3 -> {} // save bar is always visible
+        }
+    }
+    // Auto-expand "More options" when tutorial highlights it
+    LaunchedEffect(tutorialStep, showTaskTutorial) {
+        if (showTaskTutorial && tutorialStep == 1) {
+            showAdvancedOptions = true
         }
     }
     var showWindowSheet by rememberSaveable(sessionKey) { mutableStateOf(false) }
@@ -727,83 +735,6 @@ fun CreateWorkScreen(
                     } // close Box
                 }
             } else {
-                // Dependency section — pick a task to happen right after/before
-                if (!sleepMode && continuationTasks.isNotEmpty()) {
-                    item {
-                        var dependencyExpanded by remember { mutableStateOf(false) }
-                        CreateFormCard {
-                            TaskSectionTitle("Depends on")
-                            Spacer(Modifier.height(8.dp))
-                            ExposedDropdownMenuBox(
-                                expanded = dependencyExpanded,
-                                onExpandedChange = { dependencyExpanded = it },
-                            ) {
-                                OutlinedTextField(
-                                    value = continuationTasks.firstOrNull { it.id == taskDraft.continuationParentTaskId }?.title
-                                        ?: "None",
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dependencyExpanded) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .menuAnchor(),
-                                    singleLine = true,
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = dependencyExpanded,
-                                    onDismissRequest = { dependencyExpanded = false },
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("None", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                        onClick = {
-                                            taskDraft = taskDraft.copy(
-                                                continuationParentTaskId = null,
-                                                continuationMode = null,
-                                            )
-                                            dependencyExpanded = false
-                                        },
-                                    )
-                                    continuationTasks.forEach { t ->
-                                        DropdownMenuItem(
-                                            text = { Text(t.title) },
-                                            onClick = {
-                                                taskDraft = taskDraft.copy(
-                                                    continuationParentTaskId = t.id,
-                                                    continuationMode = taskDraft.continuationMode
-                                                        ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
-                                                )
-                                                dependencyExpanded = false
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                            if (taskDraft.continuationParentTaskId != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(
-                                        selected = taskDraft.continuationMode == TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
-                                        onClick = {
-                                            taskDraft = taskDraft.copy(
-                                                continuationMode = TaskContinuationMode.AFTER_PARENT_SCHEDULED_END,
-                                            )
-                                        },
-                                        label = { Text("After task ends") },
-                                    )
-                                    FilterChip(
-                                        selected = taskDraft.continuationMode == TaskContinuationMode.BEFORE_PARENT_START,
-                                        onClick = {
-                                            taskDraft = taskDraft.copy(
-                                                continuationMode = TaskContinuationMode.BEFORE_PARENT_START,
-                                            )
-                                        },
-                                        label = { Text("Before task starts") },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
                 item {
                     Box(
                         modifier = if (showTutorial && showTaskTutorial) Modifier.onGloballyPositioned { coords ->
@@ -1722,7 +1653,7 @@ fun TaskRepeatEditor(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TaskRulesEditor(
     draft: TaskDraft,
@@ -1731,6 +1662,48 @@ fun TaskRulesEditor(
     showReminderToggle: Boolean,
     globalAllowConcurrentTasks: Boolean = true,
 ) {
+    // Dependency section — date-first picker with continuation mode and no-gap toggle
+    if (continuationTasks.isNotEmpty()) {
+        ContinuationSection(
+            tasks = continuationTasks,
+            selectedParentTaskId = draft.continuationParentTaskId,
+            selectedMode = draft.continuationMode,
+            onParentSelected = { taskId ->
+                onDraftChange(draft.copy(
+                    continuationParentTaskId = taskId,
+                    continuationMode = if (taskId != null) {
+                        draft.continuationMode ?: TaskContinuationMode.AFTER_PARENT_SCHEDULED_END
+                    } else {
+                        null
+                    },
+                    noGap = if (taskId == null) false else draft.noGap,
+                ))
+            },
+            onModeSelected = { mode ->
+                onDraftChange(draft.copy(continuationMode = mode))
+            },
+        )
+        if (draft.continuationParentTaskId != null) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "No gap",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Switch(
+                    checked = draft.noGap,
+                    onCheckedChange = { onDraftChange(draft.copy(noGap = it)) },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
     TaskSectionTitle("Priority")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(TaskPriority.MEDIUM to "Normal", TaskPriority.URGENT to "Urgent").forEach { (priority, label) ->
@@ -2765,6 +2738,7 @@ fun TaskDraft.applyRulesEditor(editorDraft: TaskDraft): TaskDraft =
         timeframeId = editorDraft.timeframeId,
         continuationParentTaskId = editorDraft.continuationParentTaskId,
         continuationMode = editorDraft.continuationMode,
+        noGap = editorDraft.noGap,
         overlapPolicy = editorDraft.overlapPolicy,
         addReminder = editorDraft.addReminder,
     )
