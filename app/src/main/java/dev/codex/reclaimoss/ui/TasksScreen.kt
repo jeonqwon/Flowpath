@@ -1284,6 +1284,9 @@ private fun ExpandedContinuousTimeline(
                     val titleOffsetInVisibleSlicePx = (topPx + sourceStickyTitleOffsetPx - visibleFrame.topPx)
                         .coerceAtLeast(0)
                         .coerceAtMost((visibleFrame.heightPx - titleReservePx).coerceAtLeast(0))
+                    val taskTopPx = visibleFrame.topPx
+                    val taskBottomPx = taskTopPx + visibleFrame.heightPx
+                    val nowOverlapsTask = nowYPx in taskTopPx..taskBottomPx
                     FullDayTaskBlock(
                         positionedBlock = positioned,
                         task = tasksById[block.taskId],
@@ -1298,6 +1301,7 @@ private fun ExpandedContinuousTimeline(
                         renderContinuesIntoNext = !visibleFrame.hasOriginalBottom,
                         showTitle = true,
                         stickyTitleOffset = with(density) { titleOffsetInVisibleSlicePx.toDp() },
+                        nowLineOverlaps = nowOverlapsTask,
                     )
                 }
             }
@@ -1307,7 +1311,7 @@ private fun ExpandedContinuousTimeline(
                     modifier = Modifier
                         .offset(x = lineStart - 13.dp, y = with(density) { nowYPx.toDp() } - 7.dp)
                         .size(14.dp)
-                        .zIndex(20f)
+                        .zIndex(3f)
                         .clip(RoundedCornerShape(999.dp))
                         .background(MaterialTheme.colorScheme.primary),
                 )
@@ -1317,7 +1321,7 @@ private fun ExpandedContinuousTimeline(
                         .padding(start = lineStart)
                         .height(2.dp)
                         .offset(y = with(density) { nowYPx.toDp() })
-                        .zIndex(20f)
+                        .zIndex(3f)
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)),
                 )
             }
@@ -2042,6 +2046,7 @@ fun FullDayTaskBlock(
     renderContinuesIntoNext: Boolean = positionedBlock.segment.continuesIntoNextDay,
     showTitle: Boolean = true,
     stickyTitleOffset: Dp = 0.dp,
+    nowLineOverlaps: Boolean = false,
 ) {
     val block = positionedBlock.segment.block
     val density = LocalDensity.current
@@ -2072,15 +2077,23 @@ fun FullDayTaskBlock(
         .zIndex(1f)
     val tapCallback by rememberUpdatedState(onOpen)
     val positionedModifier = cardModifier.clickable(onClick = { tapCallback() })
+    // Shaded by default; only add outline when the now-time line overlaps this block
+    val hasBorder = nowLineOverlaps && !showsBoundaryContinuation
     Card(
         modifier = positionedModifier,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(
-            width = if (showsBoundaryContinuation) 0.dp else 1.dp,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+        colors = CardDefaults.cardColors(
+            containerColor = if (hasBorder) MaterialTheme.colorScheme.surface
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (showsBoundaryContinuation) 0.dp else 4.dp),
+        border = if (hasBorder) {
+            androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+        } else {
+            null
+        },
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (showsBoundaryContinuation || !hasBorder) 0.dp else 4.dp
+        ),
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),

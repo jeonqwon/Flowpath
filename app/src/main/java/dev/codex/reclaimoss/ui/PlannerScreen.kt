@@ -224,7 +224,6 @@ fun PlannerScreen(
                 settings = settings,
                 timeframes = state.snapshot.timeframes.filter { !selectedDate.isBefore(it.startDate) && !selectedDate.isAfter(it.endDate) },
                 blocks = blocksByDate[selectedDate].orEmpty().sortedBy { it.startAt },
-                reminders = remindersByDate[selectedDate].orEmpty().sortedBy { it.dueAt },
                 completedTasks = completedTasksByDate[selectedDate].orEmpty().sortedByDescending { it.updatedAt },
                 tasksById = tasksById,
                 zoneId = zoneId,
@@ -244,7 +243,6 @@ fun LazyListScope.selectedDayOverview(
     settings: AppSettings,
     timeframes: List<Timeframe>,
     blocks: List<ScheduleBlock>,
-    reminders: List<Reminder>,
     completedTasks: List<ScheduleTask>,
     tasksById: Map<String, ScheduleTask>,
     zoneId: ZoneId,
@@ -298,19 +296,6 @@ fun LazyListScope.selectedDayOverview(
         }
     }
     item {
-        OverviewCard(title = "Reminders") {
-            if (reminders.isEmpty()) {
-                Text("No reminders.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    reminders.forEach { reminder ->
-                        ReminderMiniCard(reminder = reminder, zoneId = zoneId)
-                    }
-                }
-            }
-        }
-    }
-    item {
         OverviewCard(title = "History") {
             if (completedTasks.isEmpty()) {
                 Text("No completed tasks.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -351,7 +336,6 @@ fun OverviewCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -377,8 +361,7 @@ fun CompactTaskRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(
@@ -605,8 +588,7 @@ private fun ExpandableTimeframeRow(
             .clip(RoundedCornerShape(18.dp))
             .clickable { expanded = !expanded },
         shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
