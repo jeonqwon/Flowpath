@@ -465,6 +465,7 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                 Spacer(Modifier.height(32.dp))
             }
         }
+        return
     }
 
     if (showingReminderCreate) {
