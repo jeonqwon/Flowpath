@@ -104,7 +104,8 @@ class SchedulerEngine {
         }
         val hardBusyWindows = (
             busyWindows +
-                completedBlocks.map { BusyWindow(it.startAt, it.endAt) }
+                completedBlocks.map { BusyWindow(it.startAt, it.endAt) } +
+                lockedPendingBlocks.map { BusyWindow(it.startAt, it.endAt) }
             )
             .sortedBy { it.startAt }
         val pendingBlocks = if (preserveExistingPendingBlocks) {

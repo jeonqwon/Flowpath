@@ -581,12 +581,18 @@ class PlannerCoordinator(
         val exactTasks = filteredTasks.filter { it.schedulingMode == TaskSchedulingMode.FIXED_EXACT }
         val schedulableTasks = filteredTasks.filter { it.schedulingMode != TaskSchedulingMode.FIXED_EXACT }
 
-        val existingBlocks = repository.getBlocks()
         val rangeStart = now()
         val policy = schedulingPolicy(getSettings())
         val rangeEnd = rangeStart.plusSeconds(60L * 60L * 24L * policy.lookAheadDays)
         val busyEvents = calendarGateway.syncBusyEvents(rangeStart, rangeEnd)
+
+        // Place exact tasks first so their locked blocks exist before flexible scheduling runs.
+        exactTasks.forEach { task ->
+            placeExactTask(task.id)
+        }
         if (schedulableTasks.isNotEmpty()) {
+            // Re-fetch blocks so the locked exact (e.g. sleep) blocks are visible as busy windows.
+            val existingBlocks = repository.getBlocks()
             val plan = scheduler.rebuildSchedule(
                 tasks = schedulableTasks,
                 timeframes = repository.getTimeframes(),
@@ -604,9 +610,6 @@ class PlannerCoordinator(
                 syncLinkedReminderForTask(task.id)
             }
             calendarGateway.syncPlannedBlocks(repository.getBlocks())
-        }
-        exactTasks.forEach { task ->
-            placeExactTask(task.id)
         }
     }
 
