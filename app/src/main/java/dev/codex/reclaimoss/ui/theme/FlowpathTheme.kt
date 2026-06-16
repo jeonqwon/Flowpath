@@ -30,8 +30,8 @@ import dev.codex.reclaimoss.settings.ThemeMode
 // then uncomment the lines below and remove the FontFamily.Monospace fallback.
 //
 private val PixelFont = FontFamily(
-    Font(R.font.press_start2p_regular, FontWeight.Normal),
-    Font(R.font.press_start2p_regular, FontWeight.Bold),
+    Font(R.font.silkscreen_regular, FontWeight.Normal),
+    Font(R.font.silkscreen_regular, FontWeight.Bold),
 )
 
 // ── Light (cream / parchment) ────────────────────────────────────────────────
