@@ -123,7 +123,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -321,10 +323,10 @@ private val TimeframeHeaderChipMaxWidth = 96.dp
 private val TimeframeHeaderChipSlotStep = 38.dp
 private val TaskTimelineLabelWidth = 64.dp
 private val TaskTimelineContentInset = 6.dp
-private val TaskTimelineCompactRailWidth = 2.dp
-private val TaskTimelineExpandedRailWidth = 2.dp
+private val TaskTimelineCompactRailWidth = 0.dp
+private val TaskTimelineExpandedRailWidth = 0.dp
 private val TaskTimelineDividerWidth = 0.75.dp
-private val TaskTimelineRailGap = 4.dp
+private val TaskTimelineRailGap = 0.dp
 private val TaskTimelineBoundaryOverlap = 2.dp
 
 private enum class TasksSheetType {
@@ -939,23 +941,21 @@ private fun CollapsedTaskDayRow(
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Timeframe rails — same max-5 lane logic, same x-position as expanded
-            TimeframeRailStrip(
-                rails = railMetadata,
+            // Date chip with timeframe hearts below
+            Box(
                 modifier = Modifier
-                    .width(timelineRailStripWidth(railMetadata, compact = true))
-                    .fillMaxHeight(),
-                compact = true,
-                segment = TimeframeRailSegment.COMPACT,
-            )
-
-            Spacer(Modifier.width(TaskTimelineRailGap))
-
-            // Date chip — centered in the label column, same slot as expanded
-            TimelineDateChipSlot(
-                date = section.date,
-                modifier = Modifier.fillMaxHeight(),
-            )
+                    .fillMaxHeight()
+                    .widthIn(min = TaskTimelineLabelWidth),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    DateChip(text = compactStickyDateText(section.date))
+                    TimeframeHearts(rails = railMetadata)
+                }
+            }
 
             // Vertical divider — continuous across rows (same x, flush rows)
             Box(
@@ -1206,24 +1206,21 @@ private fun ExpandedContinuousTimeline(
                     .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
             )
 
-            // Timeframe rails — full viewport overlay stitched from visible days
+            // Timeframe hearts — shown below each day's date chip
             visibleDayIndices.forEach { dayIndex ->
                 val date = taskFeedDateForIndex(today, dayIndex)
-                val dayTopPx = dayIndex * dayHeightPx - safeScrollPx
-                val dayBottomPx = dayTopPx + dayHeightPx
-                val visibleTop = dayTopPx.coerceAtLeast(0)
-                val visibleBottom = dayBottomPx.coerceAtMost(viewportHeightPx)
-                if (visibleBottom > visibleTop) {
-                    val dayRailMetadata = railMetadataForDate(timeframes, date)
-                    TimeframeRailStrip(
-                        rails = dayRailMetadata,
+                val chipY = dateChipYForDayIndex(dayIndex)
+                val dayRailMetadata = railMetadataForDate(timeframes, date)
+                if (dayRailMetadata.isNotEmpty()) {
+                    Box(
                         modifier = Modifier
-                            .offset { IntOffset(0, visibleTop) }
-                            .height(with(density) { (visibleBottom - visibleTop).toDp() })
-                            .width(timelineRailStripWidth(dayRailMetadata, compact = false)),
-                        compact = false,
-                        segment = TimeframeRailSegment.BODY,
-                    )
+                            .offset { IntOffset(0, chipY + dateChipHeightPx + with(density) { 4.dp.roundToPx() }) }
+                            .width(with(density) { TaskTimelineLabelWidth.toPx().toInt().toDp() })
+                            .wrapContentHeight(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        TimeframeHearts(rails = dayRailMetadata)
+                    }
                 }
             }
 
@@ -1607,6 +1604,31 @@ private fun orderedTimeframeRailsForDisplay(
         )
         .take(MaxOverlappingTimeframeRails)
         .asReversed()
+}
+
+@Composable
+private fun TimeframeHearts(
+    rails: List<TimeframeRailMetadata>,
+    modifier: Modifier = Modifier,
+) {
+    val ordered = rails
+        .distinctBy { it.id }
+        .sortedWith(compareBy<TimeframeRailMetadata> { it.startDate }.thenBy { it.name })
+        .take(MaxOverlappingTimeframeRails)
+    if (ordered.isEmpty()) return
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        ordered.forEach { rail ->
+            Text(
+                text = "♥",
+                color = parseTimeframeColor(rail.colorHex),
+                fontSize = 8.sp,
+                lineHeight = 8.sp,
+            )
+        }
+    }
 }
 
 @Composable
