@@ -44,6 +44,8 @@ import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
@@ -283,12 +285,14 @@ fun LazyListScope.selectedDayOverview(
                 val groupedBlocks = blocks.groupBy { it.taskId }.values.sortedBy { group -> group.minOf { it.startAt } }
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     groupedBlocks.forEach { taskBlocks ->
-                        val task = tasksById[taskBlocks.first().taskId]
+                        val sortedBlocks = taskBlocks.sortedBy { it.startAt }
+                        val task = tasksById[sortedBlocks.first().taskId]
                         CompactTaskRow(
-                            blocks = taskBlocks.sortedBy { it.startAt },
+                            blocks = sortedBlocks,
                             task = task,
                             zoneId = zoneId,
-                            onOpen = { onOpenTask(taskBlocks.first().taskId) },
+                            onOpen = { onOpenTask(sortedBlocks.first().taskId) },
+                            onToggleLock = { onToggleLock(sortedBlocks.first()) },
                         )
                     }
                 }
@@ -351,8 +355,10 @@ fun CompactTaskRow(
     task: ScheduleTask?,
     zoneId: ZoneId,
     onOpen: () -> Unit,
+    onToggleLock: () -> Unit,
 ) {
     val firstBlock = blocks.minByOrNull { it.startAt } ?: return
+    val isLocked = firstBlock.lockState == BlockLockState.LOCKED
     val blockSummary = blocks
         .sortedBy { it.startAt }
         .joinToString(" · ") { block ->
@@ -363,10 +369,14 @@ fun CompactTaskRow(
         shape = RoundedCornerShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .weight(1f)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable(onClick = onOpen)
                     .padding(vertical = 2.dp),
@@ -377,6 +387,13 @@ fun CompactTaskRow(
                     blockSummary,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onToggleLock) {
+                Icon(
+                    if (isLocked) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                    contentDescription = if (isLocked) "Unlock task" else "Lock task",
+                    tint = if (isLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
