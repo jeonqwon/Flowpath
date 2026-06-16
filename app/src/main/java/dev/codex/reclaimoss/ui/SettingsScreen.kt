@@ -407,7 +407,7 @@ fun SettingsNavigationRow(
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    title,
+                    title.uppercase(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = settingsPrimaryTextColor(isDarkSettings),

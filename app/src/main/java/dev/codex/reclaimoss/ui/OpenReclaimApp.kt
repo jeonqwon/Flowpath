@@ -682,12 +682,13 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                         },
                         label = {
                             Text(
-                                tab.label,
+                                tab.label.uppercase(),
                                 color = if (selectedTab == tab) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 },
+                                style = MaterialTheme.typography.labelSmall,
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
