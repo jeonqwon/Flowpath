@@ -398,13 +398,15 @@ class PlannerViewModel(
         val windowOvernight = !draftEnd.isAfter(draftStart) || windowEndTime <= windowStartTime
         val duration = draft.estimatedMinutes.coerceAtLeast(240)
         weekdays.forEach { day ->
-            // Compute the next occurrence date, then build window around it
-            val occurrenceDate = nextSleepOccurrenceDate(day, zoneId)
-            val windowStartInstant = java.time.LocalDateTime.of(occurrenceDate, windowStartTime).atZone(zoneId).toInstant()
-            val windowEndInstant = java.time.LocalDateTime.of(
-                if (windowOvernight) occurrenceDate.plusDays(1) else occurrenceDate,
-                windowEndTime,
-            ).atZone(zoneId).toInstant()
+            // Use the time-aware helper so today is used if sleep hasn't started yet,
+            // and next week is used only if today's sleep window has already passed.
+            val windowStartInstant = nextSleepOccurrenceForDay(day, windowStartTime, zoneId)
+            val windowEndInstant = if (windowOvernight) {
+                windowStartInstant.plusSeconds(duration * 60L)
+            } else {
+                val startDate = windowStartInstant.atZone(zoneId).toLocalDate()
+                java.time.LocalDateTime.of(startDate, windowEndTime).atZone(zoneId).toInstant()
+            }
             val result = coordinator.createTask(
                 title = draft.title.ifBlank { "Sleep" },
                 description = draft.description,

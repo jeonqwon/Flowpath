@@ -277,12 +277,9 @@ internal fun buildTaskDaySection(
         .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
         .sortedBy { it.block.startAt }
     val tasks = visibleSegments
-        .filter { segment ->
-            val task = tasksById[segment.block.taskId]
-            // Overnight sleep that carries over from the previous day is already listed on
-            // that day — skip it here so the task count and list stay clean.
-            !(segment.continuesFromPreviousDay && task?.taskKind == TaskKind.SLEEP)
-        }
+        // Any block that carries over from the previous day is already counted there —
+        // exclude it from this day's task list and count to avoid double-counting.
+        .filter { !it.continuesFromPreviousDay }
         .mapNotNull { tasksById[it.block.taskId] }
         .distinctBy { it.id }
     val dayReminders = reminders
