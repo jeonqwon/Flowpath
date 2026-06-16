@@ -1728,12 +1728,15 @@ fun TaskRulesEditor(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         listOf(
-            TaskOverlapPolicy.INHERIT to "Inherit",
             TaskOverlapPolicy.ALLOW to "Allow",
             TaskOverlapPolicy.DISALLOW to "No overlap",
         ).forEach { (policy, label) ->
+            // INHERIT behaves identically to ALLOW (see SchedulerEngine.taskAllowsOverlap),
+            // so treat it as ALLOW here rather than exposing a third, redundant option.
+            val isSelected = draft.overlapPolicy == policy ||
+                (policy == TaskOverlapPolicy.ALLOW && draft.overlapPolicy == TaskOverlapPolicy.INHERIT)
             FilterChip(
-                selected = draft.overlapPolicy == policy,
+                selected = isSelected,
                 onClick = { onDraftChange(draft.copy(overlapPolicy = policy)) },
                 label = { Text(label) },
             )
