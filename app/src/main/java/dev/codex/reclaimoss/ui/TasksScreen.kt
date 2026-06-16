@@ -123,7 +123,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -1621,12 +1624,20 @@ private fun TimeframeHearts(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         ordered.forEach { rail ->
-            Text(
-                text = "♥",
-                color = parseTimeframeColor(rail.colorHex),
-                fontSize = 8.sp,
-                lineHeight = 8.sp,
-            )
+            val heartColor = parseTimeframeColor(rail.colorHex)
+            Canvas(modifier = Modifier.size(8.dp)) {
+                val w = size.width
+                val h = size.height
+                val path = Path().apply {
+                    moveTo(w * 0.5f, h * 0.35f)
+                    cubicTo(w * 0.5f, h * 0.18f, w * 0.9f, h * 0.1f, w * 0.9f, h * 0.42f)
+                    cubicTo(w * 0.9f, h * 0.65f, w * 0.5f, h * 0.9f, w * 0.5f, h)
+                    cubicTo(w * 0.5f, h * 0.9f, w * 0.1f, h * 0.65f, w * 0.1f, h * 0.42f)
+                    cubicTo(w * 0.1f, h * 0.1f, w * 0.5f, h * 0.18f, w * 0.5f, h * 0.35f)
+                    close()
+                }
+                drawPath(path, color = heartColor, style = Fill)
+            }
         }
     }
 }
