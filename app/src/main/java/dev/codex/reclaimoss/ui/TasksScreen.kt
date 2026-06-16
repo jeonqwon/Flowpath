@@ -144,6 +144,7 @@ import dev.codex.reclaimoss.domain.model.Reminder
 import dev.codex.reclaimoss.domain.model.ReminderStatus
 import dev.codex.reclaimoss.domain.model.ScheduleBlock
 import dev.codex.reclaimoss.domain.model.ScheduleTask
+import dev.codex.reclaimoss.domain.model.TaskKind
 import dev.codex.reclaimoss.domain.model.TaskPriority
 import dev.codex.reclaimoss.domain.model.TaskStatus
 import dev.codex.reclaimoss.domain.model.Timeframe
@@ -276,6 +277,12 @@ internal fun buildTaskDaySection(
         .filter { it.block.completionState != dev.codex.reclaimoss.domain.model.BlockCompletionState.COMPLETED }
         .sortedBy { it.block.startAt }
     val tasks = visibleSegments
+        .filter { segment ->
+            val task = tasksById[segment.block.taskId]
+            // Overnight sleep that carries over from the previous day is already listed on
+            // that day — skip it here so the task count and list stay clean.
+            !(segment.continuesFromPreviousDay && task?.taskKind == TaskKind.SLEEP)
+        }
         .mapNotNull { tasksById[it.block.taskId] }
         .distinctBy { it.id }
     val dayReminders = reminders
