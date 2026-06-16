@@ -45,6 +45,8 @@ import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
@@ -156,6 +158,7 @@ fun TaskDetailScreen(
     onDone: (ScheduleBlock) -> Unit,
     onDoneAllRecurring: () -> Unit,
     onDelete: () -> Unit,
+    onToggleLock: (ScheduleBlock) -> Unit = {},
 ) {
     val zoneId = remember { ZoneId.systemDefault() }
     val formatter = remember { DateTimeFormatter.ofPattern("MMM d, h:mm a") }
@@ -344,6 +347,17 @@ fun TaskDetailScreen(
                                     onFollowUp()
                                 },
                             )
+                            if (firstBlock != null) {
+                                val isLocked = firstBlock.lockState == BlockLockState.LOCKED
+                                ActionMenuItem(
+                                    label = if (isLocked) "Unlock" else "Lock",
+                                    icon = if (isLocked) Icons.Outlined.LockOpen else Icons.Outlined.Lock,
+                                    onClick = {
+                                        showActionsMenu = false
+                                        onToggleLock(firstBlock)
+                                    },
+                                )
+                            }
                             ActionMenuItem(
                                 label = "Reschedule",
                                 icon = Icons.Outlined.CalendarMonth,

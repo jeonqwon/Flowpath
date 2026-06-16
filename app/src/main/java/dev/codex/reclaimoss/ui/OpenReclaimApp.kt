@@ -649,6 +649,9 @@ fun OpenReclaimApp(appGraph: AppGraph) {
                             snackbarHostState.showLatestSnackbar("Task deleted")
                         }
                     },
+                    onToggleLock = { block ->
+                        scope.launch { viewModel.toggleLock(block) }
+                    },
                 )
             }
             return
