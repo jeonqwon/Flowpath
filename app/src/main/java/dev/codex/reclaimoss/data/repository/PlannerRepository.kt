@@ -38,6 +38,7 @@ import java.time.Instant
 import java.time.LocalTime
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 data class PlannerSnapshot(
@@ -92,13 +93,13 @@ class PlannerRepositoryImpl(
 ) : PlannerRepository {
     override fun observeSnapshot(): Flow<PlannerSnapshot> =
         combine(
-            projectDao.observeProjects().map { items -> items.map { it.toDomain() } },
-            timeframeDao.observeTimeframes().map { items -> items.map { it.toDomain() } },
-            taskDao.observeTasks().map { items -> items.map { it.toDomain() } },
-            scheduleBlockDao.observeBlocks().map { items -> items.map { it.toDomain() } },
-            timePeriodDao.observeTimePeriods().map { items -> items.map { it.toDomain() } },
-            reminderDao.observeReminders().map { items -> items.map { it.toDomain() } },
-            schedulingIssueDao.observeIssues().map { items -> items.map { it.toDomain() } },
+            projectDao.observeProjects().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            timeframeDao.observeTimeframes().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            taskDao.observeTasks().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            scheduleBlockDao.observeBlocks().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            timePeriodDao.observeTimePeriods().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            reminderDao.observeReminders().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
+            schedulingIssueDao.observeIssues().map { items -> items.map { it.toDomain() } }.distinctUntilChanged(),
         ) { values ->
             @Suppress("UNCHECKED_CAST")
             PlannerSnapshot(

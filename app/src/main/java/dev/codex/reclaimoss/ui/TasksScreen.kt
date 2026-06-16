@@ -177,6 +177,7 @@ import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -375,6 +376,20 @@ fun TasksScreen(
     )
     val tasksById = remember(state.snapshot.tasks) { state.snapshot.tasks.associateBy { it.id } }
     val activeReminders = remember(state.snapshot.reminders) { state.snapshot.reminders.filter { it.status != ReminderStatus.COMPLETED } }
+    val daySections = remember(state.snapshot.blocks, tasksById, activeReminders, state.snapshot.timeframes, zoneId) {
+        val startDate = taskFeedDateForIndex(today, 0)
+        (0 until TaskFeedDayCount).associateWith { index ->
+            val date = startDate.plusDays(index.toLong())
+            buildTaskDaySection(date = date, blocks = state.snapshot.blocks, tasksById = tasksById, reminders = activeReminders, timeframes = state.snapshot.timeframes, zoneId = zoneId)
+        }
+    }
+    val railsByDate = remember(state.snapshot.timeframes, zoneId) {
+        val startDate = taskFeedDateForIndex(today, 0)
+        (0 until TaskFeedDayCount).associateWith { index ->
+            val date = startDate.plusDays(index.toLong())
+            railMetadataForDate(state.snapshot.timeframes, date)
+        }
+    }
     val dateFormatter = remember(settings.dateFormatPreference) {
         when (settings.dateFormatPreference) {
             dev.codex.reclaimoss.settings.DateFormatPreference.MONTH_DAY_YEAR -> DateTimeFormatter.ofPattern("EEE, MMM d")
@@ -455,6 +470,7 @@ fun TasksScreen(
         when (settings.tasksViewMode) {
             TasksViewMode.COLLAPSED -> {
                 snapshotFlow { collapsedListState.firstVisibleItemIndex to collapsedListState.firstVisibleItemScrollOffset }
+                    .distinctUntilChanged()
                     .collect { (index, offset) ->
                         onScrollPositionChange(
                             taskFeedDateForIndex(today, index),
@@ -464,6 +480,7 @@ fun TasksScreen(
             }
             TasksViewMode.EXPANDED -> {
                 snapshotFlow { expandedScrollPx }
+                    .distinctUntilChanged()
                     .collect { scrollPx ->
                         val position = expandedTimelinePositionForScrollPx(
                             today = today,
@@ -617,18 +634,10 @@ fun TasksScreen(
                             contentPadding = PaddingValues(bottom = 260.dp),
                         ) {
                             items(TaskFeedDayCount, key = { index -> taskFeedDateForIndex(today, index).toEpochDay() }) { index ->
-                                val date = taskFeedDateForIndex(today, index)
-                                val section = buildTaskDaySection(
-                                    date = date,
-                                    blocks = state.snapshot.blocks,
-                                    tasksById = tasksById,
-                                    reminders = activeReminders,
-                                    timeframes = state.snapshot.timeframes,
-                                    zoneId = zoneId,
-                                )
+                                val section = daySections[index] ?: return@items
                                 CollapsedTaskDayRow(
                                     section = section,
-                                    railMetadata = railMetadataForDate(state.snapshot.timeframes, date),
+                                    railMetadata = railsByDate[index].orEmpty(),
                                     isScrollInProgress = collapsedListState.isScrollInProgress,
                                     onClick = {
                                         selectedDaySummaryEpoch = section.date.toEpochDay()
@@ -1121,9 +1130,11 @@ private fun ExpandedContinuousTimeline(
             )
         }
 
-        val visibleDayRails = visibleDayIndices.map { dayIndex ->
-            val date = taskFeedDateForIndex(today, dayIndex)
-            dayIndex to railMetadataForDate(timeframes, date)
+        val visibleDayRails = remember(visibleDayIndices, timeframes) {
+            visibleDayIndices.map { dayIndex ->
+                val date = taskFeedDateForIndex(today, dayIndex)
+                dayIndex to railMetadataForDate(timeframes, date)
+            }
         }
         val previousTimeframeSlots = remember { mutableMapOf<String, Int>() }
         // Two-frame stability check: only commit a slot to history when it holds
